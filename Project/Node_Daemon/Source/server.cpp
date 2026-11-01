@@ -7,6 +7,9 @@
 #include <shellapi.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <ctime>
 #include <functional>
 #include <iostream>
 #include <regex>
@@ -857,6 +860,34 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         }
         send(res, task_view(*t), 201);
     });
+    // Wake-up: the task runs again by itself, every N minutes or every day at a time (this PC's clock).
+    add("PUT", "/api/tasks/" + ID + "/wake", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        auto t = store.task(req.matches[1]);
+        if (!t) return fail(res, 404, "Task not found");
+        if (t->value("created_by", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who created this task can change its wake-up.");
+        std::string kind = str(b, "wake", 16);
+        if (kind.empty() || kind == "none") {
+            (*t)["wake"] = ""; (*t)["wake_every"] = 0; (*t)["wake_at"] = ""; (*t)["wake_on"] = false; (*t)["wake_last"] = "";
+        } else if (kind == "interval") {
+            long long every = b.contains("every_min") && b["every_min"].is_number() ? b["every_min"].get<long long>() : 0;
+            if (every < 1 || every > 10080) return fail(res, 400, "Pick between 1 minute and 7 days (10080 minutes).");
+            (*t)["wake"] = "interval"; (*t)["wake_every"] = every; (*t)["wake_at"] = "";
+        } else if (kind == "daily") {
+            std::string at = str(b, "at", 8);
+            bool okat = at.size() == 5 && at[2] == ':' && isdigit((unsigned char)at[0]) && isdigit((unsigned char)at[1]) && isdigit((unsigned char)at[3]) && isdigit((unsigned char)at[4]) &&
+                        std::stoi(at.substr(0, 2)) < 24 && std::stoi(at.substr(3, 2)) < 60;
+            if (!okat) return fail(res, 400, "Give the time as HH:MM.");
+            (*t)["wake"] = "daily"; (*t)["wake_at"] = at; (*t)["wake_every"] = 0;
+        } else return fail(res, 400, "Unknown wake-up kind.");
+        if (!t->value("wake", "").empty()) {
+            (*t)["wake_on"] = b.value("on", true);
+            (*t)["wake_last"] = std::to_string((long long)std::time(nullptr));  // counts from now
+        }
+        store.save_task(*t);
+        send(res, task_view(*t));
+    });
     add("DELETE", "/api/tasks/" + ID, kEditor, [&](auto& req, auto& res, Ctx& c) {
         auto t = store.task(req.matches[1]);
         if (!t) return fail(res, 404, "Task not found");
@@ -1140,7 +1171,58 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         return 2;
     }
     if (opt.on_listening) opt.on_listening(true);
+
+    // ---- wake-ups: every 15 s look for tasks whose time has come and run them with the rights of the person who made the task
+    std::atomic<bool> scheduler_stop{false};
+    std::thread scheduler([&] {
+        auto wake_due = [](const json& t, long long now) {
+            long long last = 0;
+            try { last = std::stoll(t.value("wake_last", "0")); } catch (...) {}
+            std::string kind = t.value("wake", "");
+            if (kind == "interval") return t.value("wake_every", 0) > 0 && now >= last + (long long)t.value("wake_every", 0) * 60;
+            if (kind != "daily" || t.value("wake_at", "").size() != 5) return false;
+            std::time_t tt = (std::time_t)now;
+            std::tm lt = *std::localtime(&tt);
+            lt.tm_hour = std::stoi(t["wake_at"].get<std::string>().substr(0, 2));
+            lt.tm_min = std::stoi(t["wake_at"].get<std::string>().substr(3, 2));
+            lt.tm_sec = 0;
+            lt.tm_isdst = -1;
+            long long slot = (long long)std::mktime(&lt);
+            return now >= slot && last < slot && now - slot < 3600;  // a slot missed by more than an hour (program was closed) is skipped
+        };
+        for (int tick = 0; !scheduler_stop; ++tick) {
+            for (int i = 0; i < 15 && !scheduler_stop; ++i) std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (scheduler_stop) break;
+            try {
+                long long now = (long long)std::time(nullptr);
+                for (auto& t : store.tasks()) {
+                    if (!t.value("wake_on", false) || t.value("wake", "").empty() || !wake_due(t, now)) continue;
+                    std::string conv = t.value("conversation_id", "");
+                    auto cv = store.conv_load(conv);
+                    auto u = store.user(t.value("created_by", ""));
+                    auto a = store.agent(t.value("agent_id", ""));
+                    if (!cv || runner.conversation_busy(conv)) continue;  // busy: try again at the next look
+                    Ctx c;
+                    if (u && !u->value("disabled", false)) { c.ok = true; c.id = u->value("id", ""); c.role = auth.role(c.id); c.name = u->value("name", c.id); }
+                    std::string err;
+                    if (!c.ok || c.role == "viewer") err = "the person who made this task cannot run it any more.";
+                    else if (!a || !a->value("enabled", true)) err = "its ghost is gone or switched off.";
+                    else {
+                        store.conv_append(conv, {{"t", "msg"}, {"from", "system"}, {"text", "⏰ Wake-up: running this task again."}});
+                        start_job((*cv)["meta"], conv, c, "Scheduled wake-up: please run this task again.", false, err);
+                        if (!err.empty()) err = "it could not start (" + err + ")";
+                    }
+                    if (!err.empty()) store.conv_append(conv, {{"t", "msg"}, {"from", "system"}, {"text", "⚠ Wake-up skipped: " + err}});
+                    t["wake_last"] = std::to_string(now);
+                    store.save_task(t);
+                }
+            } catch (...) { /* a broken task file must not stop the clock */ }
+        }
+    });
+
     svr.listen_after_bind();
+    scheduler_stop = true;
+    scheduler.join();
     g_server = nullptr;
     return 0;
 }

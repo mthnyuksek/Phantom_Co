@@ -254,9 +254,23 @@ export const EXACT = {
   'Sent to a friend\'s PC': 'Arkadaşın bilgisayarına gönderildi', "Waiting for a friend's PC to come online": 'Bir arkadaşın bilgisayarının çevrimiçi olması bekleniyor',
   'Started': 'Başladı', 'Session started': 'Oturum başladı',
   '(no answer)': '(yanıt yok)',
+  // ---- wake-ups
+  '⏰ Wake-up': '⏰ Uyanış', 'Wake-up': 'Uyanış', 'Repeat': 'Tekrar', 'Never': 'Hiçbir zaman',
+  'Every few minutes': 'Birkaç dakikada bir', 'Every day at a time': 'Her gün belli bir saatte',
+  'Every (minutes)': 'Kaç dakikada bir', "Time (this PC's clock)": 'Saat (bu bilgisayarın saati)',
+  'Wake-up is on': 'Uyanış açık', 'Wake-up saved': 'Uyanış kaydedildi',
+  'The task runs again by itself. It uses the rights of the person who made it and is skipped while it is still running. It only wakes while Phantom Co. is open.':
+    'Görev kendi kendine yeniden çalışır. Görevi oluşturan kişinin yetkileriyle çalışır; hâlâ çalışıyorsa o seferlik atlanır. Yalnızca Phantom Co. açıkken uyanır.',
+  '⏰ Wake-up: running this task again.': '⏰ Uyanış: görev yeniden çalıştırılıyor.',
 };
 
 export const PATTERNS = [
+  // wake-ups
+  ['Wakes every {#} min', 'Her {0} dakikada bir uyanır'], ['⏸ Wakes every {#} min', '⏸ Her {0} dakikada bir uyanır (duraklatıldı)'],
+  ['Wakes every day at {}', 'Her gün {0} saatinde uyanır'], ['⏸ Wakes every day at {}', '⏸ Her gün {0} saatinde uyanır (duraklatıldı)'],
+  ['⏰ Wakes every {#} min', '⏰ Her {0} dakikada bir uyanır'], ['⏰ ⏸ Wakes every {#} min', '⏰ ⏸ Her {0} dakikada bir uyanır (duraklatıldı)'],
+  ['⏰ Wakes every day at {}', '⏰ Her gün {0} saatinde uyanır'], ['⏰ ⏸ Wakes every day at {}', '⏰ ⏸ Her gün {0} saatinde uyanır (duraklatıldı)'],
+  ['⚠ Wake-up skipped: {}', '⚠ Uyanış atlandı: {0}'],
   // time
   ['{#} min ago', '{0} dk önce'], ['{#} h ago', '{0} sa önce'], ['{#} d ago', '{0} gün önce'], ['just now', 'az önce'],
   ['{#} min {#} s', '{0} dk {1} sn'], ['{#} s', '{0} sn'],

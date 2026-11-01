@@ -6,10 +6,40 @@ import { openRunModal } from './runs.js';
 
 let view, list = [];
 
+// "Wakes every 30 min" / "Wakes every day at 09:00" / "" when the task has no wake-up
+const wakeText = (t) => !t.wake ? '' : (t.wake_on ? '' : '⏸ ') + (t.wake === 'interval' ? `Wakes every ${t.wake_every} min` : `Wakes every day at ${t.wake_at}`);
+
+function openWakeModal(t, done) {
+  modal(`<h2>Wake-up</h2><p class="sub">The task runs again by itself. It uses the rights of the person who made it and is skipped while it is still running. It only wakes while Phantom Co. is open.</p>
+    <label>Repeat</label><select id="w-kind"><option value="none">Never</option><option value="interval">Every few minutes</option><option value="daily">Every day at a time</option></select>
+    <div id="w-int"><label>Every (minutes)</label><input type="number" id="w-every" min="1" max="10080" value="${esc(t.wake_every || 60)}"></div>
+    <div id="w-day"><label>Time (this PC's clock)</label><input type="time" id="w-at" value="${esc(t.wake_at || '09:00')}"></div>
+    <label class="check" id="w-onrow"><input type="checkbox" id="w-on" ${t.wake && !t.wake_on ? '' : 'checked'}> Wake-up is on</label>
+    <div class="modal-foot"><button class="btn" id="w-cancel">Cancel</button><button class="btn primary" id="w-ok">Save</button></div>`,
+  (m) => {
+    const sync = () => {
+      const k = $('#w-kind', m).value;
+      $('#w-int', m).hidden = k !== 'interval';
+      $('#w-day', m).hidden = k !== 'daily';
+      $('#w-onrow', m).hidden = k === 'none';
+    };
+    $('#w-kind', m).value = t.wake || 'none';
+    sync();
+    $('#w-kind', m).onchange = sync;
+    m.addEventListener('click', guard(async (e) => {
+      if (e.target.id === 'w-cancel') return closeModal();
+      if (e.target.id !== 'w-ok') return;
+      const kind = $('#w-kind', m).value;
+      const r = await api('PUT', `/api/tasks/${t.id}/wake`, { wake: kind, every_min: +$('#w-every', m).value, at: $('#w-at', m).value, on: $('#w-on', m).checked });
+      closeModal(); toast('Wake-up saved'); done(r);
+    }));
+  });
+}
+
 function row(t) {
   const a = agentById(t.agent_id), p = projectById(t.project_id), u = userById(t.created_by);
   return `<a class="row" href="#/tasks/${esc(t.id)}"><div class="mini">${agentGhost(a, { mood: moodOfStatus(t.status), size: 34 })}</div>
-    <div><div class="title">${esc(t.title)}</div><div class="meta">${esc(a ? a.name : 'removed ghost')}${p ? ' · 📁 ' + esc(p.name) : ''}${u ? ' · by ' + esc(u.name) : ''}</div></div>
+    <div><div class="title">${esc(t.title)}</div><div class="meta">${esc(a ? a.name : 'removed ghost')}${p ? ' · 📁 ' + esc(p.name) : ''}${u ? ' · by ' + esc(u.name) : ''}</div>${t.wake ? `<div class="meta">⏰ ${esc(wakeText(t))}</div>` : ''}</div>
     <div class="meta hide-s">${esc(ago(t.created))}</div><div>${pill(t.status)}</div><div class="hide-s"></div></a>`;
 }
 
@@ -45,9 +75,9 @@ async function renderTask(id, ctx) {
     const t = d.task, a = agentById(t.agent_id), p = projectById(t.project_id), u = userById(t.created_by);
     const active = t.status === 'running' || t.status === 'queued';
     $('#th', view).innerHTML = `<div class="mini" style="--gc:${esc(a?.color || '#888')}">${agentGhost(a, { mood: moodOfStatus(t.status), size: 62 })}</div>
-      <div><h1>${esc(t.title)}</h1><div class="meta">${esc(a ? a.name + ' · ' + a.role : 'removed ghost')}${p ? ' · 📁 <a href="#/projects/' + esc(p.id) + '">' + esc(p.name) + '</a>' : ''}${u ? ' · by ' + esc(u.name) : ''} · ${esc(ago(t.created))}</div></div>
+      <div><h1>${esc(t.title)}</h1><div class="meta">${esc(a ? a.name + ' · ' + a.role : 'removed ghost')}${p ? ' · 📁 <a href="#/projects/' + esc(p.id) + '">' + esc(p.name) + '</a>' : ''}${u ? ' · by ' + esc(u.name) : ''} · ${esc(ago(t.created))}</div>${t.wake ? `<div class="meta">⏰ ${esc(wakeText(t))}</div>` : ''}</div>
       ${pill(t.status)}<div class="spacer"></div>
-      ${canEdit() ? `${active ? '<button class="btn" data-act="stop">Stop</button>' : '<button class="btn primary" data-act="rerun">Run again</button>'}
+      ${canEdit() ? `<button class="btn" data-act="wake">⏰ Wake-up</button> ${active ? '<button class="btn" data-act="stop">Stop</button>' : '<button class="btn primary" data-act="rerun">Run again</button>'}
       <button class="btn danger" data-act="del" ${active ? 'disabled' : ''}>Delete</button>` : ''}`;
     $('#runs', view).innerHTML = d.runs.length ? `<div class="table">${d.runs.slice().reverse().map((r) => {
       const ag = agentById(r.agent_id);
@@ -66,6 +96,7 @@ async function renderTask(id, ctx) {
     const el = e.target.closest('[data-act]');
     if (!el) return;
     if (el.dataset.act === 'run') return openRunModal(el.dataset.id);
+    if (el.dataset.act === 'wake') return openWakeModal(d.task, (r) => { d.task = r; head(); });
     if (el.dataset.act === 'rerun') { await api('POST', `/api/tasks/${id}/run`, {}); conv.reload(); }
     if (el.dataset.act === 'stop') { await api('POST', `/api/chats/${d.task.conversation_id}/stop`, {}); }
     if (el.dataset.act === 'del') twoStep(el, 'Really delete?', async () => { await api('DELETE', '/api/tasks/' + id); toast('Task deleted'); location.hash = '#/tasks'; });

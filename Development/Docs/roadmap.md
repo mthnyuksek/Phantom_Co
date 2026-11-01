@@ -15,7 +15,7 @@
 | # | Item | Why |
 | --- | --- | --- |
 | 1 | Provider workers, next steps: send deletions back, big folders (UE assets) without full mirroring, queue a job until the friend's PC comes online, a usage gate per lent AI | The first version works (see Done) |
-| 2 | Wake-up scheduler (daily/weekly/every N minutes/one time) and the usage gate (5 h / 7 d Claude limits) | Port of Burrow features |
+| 2 | Wake-ups: every N minutes and daily are done (tasks); weekly/one time and wake-ups for agents are open. The usage gate (5 h / 7 d Claude limits) | Port of Burrow features |
 | 3 | Token budgets (per agent, per company) and an Overview page with per-agent/per-person usage | Port of Burrow features |
 | 5 | Retry of failed runs, chat export, notifications (Telegram) | Port of Burrow features |
 | 6 | Installer, app icon, light theme | Polish |

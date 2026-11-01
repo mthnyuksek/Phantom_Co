@@ -69,7 +69,10 @@ static const std::vector<Field> kProjectF = {{"name", "name", 'S', ""}, {"create
 static const std::vector<Field> kTaskF = {
     {"name", "title", 'S', ""}, {"agent", "agent_id", 'S', ""}, {"project", "project_id", 'S', ""},
     {"created_by", "created_by", 'S', ""}, {"created", "created", 'S', ""}, {"updated", "updated", 'S', ""},
-    {"conversation", "conversation_id", 'S', ""}};
+    {"conversation", "conversation_id", 'S', ""},
+    // wake-up schedule: wake = "" | "interval" | "daily"; wake_last = unix seconds of the last wake-up (or of the moment it was set)
+    {"wake", "wake", 'S', ""}, {"wake_every", "wake_every", 'I', "0"}, {"wake_at", "wake_at", 'S', ""},
+    {"wake_on", "wake_on", 'B', "false"}, {"wake_last", "wake_last", 'S', ""}};
 static const std::vector<Field> kUserF = {
     {"name", "name", 'S', ""}, {"form", "form", 'S', "classic"}, {"color", "color", 'S', "#9ff0d4"},
     {"created", "created", 'S', ""}, {"disabled", "disabled", 'B', "false"}};
