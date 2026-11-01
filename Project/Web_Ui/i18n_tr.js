@@ -255,6 +255,7 @@ export const EXACT = {
   'Started': 'Başladı', 'Session started': 'Oturum başladı',
   '(no answer)': '(yanıt yok)',
   // ---- wake-ups
+  "Tokens used today (read + written), from the finished runs of this PC's calendar day": 'Bugün harcanan token (okunan + yazılan); bu bilgisayarın takvim gününe ait çalıştırmalardan',
   '⏰ Wake-up': '⏰ Uyanış', 'Wake-up': 'Uyanış', 'Repeat': 'Tekrar', 'Never': 'Hiçbir zaman',
   'Every few minutes': 'Birkaç dakikada bir', 'Every day at a time': 'Her gün belli bir saatte',
   'Every (minutes)': 'Kaç dakikada bir', "Time (this PC's clock)": 'Saat (bu bilgisayarın saati)',
@@ -266,6 +267,7 @@ export const EXACT = {
 
 export const PATTERNS = [
   // wake-ups
+  ['🪙 {} tokens today', '🪙 bugün {0} token'],
   ['Wakes every {#} min', 'Her {0} dakikada bir uyanır'], ['⏸ Wakes every {#} min', '⏸ Her {0} dakikada bir uyanır (duraklatıldı)'],
   ['Wakes every day at {}', 'Her gün {0} saatinde uyanır'], ['⏸ Wakes every day at {}', '⏸ Her gün {0} saatinde uyanır (duraklatıldı)'],
   ['⏰ Wakes every {#} min', '⏰ Her {0} dakikada bir uyanır'], ['⏰ ⏸ Wakes every {#} min', '⏰ ⏸ Her {0} dakikada bir uyanır (duraklatıldı)'],

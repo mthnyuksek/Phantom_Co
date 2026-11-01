@@ -15,6 +15,9 @@ function ordered() {
   return out;
 }
 
+// 842 -> "842", 12345 -> "12.3k", 2400000 -> "2.4M"
+const compact = (n) => n < 1000 ? String(n) : n < 1e6 ? (n / 1000).toFixed(n < 1e4 ? 1 : 0).replace(/\.0$/, '') + 'k' : (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+
 function card({ a, depth }) {
   const act = a.activity;
   const mood = act?.state === 'working' ? 'working' : act?.state === 'queued' ? 'queued' : 'idle';
@@ -27,6 +30,7 @@ function card({ a, depth }) {
     ${boss ? `<div class="gboss">↳ reports to ${esc(boss.name)}</div>` : ''}
     <span class="badge" title="${prov && !prov.available ? 'Not installed on this PC' : ''}">${esc(providerLabel(a.provider))}${prov && !prov.available ? ' ⚠' : ''}</span>
     <div class="gskills">${a.skills.length ? a.skills.length + ' skill' + (a.skills.length > 1 ? 's' : '') : 'no skills'}</div>
+    <div class="gtokens" title="Tokens used today (read + written), from the finished runs of this PC's calendar day">🪙 ${esc(compact(a.tokens_today || 0))} tokens today</div>
     <div class="gstatus ${act?.state === 'working' ? 'working' : ''}">${status}</div>
     ${canEdit() ? `<div class="gactions">
       <button class="btn small primary" data-act="chat" data-id="${esc(a.id)}">Chat</button>
