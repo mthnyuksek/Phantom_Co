@@ -29,5 +29,6 @@ std::string dumps(const json& j, int indent = -1);
 std::string slugify(const std::string& s, size_t max_len = 24);
 bool valid_id(const std::string& s);                       // [A-Za-z0-9_-]{1,64}
 std::string truncate_utf8(const std::string& s, size_t max_bytes);
+std::string sha256_hex_of(const std::string& data);  // lower-case hex SHA-256
 
 }  // namespace pc2

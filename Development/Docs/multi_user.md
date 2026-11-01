@@ -33,9 +33,10 @@ A skill has `min_role`. When Ece (editor) chats with an agent, skills with `min_
 `max_concurrent` runs per brain (default 1), an agent never runs twice at once, `max_queue_per_user` waiting runs per person (default 10), a time limit per run, `max_turns` per run, a hop limit for agent-to-agent chains.
 
 ## Network
+**Internet access** (Settings → Internet access, owner): a free Cloudflare quick tunnel gives the company an encrypted `https://….trycloudflare.com` address that works from anywhere; invitations then carry that address. Off at every start.
 Off by default: the server listens on `127.0.0.1` and only accepts local Host headers. "Let people on my network connect" (Settings, owner) makes it listen on all addresses and restarts the listener. Windows asks once about the firewall (allow private networks). The connection is plain HTTP: use a home network or a private overlay (Tailscale), never the open internet. Sign-in is required for everything except the page itself and the sign-in calls.
 
 ## Limits of this design (today)
-- All agents of a company use the **host's** providers. Using Claude from one PC and Codex from another in the same company needs provider workers (see `roadmap.md`).
+- An agent uses the host's providers, or - with `provider: claude@<friend>` / `codex@<friend>` - the CLI of a friend whose program lends it (see `Decisions/0006_provider_workers.md`). The friend's PC must be on, the program open and "Lend my AI" switched on; otherwise the run fails after 90 s.
 - The host PC must be on and Phantom Co. open.
 - No encryption on the wire (see Network).

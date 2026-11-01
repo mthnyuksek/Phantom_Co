@@ -1,8 +1,8 @@
 import { api } from '../api.js';
 import { S, isOwner } from '../state.js';
-import { $, esc, guard, toast } from '../ui.js';
+import { $, esc, guard, toast, copyText } from '../ui.js';
 
-let view, net = null;
+let view, net = null, tun = null, tunTimer = null;
 
 function draw() {
   const s = S.state, c = s.company, set = s.settings;
@@ -17,6 +17,9 @@ function draw() {
       <label class="check"><input type="checkbox" id="s-share" ${s.share ? 'checked' : ''}> Let people on my network connect</label>
       ${s.share && net ? `<p class="hint">Friends connect to: ${net.addresses.map((a) => `<code>http://${esc(a.address)}:${net.port}</code> <span class="meta">(${esc(a.name)})</span>`).join(' &nbsp; ') || 'no network address found'}</p>` : ''}
       <p class="hint">Windows may ask once to allow the program through the firewall: allow it for <b>private</b> networks. The connection is not encrypted: use a home network or a private network app such as Tailscale, never the open internet. Sign-in is always required.</p></div>
+    <div class="card"><h3>Internet access</h3>
+      <p class="hint" style="margin-top:0">For friends who are <b>not</b> on your network. Phantom Co. opens a free, encrypted Cloudflare tunnel (no account) and gives you a <code>https://…trycloudflare.com</code> address. It is off every time the program starts and the address changes each time. Sign-in is always required.</p>
+      ${tunnelHTML()}</div>
     <div class="card"><h3>Limits</h3>
       <div class="two"><div><label>Runs at the same time (per brain)</label><input type="number" id="s-conc" min="1" max="4" value="${set.max_concurrent}"></div>
         <div><label>Waiting runs per person</label><input type="number" id="s-queue" min="0" max="100" value="${set.max_queue_per_user}"></div></div>
@@ -31,11 +34,33 @@ function draw() {
       <p class="hint">Claude and Codex are used through their own command-line tools, signed in on this PC.</p></div>`;
 }
 
+function tunnelHTML() {
+  if (!tun) return '<p class="hint">Not available.</p>';
+  const st = tun.state;
+  if (st === 'installing') return `<p class="hint">⏳ ${esc(tun.message)}</p>`;
+  if (!tun.installed) return `${st === 'error' ? `<div class="errbox" style="margin-left:0">${esc(tun.message)}</div>` : ''}<p class="hint">It needs Cloudflare's small helper program <b>cloudflared</b> (about 40 MB, downloaded from Cloudflare's GitHub page once).</p><button class="btn primary" data-act="tun-install">Download cloudflared</button>`;
+  if (st === 'starting') return `<p class="hint">⏳ ${esc(tun.message || 'Opening the tunnel...')}</p>`;
+  if (st === 'on') return `<div class="linkbox"><input type="text" readonly value="${esc(tun.url)}"><button class="btn small" data-act="tun-copy">Copy</button></div>
+    <p class="hint">Friends paste this address into "I was invited to a friend's company", or you send them an invitation link from the People page (it will use this address). Switch it off when you do not need it.</p>
+    <button class="btn danger" data-act="tun-stop">Switch off</button>`;
+  return `${st === 'error' ? `<div class="errbox" style="margin-left:0">${esc(tun.message)}</div>` : ''}<button class="btn primary" data-act="tun-start">Switch on</button>`;
+}
+async function pollTunnel() {
+  clearTimeout(tunTimer);
+  tun = await api('GET', '/api/tunnel').catch(() => null);
+  if (!view || !view.isConnected || !$('#s-name', view)) return;  // left the page
+  const card = [...view.querySelectorAll('.card')].find((c) => c.querySelector('h3')?.textContent === 'Internet access');
+  if (card) card.innerHTML = `<h3>Internet access</h3>` + card.querySelector('p.hint').outerHTML + tunnelHTML();
+  if (tun && (tun.state === 'installing' || tun.state === 'starting')) tunTimer = setTimeout(pollTunnel, 1000);
+}
+
 export async function render(v) {
   view = v;
   if (!isOwner()) { view.innerHTML = '<div class="empty">Only the owner can change settings.</div>'; return; }
   net = await api('GET', '/api/network').catch(() => null);
+  tun = await api('GET', '/api/tunnel').catch(() => null);
   draw();
+  if (tun && (tun.state === 'installing' || tun.state === 'starting')) tunTimer = setTimeout(pollTunnel, 1000);
   view.onclick = guard(async (e) => {
     const el = e.target.closest('[data-act]');
     if (!el) return;
@@ -46,6 +71,10 @@ export async function render(v) {
       toast('Saved'); window.dispatchEvent(new Event('pc2:changed'));
     } else if (act === 'save-vault') { await api('PUT', '/api/settings/vault', { path: $('#s-vault', view).value.trim() }); toast('Vault changed'); window.dispatchEvent(new Event('pc2:changed')); }
     else if (act === 'open-vault') await api('POST', '/api/vault/open', {});
+    else if (act === 'tun-install') { await api('POST', '/api/tunnel', { action: 'install' }); await pollTunnel(); }
+    else if (act === 'tun-start') { await api('POST', '/api/tunnel', { action: 'start' }); await pollTunnel(); }
+    else if (act === 'tun-stop') { await api('POST', '/api/tunnel', { action: 'stop' }); await pollTunnel(); }
+    else if (act === 'tun-copy') copyText(tun.url);
   });
   view.onchange = guard(async (e) => {
     if (e.target.id !== 's-share') return;

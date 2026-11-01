@@ -13,6 +13,7 @@
 #include "prompt.hpp"
 #include "providers.hpp"
 #include "store.hpp"
+#include "worker_hub.hpp"
 
 namespace pc2 {
 
@@ -76,6 +77,7 @@ public:
     std::string task_state(const std::string& conv_id);         // "running" | "queued" | ""
     bool any_active();
     void shutdown();
+    WorkerHub& hub() { return hub_; }  // friends' PCs that lend their Claude/Codex
 
 private:
     struct Lane {
@@ -84,6 +86,7 @@ private:
         std::deque<std::shared_ptr<JobState>> queue;
         std::set<std::string> running_agents;
         int running = 0;
+        int cap = 0;  // 0 = the max_concurrent setting; remote lanes run one job at a time
         std::vector<std::thread> workers;
     };
     struct Outcome {
@@ -97,6 +100,8 @@ private:
 
     std::string enqueue_internal(Job job, std::string& error, bool user_started);
     std::shared_ptr<JobState> find(const std::string& run_id);
+    Lane* lane_for(const std::string& provider);  // creates the lane of a remote provider ("claude@<user>") on demand
+    Outcome run_remote(const std::shared_ptr<JobState>& js, const RunSpec& spec, const std::string& worker, const std::string& scope, int timeout_min);
     void worker_loop(Lane& lane);
     std::deque<std::shared_ptr<JobState>>::iterator pick(Lane& lane);
     void execute(const std::shared_ptr<JobState>& js);
@@ -110,7 +115,9 @@ private:
     Store& store_;
     std::mutex reg_mu_;
     std::map<std::string, std::shared_ptr<JobState>> registry_;
+    std::mutex lanes_mu_;
     std::map<std::string, std::unique_ptr<Lane>> lanes_;
+    WorkerHub hub_;
     std::atomic<bool> stopping_{false};
 };
 

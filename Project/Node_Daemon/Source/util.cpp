@@ -1,6 +1,7 @@
 #include "util.hpp"
 
 #include <windows.h>
+#include <bcrypt.h>
 
 #include <chrono>
 #include <cstdint>
@@ -121,6 +122,15 @@ std::string truncate_utf8(const std::string& s, size_t max_bytes) {
     size_t n = max_bytes;
     while (n > 0 && (static_cast<unsigned char>(s[n]) & 0xC0) == 0x80) --n;
     return s.substr(0, n) + "…";
+}
+
+std::string sha256_hex_of(const std::string& data) {
+    unsigned char out[32] = {};
+    BCryptHash(BCRYPT_SHA256_ALG_HANDLE, nullptr, 0, reinterpret_cast<PUCHAR>(const_cast<char*>(data.data())), (ULONG)data.size(), out, 32);
+    static const char* hex = "0123456789abcdef";
+    std::string s;
+    for (unsigned char b : out) { s += hex[b >> 4]; s += hex[b & 15]; }
+    return s;
 }
 
 }  // namespace pc2

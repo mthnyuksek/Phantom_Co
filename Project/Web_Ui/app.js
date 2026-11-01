@@ -1,7 +1,7 @@
 import { api } from './api.js';
 import { ghostSVG } from './ghosts.js';
 import { $, $$, esc, guard, modal, closeModal, toast, ROLE_TEXT } from './ui.js';
-import { S, refreshState, forgetState, me, isOwner, userGhost, providerLabel } from './state.js';
+import { S, refreshState, forgetState, me, isOwner, canEdit, userGhost, providerLabel } from './state.js';
 import { ghostPickerHTML, bindGhostPicker } from './pickers.js';
 
 const view = $('#view');
@@ -72,14 +72,32 @@ function showSetup() {
 function showLogin() {
   authCard('Sign in', 'Welcome back to the haunt.',
     `${field('a-name', 'Name', 'text', 'maxlength="40" autofocus')}${field('a-pass', 'Password', 'password')}
-     <div class="auth-err" id="a-err"></div><button class="btn primary wide-btn" id="a-go">Sign in</button>${joinFriendHTML()}`);
+     <div class="auth-err" id="a-err"></div><button class="btn primary wide-btn" id="a-go">Sign in</button>
+     ${isRemote ? '' : '<div class="auth-alt"><a href="#" id="a-new">Create a new account</a></div>'}${joinFriendHTML()}`);
   bindJoinFriend();
+  if ($('#a-new')) $('#a-new').onclick = (e) => { e.preventDefault(); showRegister(); };
   const go = async () => {
     try {
       await api('POST', '/api/auth/login', { name: $('#a-name').value.trim(), password: $('#a-pass').value });
       await startApp();
     } catch (e) { $('#a-err').textContent = e.message; }
   };
+  $('#a-go').onclick = go;
+  $('#a-pass').onkeydown = (e) => { if (e.key === 'Enter') go(); };
+}
+
+function showRegister() {
+  authCard('New account', 'Create another owner account on this PC.',
+    `${field('a-name', 'Your name', 'text', 'maxlength="40" autofocus')}${field('a-pass', 'Password (at least 8 characters)', 'password')}
+     <div class="auth-err" id="a-err"></div><button class="btn primary wide-btn" id="a-go">Create account</button>
+     <div class="auth-alt"><a href="#" id="a-back">← Back to sign in</a></div>`);
+  $('#a-back').onclick = (e) => { e.preventDefault(); showLogin(); };
+  const go = guard(async () => {
+    try {
+      await api('POST', '/api/auth/register', { name: $('#a-name').value.trim(), password: $('#a-pass').value });
+      await startApp();
+    } catch (e) { $('#a-err').textContent = e.message; }
+  });
   $('#a-go').onclick = go;
   $('#a-pass').onkeydown = (e) => { if (e.key === 'Enter') go(); };
 }
@@ -181,6 +199,44 @@ function stopApp() {
   token++;
 }
 
+// ------------------------------------------------- lend my Claude/Codex to this company
+// Only inside the program window while it shows a friend's company: the window program does the lending.
+let lend = { running: false, url: '', status: '' };
+bridge?.addEventListener('message', (e) => {
+  if (e.data?.type !== 'worker_status') return;
+  lend = { running: !!e.data.running, url: e.data.url || '', status: e.data.status || '' };
+  paintLend();
+});
+const lendHere = () => lend.running && lend.url === location.origin;
+function paintLend() {
+  const box = $('#p-lend'), txt = $('#p-lend-status');
+  if (!box || !txt) return;
+  box.checked = lendHere();
+  txt.textContent = lend.running && !lendHere() ? 'Your AI is currently lent to another company (' + lend.url + ').' : lend.status || (lendHere() ? '' : 'Off');
+}
+function lendHTML() {
+  if (!bridge || !isRemote || !canEdit()) return '';
+  return `<h3 class="subhead">Lend my AI</h3>
+    <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="p-lend" style="width:auto"> Let this company use the Claude Code / Codex on <b>my PC</b></label>
+    <p class="sub" id="p-lend-status"></p>
+    <p class="sub">The company can then give work to my AI. Only file and web tools run (no commands). The files of the project the AI works on are copied to this PC and the changes copied back. It uses my own subscriptions, so only switch it on for people I trust. It stays on when I reopen the program, until I switch it off.</p>`;
+}
+function bindLend(el) {
+  const box = $('#p-lend', el);
+  if (!box) return;
+  bridge.postMessage({ cmd: 'worker_status' });
+  const t = setInterval(() => { if (!document.body.contains(box)) clearInterval(t); else bridge.postMessage({ cmd: 'worker_status' }); }, 3000);
+  box.onchange = guard(async () => {
+    if (box.checked) {
+      const { token } = await api('POST', '/api/worker/token', {});
+      bridge.postMessage({ cmd: 'worker_start', url: location.origin, token });
+    } else {
+      bridge.postMessage({ cmd: 'worker_stop' });
+      await api('DELETE', '/api/worker/token');
+    }
+  });
+}
+
 // ------------------------------------------------------------------- profile
 $('#me-chip').onclick = () => openProfile();
 $('#home-btn').onclick = () => bridge?.postMessage({ cmd: 'home' });
@@ -194,6 +250,7 @@ function openProfile() {
       <h3 class="subhead">Change password</h3>
       <div class="two"><div><label>Current password</label><input type="password" id="p-old" autocomplete="current-password"></div>
         <div><label>New password</label><input type="password" id="p-new" autocomplete="new-password"></div></div>
+      ${lendHTML()}
     </div></div>
     <div class="modal-foot"><button class="btn danger" id="p-out" style="margin-right:auto">Sign out</button>
       <button class="btn" id="p-cancel">Cancel</button><button class="btn primary" id="p-save">Save</button></div>`,
@@ -202,6 +259,7 @@ function openProfile() {
     bindGhostPicker($('#pp-pick', el), draft, prev);
     $('#p-name', el).oninput = prev;
     prev();
+    bindLend(el);
     el.addEventListener('click', guard(async (e) => {
       if (e.target.id === 'p-cancel') return closeModal();
       if (e.target.id === 'p-out') { await api('POST', '/api/auth/logout', {}); closeModal(); return boot(); }

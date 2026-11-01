@@ -32,6 +32,10 @@ add_executable(phantom_co WIN32
   Source/process.cpp
   Source/providers.cpp
   Source/runner.cpp
+  Source/worker_hub.cpp
+  Source/worker.cpp
+  Source/http_client.cpp
+  Source/tunnel.cpp
   Source/server.cpp
   Source/web_view_host.cpp
   Resources/phantom_co.rc
@@ -39,7 +43,7 @@ add_executable(phantom_co WIN32
 
 target_include_directories(phantom_co PRIVATE Source Third_Party Third_Party/Web_View2/Include)
 target_compile_definitions(phantom_co PRIVATE _WIN32_WINNT=0x0A00 WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
-target_link_libraries(phantom_co PRIVATE ws2_32 shell32 ole32 bcrypt iphlpapi dwmapi)
+target_link_libraries(phantom_co PRIVATE ws2_32 shell32 ole32 bcrypt iphlpapi dwmapi winhttp)
 
 if(MINGW)
   target_compile_options(phantom_co PRIVATE -Wall -Wextra -Wno-unused-parameter)

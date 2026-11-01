@@ -12,6 +12,7 @@ namespace pc2 {
 // WebView2.h is huge, so it stays inside the .cpp (pimpl).
 //
 // Page -> program: window.chrome.webview.postMessage(obj) arrives in on_message (UTF-8 JSON text).
+// Program -> page: PostToPage(json) (UI thread only).
 class WebViewHost {
 public:
     WebViewHost();
@@ -25,6 +26,7 @@ public:
     void Resize(int width, int height);
     void Focus();
     void OpenDevTools();
+    void PostToPage(const std::string& json_text);  // program -> page: arrives as a 'message' event on window.chrome.webview
 
     std::function<void(const std::string&)> on_message;
 

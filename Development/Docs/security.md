@@ -20,6 +20,13 @@ PBKDF2-SHA256 (200k iterations, random salt), constant-time compare, login throt
 - File API: paths are resolved inside the chosen folder (`Shared_Files` or a project); `..`, absolute paths and the hidden `.Pc2` metadata are refused; images are served with `Content-Security-Policy: sandbox`.
 - User-supplied model names are checked against a character whitelist (they reach a command line).
 
+## Lending a friend's AI (provider workers)
+- The friend's program authenticates with its own worker token (Bearer, one per user, only a SHA-256 stored, ended by a new token, a password change, or removing the user). The worker API (`/api/worker/*`) accepts only that token and only editors/owners; file calls work only for the folder of a run that this worker currently holds.
+- The host decides the prompt, so lending is an act of trust by the friend: it is off until the friend switches it on in the profile, and says so. The friend's program starts only `claude` / `codex`, only with file and web tools (Bash/PowerShell are removed by the host and again by the worker), without extra folders, inside a mirror folder under `%LOCALAPPDATA%\PC2\Worker`. Model and session strings from the host are checked against a whitelist because they reach a command line (`.cmd` files run through `cmd.exe`). Residual risk: a malicious host could still try to make Codex's read-only sandbox read other files of the friend's PC, because Codex can read outside the working folder.
+- The new-account link on the sign-in screen (`/api/auth/register`) only works from the PC that runs the program (loopback address **and** a local Host header **and** no Cloudflare/forwarding header, because tunnel traffic also arrives from 127.0.0.1), never over the network or the tunnel.
+- Internet access (Cloudflare quick tunnel): off at every start, the owner switches it on in Settings. The address is random and changes each time, traffic is encrypted (https), sign-in is still required for everything. While it is on, anybody who knows the address can see the sign-in page and try passwords (throttled per person and address, 5 tries then waiting). Switch it off when it is not needed. The local server keeps listening on 127.0.0.1 only; the tunnel program (`cloudflared`, downloaded from Cloudflare's GitHub release) is the only thing that reaches it.
+- File exchange: uploads need editor, deletes owner; 200 MB per upload; same path rules as the file API.
+
 ## Threats considered
 | Threat | Mitigation |
 | --- | --- |
@@ -27,6 +34,9 @@ PBKDF2-SHA256 (200k iterations, random salt), constant-time compare, login throt
 | Someone on the network guesses passwords | Throttling, long hashes, sharing is off by default |
 | Editor makes an agent run commands or promote themselves | `min_role` per skill, owner-only skills/rules/users, role data outside the Vault |
 | Prompt injection from a file or chat | Tools only through skills, no MCP, deny-by-default permissions, owner-only powerful skills |
+| Strangers find the tunnel address | Random address, off by default, sign-in + throttling, owner can switch off at once |
+| Tunnel traffic mistaken for "this PC" | `is_this_pc` checks Host and forwarding headers, not only the address |
+| Host abuses a friend's lent AI | Friend switches it on knowingly, file/web tools only, mirror folder, validated command-line strings |
 | One person drains the subscription | Per-person queue limit, concurrency limit, time and turn limits |
 | Private chat read by others | Visibility check in every chat/run/job endpoint (the owner can read all) |
 | Traffic sniffed on the network | Not handled: use a private network (Tailscale) |

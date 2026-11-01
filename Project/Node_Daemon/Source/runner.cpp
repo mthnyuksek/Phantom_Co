@@ -23,6 +23,7 @@ Runner::~Runner() { shutdown(); }
 
 void Runner::shutdown() {
     if (stopping_.exchange(true)) return;
+    hub_.shutdown();
     {
         std::lock_guard<std::mutex> lk(reg_mu_);
         for (auto& [k, js] : registry_) {
@@ -31,11 +32,36 @@ void Runner::shutdown() {
             if (js->proc) js->proc->kill();
         }
     }
-    for (auto& [name, lane] : lanes_) {
+    std::vector<Lane*> all;
+    { std::lock_guard<std::mutex> lk(lanes_mu_); for (auto& [name, lane] : lanes_) all.push_back(lane.get()); }
+    for (Lane* lane : all) {
         { std::lock_guard<std::mutex> lk(lane->mu); }
         lane->cv.notify_all();
         for (auto& w : lane->workers) if (w.joinable()) w.join();
     }
+}
+
+// "claude@<user id>" = the Claude Code of a friend whose program lends it to this company.
+static bool split_provider(const std::string& full, std::string& base, std::string& worker) {
+    size_t at = full.find('@');
+    if (at == std::string::npos) { base = full; worker.clear(); return false; }
+    base = full.substr(0, at);
+    worker = full.substr(at + 1);
+    return true;
+}
+
+Runner::Lane* Runner::lane_for(const std::string& provider) {
+    std::lock_guard<std::mutex> lk(lanes_mu_);
+    auto it = lanes_.find(provider);
+    if (it != lanes_.end()) return it->second.get();
+    std::string base, worker;
+    if (stopping_ || !split_provider(provider, base, worker) || worker.empty() || (base != "claude" && base != "codex")) return nullptr;
+    auto lane = std::make_unique<Lane>();
+    Lane* raw = lane.get();
+    raw->cap = 1;
+    for (int i = 0; i < 2; ++i) raw->workers.emplace_back([this, raw] { worker_loop(*raw); });
+    lanes_[provider] = std::move(lane);
+    return raw;
 }
 
 std::shared_ptr<JobState> Runner::find(const std::string& id) {
@@ -53,8 +79,8 @@ std::string Runner::enqueue_internal(Job job, std::string& error, bool user_star
     if (!agent->value("enabled", true)) { error = "This agent is switched off."; return ""; }
     if (job.stack.empty()) { error = "Internal error: empty reply stack."; return ""; }
     const std::string provider = agent->value("provider", "claude");
-    auto lane = lanes_.find(provider);
-    if (lane == lanes_.end()) { error = "Unknown provider: " + provider; return ""; }
+    Lane* lane = lane_for(provider);
+    if (!lane) { error = "Unknown provider: " + provider; return ""; }
 
     if (user_started) {
         int limit = store_.setting_int("max_queue_per_user"), mine = 0;
@@ -80,15 +106,15 @@ std::string Runner::enqueue_internal(Job job, std::string& error, bool user_star
     }
     emit(*js, {{"kind", "status"}, {"text", "Queued"}});
     {
-        std::lock_guard<std::mutex> lk(lane->second->mu);
-        lane->second->queue.push_back(js);
+        std::lock_guard<std::mutex> lk(lane->mu);
+        lane->queue.push_back(js);
     }
-    lane->second->cv.notify_all();
+    lane->cv.notify_all();
     return job.id;
 }
 
 std::deque<std::shared_ptr<JobState>>::iterator Runner::pick(Lane& lane) {
-    int limit = std::clamp(store_.setting_int("max_concurrent"), 1, kWorkersPerLane);
+    int limit = lane.cap > 0 ? lane.cap : std::clamp(store_.setting_int("max_concurrent"), 1, kWorkersPerLane);
     if (lane.running >= limit) return lane.queue.end();
     return std::find_if(lane.queue.begin(), lane.queue.end(), [&](const std::shared_ptr<JobState>& j) {
         return !lane.running_agents.count(j->job.agent_id);
@@ -311,6 +337,9 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     json project;
     if (!job.project_id.empty()) if (auto p = store_.project(job.project_id)) project = *p;
     fs::path workdir = project.is_object() ? store_.project_dir(job.project_id) : store_.files_root();
+    std::string base_provider, worker;
+    const bool remote = split_provider(agent->value("provider", "claude"), base_provider, worker);
+    const std::string scope = project.is_object() ? "project:" + job.project_id : "shared";
     std::error_code ec;
     fs::create_directories(workdir, ec);
 
@@ -319,12 +348,12 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     pin.ctx = &ctx;
     pin.user_name = user.is_object() ? user.value("name", "") : "";
     pin.shared_chat = shared;
-    pin.workdir = U8(workdir);
+    pin.workdir = remote ? "@@WORKDIR@@" : U8(workdir);  // a friend's PC fills in its own folder
     pin.workdir_label = project.is_object() ? "the folder of project \"" + project.value("name", "") + "\"" : "the shared files folder";
     pin.project = project;
 
     RunSpec spec;
-    spec.provider = agent->value("provider", "claude");
+    spec.provider = base_provider;
     spec.model = agent->value("model", "");
     spec.workdir = U8(workdir);
     spec.system_prompt = build_system_prompt(store_, pin);
@@ -334,11 +363,31 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     spec.add_dirs = ctx.add_dirs;
     spec.can_write = ctx.can_write();
     spec.max_turns = (job.kind == "chat" || job.kind == "task") ? 40 : 25;
-    if (conv && (*conv)["sessions"].contains(job.agent_id)) spec.session_id = (*conv)["sessions"][job.agent_id].get<std::string>();
+    // A session lives on the PC that ran it: remote ids are stored as "@<worker>:<id>".
+    if (conv && (*conv)["sessions"].contains(job.agent_id)) {
+        std::string sid = (*conv)["sessions"][job.agent_id].get<std::string>();
+        const std::string prefix = "@" + worker + ":";
+        if (remote) spec.session_id = sid.rfind(prefix, 0) == 0 ? sid.substr(prefix.size()) : "";
+        else spec.session_id = !sid.empty() && sid[0] == '@' ? "" : sid;
+    }
+    if (remote) {
+        // The owner of this company must not be able to run commands on a friend's PC: only file and web tools, no extra folders.
+        static const std::set<std::string> allowed = {"Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"};
+        std::vector<std::string> keep;
+        for (auto& t : spec.tools) if (allowed.count(t)) keep.push_back(t);
+        spec.tools = keep;
+        spec.add_dirs.clear();
+        spec.can_write = std::find(keep.begin(), keep.end(), "Write") != keep.end() || std::find(keep.begin(), keep.end(), "Edit") != keep.end();
+    }
     if (spec.model.empty() && spec.provider == "claude") spec.model = store_.settings().value("default_model", "");  // a Claude model name
 
     if (spec.provider == "demo") {
         o = run_demo(js, ctx, U8(workdir));
+        finish(o);
+        return;
+    }
+    if (remote) {
+        o = run_remote(js, spec, worker, scope, std::clamp(agent->value("timeout_min", 30), 1, 240));
         finish(o);
         return;
     }
@@ -393,6 +442,45 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
         o.error = parser.is_error && !parser.result_text.empty() ? parser.result_text : "The CLI exited with code " + std::to_string(o.exit_code) + ".";
     }
     finish(o);
+}
+
+// Runs the job on a friend's PC (its own Claude/Codex sign-in). The files of the folder are mirrored there and back.
+Runner::Outcome Runner::run_remote(const std::shared_ptr<JobState>& js, const RunSpec& spec, const std::string& worker, const std::string& scope, int timeout_min) {
+    Outcome o;
+    if (!store_.user(worker)) { o.status = "failed"; o.error = "The owner of this AI no longer exists."; return o; }
+    json payload = {{"provider", spec.provider}, {"model", spec.model}, {"system_prompt", spec.system_prompt}, {"prompt", spec.prompt},
+                    {"tools", spec.tools}, {"can_write", spec.can_write}, {"max_turns", spec.max_turns}, {"session_id", spec.session_id},
+                    {"timeout_min", timeout_min}, {"scope", scope}, {"run_id", js->job.id}};
+    emit(*js, {{"kind", "status"}, {"text", hub_.online(worker) ? "Sent to a friend's PC" : "Waiting for a friend's PC to come online"}});
+    static const std::set<std::string> kinds = {"status", "message", "thinking", "tool_use", "tool_result", "log", "error"};
+    auto job = hub_.submit(worker, js->job.id, scope, payload, [this, js](json ev) {
+        if (!ev.is_object() || !kinds.count(ev.value("kind", ""))) return;
+        ev.erase("seq");
+        ev.erase("ts");
+        for (auto& [k, v] : ev.items()) if (v.is_string() && v.get<std::string>().size() > 20000) v = truncate_utf8(v.get<std::string>(), 20000);
+        emit(*js, std::move(ev));
+    });
+    std::string error;
+    bool ok = hub_.wait(job, js->cancel, timeout_min, error);
+    if (!ok) {
+        o.status = js->cancel || error == "stopped" ? "cancelled" : "failed";
+        o.error = error;
+        return o;
+    }
+    json r;
+    { std::lock_guard<std::mutex> lk(job->mu); r = job->result; }
+    o.status = r.value("status", "failed");
+    if (o.status != "done" && o.status != "failed" && o.status != "cancelled" && o.status != "timeout") o.status = "failed";
+    o.text = r.value("text", "");
+    o.error = r.value("error", "");
+    o.exit_code = r.value("exit_code", 0);
+    o.tokens_in = r.value("tokens_in", 0LL);
+    o.tokens_out = r.value("tokens_out", 0LL);
+    o.cost = r.value("cost", -1.0);
+    o.max_turns = r.value("max_turns", false);
+    std::string sid = r.value("session_id", "");
+    if (!sid.empty()) o.session_id = "@" + worker + ":" + sid;
+    return o;
 }
 
 // A scripted agent that needs no subscription: for trying the app and for tests.

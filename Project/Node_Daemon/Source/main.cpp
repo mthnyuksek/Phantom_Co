@@ -14,7 +14,9 @@
 #include "runner.hpp"
 #include "server.hpp"
 #include "store.hpp"
+#include "tunnel.hpp"
 #include "web_view_host.hpp"
+#include "worker.hpp"
 
 using namespace pc2;
 
@@ -23,6 +25,8 @@ constexpr wchar_t kWindowClass[] = L"PhantomCoWindow";
 constexpr UINT kServerFailed = WM_APP + 1;
 
 WebViewHost* g_host = nullptr;
+WorkerClient g_worker;
+Config* g_cfg = nullptr;
 std::wstring g_home_url;
 
 BOOL WINAPI on_ctrl(DWORD) {
@@ -42,8 +46,17 @@ void usage() {
                  "  --share            Let people on the network connect (the owner can also switch it in Settings)\n"
                  "  --data <folder>    Folder for accounts and settings (default %LOCALAPPDATA%\\PC2)\n"
                  "  --no-window        Run only the server, without a window (tests, a PC without a screen)\n"
+                 "  --worker-url <address> --worker-token <token>\n"
+                 "                     Lend this PC's Claude/Codex to the company at that address (normally switched on in the window)\n"
                  "  --devtools         Keep browser shortcuts and F12 in the window (development)\n"
                  "  --ui-dir <folder>  Read the web pages from disk instead of the built-in copy (development)\n";
+}
+
+void report_worker() {
+    if (!g_host) return;
+    json i = g_worker.info();
+    i["type"] = "worker_status";
+    g_host->PostToPage(i.dump());
 }
 
 // A page asks the program to open another company (a friend's Phantom Co.) or to come back home.
@@ -51,7 +64,23 @@ void on_page_message(const std::string& text) {
     json m = json::parse(text, nullptr, false);
     if (!m.is_object() || !g_host) return;
     std::string cmd = m.value("cmd", "");
-    if (cmd == "home") {
+    if (cmd == "worker_status") {
+        report_worker();
+    } else if (cmd == "worker_start") {
+        std::string url = m.value("url", ""), token = m.value("token", ""), err;
+        if (g_worker.start(url, token, err)) {
+            if (g_cfg) { g_cfg->worker_url = url; g_cfg->worker_token = token; save_config(*g_cfg); }
+        } else {
+            json i = {{"type", "worker_status"}, {"running", false}, {"status", err}};
+            g_host->PostToPage(i.dump());
+            return;
+        }
+        report_worker();
+    } else if (cmd == "worker_stop") {
+        g_worker.stop();
+        if (g_cfg) { g_cfg->worker_url.clear(); g_cfg->worker_token.clear(); save_config(*g_cfg); }
+        report_worker();
+    } else if (cmd == "home") {
         g_host->Navigate(g_home_url);
     } else if (cmd == "connect") {
         std::string url = m.value("url", "");
@@ -121,6 +150,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     Config cfg = load_config();
     fs::path vault_override, ui_dir, data_dir;
     bool window_mode = true, share = false, dev = false;
+    std::string cli_worker_url, cli_worker_token;
     for (int i = 1; i < argc; ++i) {
         std::wstring a = argv[i];
         auto next = [&]() -> std::wstring { return i + 1 < argc ? argv[++i] : L""; };
@@ -131,6 +161,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         else if (a == L"--no-window") window_mode = false;
         else if (a == L"--share") share = true;
         else if (a == L"--devtools") dev = true;
+        else if (a == L"--worker-url") cli_worker_url = Narrow(next());
+        else if (a == L"--worker-token") cli_worker_token = Narrow(next());
         else { usage(); return a == L"--help" ? 0 : 1; }
     }
     if (!data_dir.empty()) cfg.file = fs::absolute(data_dir) / L"node.json";  // an isolated account store (tests, a second company)
@@ -154,11 +186,18 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         Store store(cfg.vault);
         Auth auth(cfg.file.parent_path() / L"auth.json");
         Runner runner(store);
+        g_cfg = &cfg;
+        {   // lending this PC's AI was switched on before (in the window), or is asked for on the command line
+            std::string url = cli_worker_url.empty() ? cfg.worker_url : cli_worker_url, token = cli_worker_token.empty() ? cfg.worker_token : cli_worker_token, err;
+            if (!url.empty() && !g_worker.start(url, token, err)) std::cerr << "Lending the AI: " << err << "\n";
+        }
         if (!window_mode) SetConsoleCtrlHandler(on_ctrl, TRUE);
 
         ServerOptions opt;
         opt.ui_dir = ui_dir;
         opt.config = &cfg;
+        Tunnel tunnel;  // starts off
+        opt.tunnel = &tunnel;
         std::promise<bool> listening;
         std::atomic<bool> signalled{false};
         std::atomic<HWND> hwnd{nullptr};
@@ -198,11 +237,14 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
                 }
             }
             g_host = nullptr;
+            g_worker.stop();
             stop_server();  // the window was closed: stop serving
         } else {
             std::cout << "Phantom Co. server is running.\n  Vault: " << U8(store.root()) << "\n  Open:  http://127.0.0.1:" << cfg.port << "/\n  Press Ctrl+C to stop.\n";
         }
         server.join();  // headless: returns when Ctrl+C stops the server
+        tunnel.Stop();
+        g_worker.stop();
         runner.shutdown();
         if (single) ReleaseMutex(single);
         return code;

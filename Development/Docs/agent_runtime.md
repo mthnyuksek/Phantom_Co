@@ -32,5 +32,8 @@ Skills of the agent that are switched on **and** allowed for the role of the ask
 ## Limits
 `timeout_min` per agent (default 30), `max_turns`, `max_concurrent` runs per provider (setting, default 1), an agent never runs twice at once, `max_queue_per_user`, `max_hops` for `<send>` chains. The vault-wide `default_model` is only used for Claude.
 
+## Remote provider (a friend's PC)
+`provider: claude@<user>` / `codex@<user>`. The runner builds the same prompt, tools and session as for a local run, but the working folder is written as `@@WORKDIR@@` (the friend's program fills in its mirror folder), tools are cut to `Read Write Edit Glob Grep WebSearch WebFetch`, there are no `--add-dir`s, and the job goes to `WorkerHub`. Events from the friend are relayed into the run log; the result carries text, session, tokens and cost. Sessions are stored as `@<user>:<id>` and only resumed on that PC. One remote lane (one job at a time) per friend. Timeouts: 90 s until the friend picks the job up, 120 s of silence while running (the worker sends a heartbeat every 15 s), the agent's `timeout_min` for the run.
+
 ## Demo provider
 No process: a scripted agent for trying the app and for tests. Keywords in the message steer it: `demo:send:<agent_id>` (hands work over), `demo:write` (writes a file if it has the Write tool), `demo:slow` (waits, for stop tests), `demo:fail`.

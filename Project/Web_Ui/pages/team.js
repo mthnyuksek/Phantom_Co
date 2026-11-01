@@ -6,15 +6,17 @@ let view, users = [];
 const ROLE_INFO = { owner: 'Everything, including people, skills, settings and commands.', editor: 'Chats with ghosts, creates tasks and projects, hires ghosts.', viewer: 'Looks around, reads shared chats and tasks. Cannot change anything.' };
 
 async function inviteModal(name, token) {
-  let net = { share: false, port: location.port, addresses: [] };
-  try { net = await api('GET', '/api/network'); } catch { /* owner only */ }
-  const links = net.share ? net.addresses.map((a) => `http://${a.address}:${net.port}/#/join/${token}`) : [];
+  let net = { share: false, port: location.port, addresses: [] }, tun = null;
+  try { net = await api('GET', '/api/network'); tun = await api('GET', '/api/tunnel'); } catch { /* owner only */ }
+  const links = [];
+  if (tun?.state === 'on') links.push(`${tun.url}/#/join/${token}`);  // reachable from anywhere, encrypted
+  if (net.share) links.push(...net.addresses.map((a) => `http://${a.address}:${net.port}/#/join/${token}`));
   modal(`<h2>Invite ${esc(name)}</h2>
     <p class="sub">Send this link to ${esc(name)}. They open it in their Phantom Co. (or paste it into "Join a friend's company"), choose a password and are in. It works once and expires in 3 days.</p>
     ${links.length ? links.map((l, i) => `<div class="linkbox"><input type="text" readonly value="${esc(l)}"><button class="btn small" data-copy="${esc(l)}">Copy</button></div>${i === 0 ? '' : ''}`).join('')
-      : `<div class="errbox" style="margin-left:0">Network sharing is switched off, so only this PC can reach the company. Turn it on in <a href="#/settings" id="to-settings">Settings</a>, then invite again.</div>
+      : `<div class="errbox" style="margin-left:0">Nobody can reach this PC yet. In <a href="#/settings" id="to-settings">Settings</a> switch on <b>Internet access</b> (friends anywhere) or <b>Let people on my network connect</b> (same home network), then invite again.</div>
          <div class="linkbox"><input type="text" readonly value="${esc(location.origin + '/#/join/' + token)}"><button class="btn small" data-copy="${esc(location.origin + '/#/join/' + token)}">Copy</button></div>`}
-    <p class="hint">The connection is not encrypted, so share only inside a network you trust (home LAN, or a private network such as Tailscale). Several addresses are listed when this PC has several network cards: pick the one your friend can reach.</p>
+    <p class="hint">Links starting with <code>https://</code> (Internet access) are encrypted and work from anywhere. Links starting with <code>http://</code> are for the same network only and are not encrypted. Several addresses are listed when this PC has several network cards: pick the one your friend can reach.</p>
     <div class="modal-foot"><button class="btn primary" id="iv-close">Done</button></div>`,
   (m) => m.addEventListener('click', guard(async (e) => {
     if (e.target.id === 'iv-close' || e.target.id === 'to-settings') return closeModal();

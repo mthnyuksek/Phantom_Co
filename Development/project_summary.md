@@ -18,6 +18,8 @@ UI testing in the real window: set env `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--
 - `auth` accounts, roles, password hashes (PBKDF2-SHA256 via BCrypt), sessions, invites, login throttling. Stored in `%LOCALAPPDATA%\PC2\auth.json`, **never in the Vault** (agents with file tools must not read hashes or change roles).
 - `prompt` effective skills for a user role, lean system prompt, `<send>` / `<title>` parsing.
 - `providers` command lines for `claude` and `codex`, output parsers (events, session id, tokens, cost). `process` Win32 child process in a Job Object (kills the whole tree).
+- `tunnel` "Internet access": Cloudflare quick tunnel (`cloudflared`, downloaded on demand into `%LOCALAPPDATA%\PC2\runtime`), off at every start. `http_client` WinHTTP client (http and https) used by `worker` and the cloudflared download.
+- `worker_hub` (host) / `worker` (friend): lending a friend's Claude/Codex, see below and `Decisions/0006_provider_workers.md`.
 - `runner` job queue (lanes per provider, `max_concurrent`, an agent never runs twice at once), run records, live events, the **router** (writes answers to conversations, forwards `<send>`, hands reports back along the reply stack). Built-in `demo` provider for tests/trying.
 - `server` REST API + static UI, auth gate, role checks, sharing switch (restarts the listener). `web_view_host` WebView2 wrapper. `main` window, server thread, single-instance mutex.
 - `Web_Ui/` plain ES modules, no build step: `app.js` shell/auth/router, `pages/*` one module per tab, `chat_view.js` conversation component, `agent_editor.js`, `pickers.js`, `ghosts.js` (SVG ghosts), `state.js`, `ui.js`, `api.js`.
@@ -34,6 +36,9 @@ Default Vault: `<Documents>\PC2_Vault`, created by the program. A version 1 Vaul
 
 ## Multi-user rules
 Roles: owner (everything), editor (chat, tasks, projects, hire agents), viewer (read only). Chats are private to their creator unless shared; task conversations are team-wide; agent-to-agent conversations follow the chat they came from; the owner sees everything. **Agents act with the rights of the person who asked** (`min_role` of skills). Powerful skills (commands, Vault folders other than Projects) are forced to `min_role: owner`; only the owner edits skills and rules. Per-user queue limit (`max_queue_per_user`).
+Provider workers: a friend's window switches "Lend my AI" on (profile) -> the page fetches a worker token (`POST /api/worker/token`) and asks the program (`worker_start` bridge message); `WorkerClient` long-polls the host, runs `claude`/`codex` in `%LOCALAPPDATA%\PC2\Worker\<host>\<scope>` (mirror of the run folder, files synced both ways), streams events back. Agents use it with `provider: claude@<user id>`. Lending resumes at the next start (`worker_url`/`worker_token` in `node.json`). Files page: upload/download/new folder (`/api/files/upload|download|mkdir`).
+Internet access (Settings, owner): `POST /api/tunnel {action: install|start|stop}`; while on, requests with `Host = <tunnel host>` pass the security gate and `Origin = https://<tunnel host>` is accepted. Tunnel traffic comes from 127.0.0.1, so "this PC only" checks (`is_this_pc`) also require a local Host and no `Cf-*`/`X-Forwarded-For` header; the login throttle uses `Cf-Connecting-Ip`.
+Accounts: first owner via `/api/auth/setup`; more owner accounts via `/api/auth/register` (sign-in screen link "Create a new account", only from this PC, never from the network or the tunnel); friends join by invitation. Login looks the name up in Vault `Users/*.md` and the hash in `auth.json`: if the two get out of sync (other Vault, deleted profile) nobody can sign in.
 Sessions: HttpOnly cookie `pc2_session_<port>` (the port is in the name because cookies are shared between ports of one host), 30 days. API calls need `X-PC2: 1` and a same-origin `Origin`; the Host header must be local unless sharing is on (sign-in is always required).
 
 ## Pitfalls (already hit once)
@@ -43,12 +48,16 @@ Sessions: HttpOnly cookie `pc2_session_<port>` (the port is in the name because 
 - Bash/Python heredocs run through the tool eat backslashes (`\n`, `\\`): use the Write/Edit tools for source files.
 - WebView2 on MinGW: `__uuidof` does not work, IIDs are copied by hand in `web_view_host.cpp`; callback objects answer only `IUnknown`.
 - httplib: do security checks in `set_pre_request_handler` (after the body is read), not in the pre-routing handler (the client sees a reset connection).
+- The build breaks when the project path contains a space (`Phantom Co`): build through a space-free junction (`mklink /J C:\Agent_Workspace\Projects\Phantom_Co_Link "C:\Agent_Workspace\Projects\Phantom Co"`). A moved project also needs the CMake cache of `Build/` deleted.
+- Anything that trusts "loopback" is wrong once the tunnel is on: cloudflared connects from 127.0.0.1. Use `is_this_pc`, not `remote_addr`.
+- httplib here has no TLS: for https (tunnel) the friend's program uses `HttpClient` (WinHTTP).
+- Remote runs: the system prompt must not contain host paths (`@@WORKDIR@@` placeholder); Bash/PowerShell never go to a friend; strings from the host that reach a command line are validated on the friend's side.
 - Cookies are per host, not per port (see above).
 - Prompts go through stdin; Codex waits for stdin to close, so the pipe is always closed after writing.
 - `windows.h` needs `WIN32_LEAN_AND_MEAN` + `<winsock2.h>` first when `<iphlpapi.h>` is used.
 
 ## Not done yet
-Remote providers (a company using the Claude of one PC and the Codex of another at the same time), wake-up scheduler, usage gate and token budgets, overview/statistics page, Telegram, HTTPS, Turkish/English UI, installer and icon, light theme. See `Docs/roadmap.md`.
+Telegram, HTTPS built into the server (the tunnel covers the internet case), a fixed tunnel address (named Cloudflare tunnel with an account). Provider workers are in a first version (no deletions sent back, no huge-folder handling, fails when the friend is offline). Wake-up scheduler, usage gate and token budgets, overview/statistics page, Telegram, HTTPS, Turkish/English UI, installer and icon, light theme. See `Docs/roadmap.md`.
 
 ## Naming
 The product is called **Phantom Co.** (exe `phantom_co.exe`, CMake target `phantom_co`). The folder `Projects/PC2` and these internal identifiers still say "pc2" on purpose, so existing Vaults and data keep working: C++ namespace `pc2`, header `X-PC2`, cookie `pc2_session_<port>`, hidden `.Pc2` project folder, `%LOCALAPPDATA%\PC2`, default Vault `Documents\PC2_Vault`, localStorage key and `pc2:*` window events.

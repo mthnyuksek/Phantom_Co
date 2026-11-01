@@ -43,11 +43,15 @@ Config load_config() {
     c.vault = j.contains("vault_path") && j["vault_path"].is_string() ? P(j["vault_path"].get<std::string>()) : default_vault_path();
     if (j.contains("port") && j["port"].is_number_integer()) c.port = j["port"].get<int>();
     if (j.contains("share") && j["share"].is_boolean()) c.share = j["share"].get<bool>();
+    if (j.contains("worker_url") && j["worker_url"].is_string()) c.worker_url = j["worker_url"].get<std::string>();
+    if (j.contains("worker_token") && j["worker_token"].is_string()) c.worker_token = j["worker_token"].get<std::string>();
     if (!fs::exists(c.file)) save_config(c);
     return c;
 }
 void save_config(const Config& c) {
-    write_json(c.file, json{{"vault_path", U8(c.vault)}, {"port", c.port}, {"share", c.share}});
+    json j = {{"vault_path", U8(c.vault)}, {"port", c.port}, {"share", c.share}};
+    if (!c.worker_url.empty() && !c.worker_token.empty()) { j["worker_url"] = c.worker_url; j["worker_token"] = c.worker_token; }
+    write_json(c.file, j);
 }
 
 // ------------------------------------------------------------ field tables

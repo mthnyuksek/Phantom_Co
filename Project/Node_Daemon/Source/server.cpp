@@ -45,6 +45,15 @@ static std::string str(const json& j, const char* k, size_t max, const std::stri
     std::string s = j[k];
     return s.size() > max ? truncate_utf8(s, max) : s;
 }
+static std::string pct_encode(const std::string& s) {
+    static const char* hex = "0123456789ABCDEF";
+    std::string o;
+    for (unsigned char c : s) {
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') o += (char)c;
+        else { o += '%'; o += hex[c >> 4]; o += hex[c & 15]; }
+    }
+    return o;
+}
 static std::string lower(std::string s) { for (auto& c : s) c = (char)tolower((unsigned char)c); return s; }
 static bool is_color(const std::string& s) { return std::regex_match(s, std::regex("#[0-9a-fA-F]{6}")); }
 
@@ -155,14 +164,29 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
     };
 
     // ---- security gate: this PC's own browser only, unless sharing is on
+    // The tunnel program (cloudflared) connects from this PC, so tunnel traffic looks local: it is told apart by
+    // its Host (the tunnel address) and by the headers Cloudflare adds.
+    auto via_tunnel = [&](const httplib::Request& req) {
+        if (!opt.tunnel) return false;
+        std::string th = opt.tunnel->host();
+        return !th.empty() && req.get_header_value("Host") == th;
+    };
+    auto forwarded = [&](const httplib::Request& req) {
+        return req.has_header("Cf-Connecting-Ip") || req.has_header("X-Forwarded-For") || req.has_header("Cf-Ray");
+    };
+    auto is_this_pc = [&](const httplib::Request& req) {  // the person at this PC, not somebody on the network or the tunnel
+        return (req.remote_addr == "127.0.0.1" || req.remote_addr == "::1") && hosts.count(req.get_header_value("Host")) && !forwarded(req);
+    };
     svr.set_pre_request_handler([&](const httplib::Request& req, httplib::Response& res) {
-        if (!cfg.share && !hosts.count(req.get_header_value("Host"))) {
+        if (!cfg.share && !hosts.count(req.get_header_value("Host")) && !via_tunnel(req)) {
             fail(res, 403, "Forbidden host");
             return httplib::Server::HandlerResponse::Handled;
         }
         if (req.method != "GET" && req.method != "HEAD") {
             std::string origin = req.get_header_value("Origin");
-            if ((!origin.empty() && origin != "http://" + req.get_header_value("Host")) || req.get_header_value("X-PC2") != "1") {
+            std::string host = req.get_header_value("Host");
+            bool origin_ok = origin.empty() || origin == "http://" + host || (via_tunnel(req) && origin == "https://" + host);
+            if (!origin_ok || req.get_header_value("X-PC2") != "1") {
                 fail(res, 403, "Forbidden");
                 return httplib::Server::HandlerResponse::Handled;
             }
@@ -216,11 +240,27 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         start_session(res, u["id"]);
     });
 
+    // Extra owner account, only from the PC that runs the program (friends on the network must use invitations).
+    add("POST", "/api/auth/register", kPublic, [&](auto& req, auto& res, Ctx&) {
+        if (!is_this_pc(req)) return fail(res, 403, "New accounts can only be created on the PC that runs Phantom Co.");
+        json b;
+        if (!parse_body(req, res, b)) return;
+        std::string name = str(b, "name", 40), pw = str(b, "password", 200);
+        if (name.empty()) return fail(res, 400, "Please enter your name.");
+        if (!valid_password(pw)) return fail(res, 400, "The password needs at least 8 characters.");
+        for (auto& o : store.users()) if (lower(o.value("name", "")) == lower(name)) return fail(res, 409, "Someone already uses this name.");
+        static const char* colors[] = {"#9ff0d4", "#ffb38a", "#7cc4ff", "#ff8fb8", "#ffe27a", "#b4f06a", "#f2f0ff", "#5fd6d6"};
+        json u = store.save_user({{"name", name}, {"form", "classic"}, {"color", colors[store.users().size() % 8]}});
+        auth.add_user(u["id"], "owner");
+        auth.set_password(u["id"], pw);
+        start_session(res, u["id"]);
+    });
+
     add("POST", "/api/auth/login", kPublic, [&](auto& req, auto& res, Ctx&) {
         json b;
         if (!parse_body(req, res, b)) return;
         std::string name = lower(str(b, "name", 40)), pw = str(b, "password", 200);
-        std::string key = name + "|" + req.remote_addr;
+        std::string key = name + "|" + (req.has_header("Cf-Connecting-Ip") ? req.get_header_value("Cf-Connecting-Ip") : req.remote_addr);
         if (!auth.login_allowed(key)) return fail(res, 429, "Too many attempts. Wait a minute and try again.");
         std::string uid;
         for (auto& u : store.users()) if (lower(u.value("name", "")) == name) uid = u["id"];
@@ -355,6 +395,17 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         json st = {{"company", store.company()}, {"me", public_user(c.profile)}, {"users", users}, {"providers", providers},
                    {"agents", agents}, {"skills", skills}, {"rules", store.rules()}, {"projects", store.projects()}, {"jobs", jobs},
                    {"forms", kForms}, {"tools", kTools}};
+        {   // friends who lend their Claude/Codex (the agent editor offers "claude@<user>")
+            json ws = json::array();
+            for (auto& w : runner.hub().status()) {
+                auto u = store.user(w.value("user_id", ""));
+                if (!u) continue;
+                json x = w;
+                x["name"] = u->value("name", "");
+                ws.push_back(x);
+            }
+            st["workers"] = ws;
+        }
         if (owner) {
             st["settings"] = store.settings();
             st["vault_path"] = U8(store.root());
@@ -410,6 +461,21 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
     add("GET", "/api/network", kOwner, [&](auto&, auto& res, Ctx&) {
         send(res, {{"share", cfg.share}, {"port", cfg.port}, {"addresses", list_addresses()}});
     });
+    // Internet access through a Cloudflare quick tunnel (owner). Off at every start; the address changes every time.
+    add("GET", "/api/tunnel", kOwner, [&](auto&, auto& res, Ctx&) {
+        send(res, opt.tunnel ? opt.tunnel->status() : json{{"state", "error"}, {"installed", false}, {"url", ""}, {"message", "Not available."}});
+    });
+    add("POST", "/api/tunnel", kOwner, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!opt.tunnel) return fail(res, 404, "Not available.");
+        if (!parse_body(req, res, b)) return;
+        std::string act = str(b, "action", 16);
+        if (act == "install") opt.tunnel->Install();
+        else if (act == "start") opt.tunnel->Start(cfg.port);
+        else if (act == "stop") opt.tunnel->Stop();
+        else return fail(res, 400, "Unknown action.");
+        send(res, opt.tunnel->status());
+    });
     add("PUT", "/api/network", kOwner, [&](auto& req, auto& res, Ctx&) {
         json b;
         if (!parse_body(req, res, b)) return;
@@ -428,7 +494,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         out["name"] = str(in, "name", 40, base.value("name", ""));
         out["role"] = str(in, "role", 60, base.value("role", ""));
         out["persona"] = str(in, "persona", 8000, base.value("persona", ""));
-        out["provider"] = str(in, "provider", 16, base.value("provider", "claude"));
+        out["provider"] = str(in, "provider", 64, base.value("provider", "claude"));
         out["model"] = str(in, "model", 80, base.value("model", ""));
         out["form"] = str(in, "form", 16, base.value("form", "classic"));
         out["color"] = str(in, "color", 7, base.value("color", "#b69cff"));
@@ -441,7 +507,13 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             for (auto& s : in["skills"]) if (s.is_string() && store.skill(s.get<std::string>())) out["skills"].push_back(s);
         }
         if (out["name"].get<std::string>().empty()) { err = "Every ghost needs a name."; return false; }
-        if (!provider_known(out["provider"])) { err = "Unknown provider."; return false; }
+        {
+            std::string pv = out["provider"], at_user;
+            size_t at = pv.find('@');
+            if (at != std::string::npos) { at_user = pv.substr(at + 1); pv = pv.substr(0, at); }
+            if (!provider_known(pv) || (pv == "demo" && !at_user.empty())) { err = "Unknown provider."; return false; }
+            if (at != std::string::npos && (!auth.exists(at_user) || role_rank(auth.role(at_user)) < kEditor)) { err = "That friend is not part of this company."; return false; }
+        }
         if (!kForms.count(out["form"])) { err = "Unknown ghost form."; return false; }
         if (!is_color(out["color"])) { err = "Color must look like #rrggbb."; return false; }
         if (!std::regex_match(out["model"].get<std::string>(), std::regex("[A-Za-z0-9._:/\\[\\]-]*"))) { err = "Model name has unsupported characters."; return false; }
@@ -871,6 +943,177 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         res.set_header("Content-Security-Policy", "sandbox");
         res.set_header("X-Content-Type-Options", "nosniff");
         res.set_content(data, m);
+    });
+
+    // ======================================================= friends' PCs lend their AI
+    // The friend's program signs in with a worker token (not a cookie), asks for jobs, streams events back and
+    // mirrors the run's folder. Every call after "poll" is tied to a run that this worker currently has.
+    auto worker_of = [&](const httplib::Request& req) -> std::string {
+        std::string h = req.get_header_value("Authorization");
+        if (h.rfind("Bearer ", 0) != 0) return "";
+        std::string id = auth.worker_user(h.substr(7));
+        return !id.empty() && role_rank(auth.role(id)) >= kEditor ? id : "";
+    };
+    add("POST", "/api/worker/token", kEditor, [&](auto&, auto& res, Ctx& c) {
+        send(res, {{"token", auth.new_worker_token(c.id)}});
+    });
+    add("DELETE", "/api/worker/token", kEditor, [&](auto&, auto& res, Ctx& c) {
+        auth.end_worker(c.id);
+        send(res, {{"ok", true}});
+    });
+    add("POST", "/api/worker/poll", kPublic, [&](auto& req, auto& res, Ctx&) {
+        std::string w = worker_of(req);
+        if (w.empty()) return fail(res, 401, "Unknown worker token.");
+        json b;
+        if (!parse_body(req, res, b)) return;
+        std::set<std::string> provs;
+        if (b.contains("providers") && b["providers"].is_array())
+            for (auto& p : b["providers"]) if (p.is_string() && (p == "claude" || p == "codex")) provs.insert(p.get<std::string>());
+        auto job = runner.hub().poll(w, provs, 20);
+        if (!job) return send(res, {{"job", nullptr}});
+        json j = job->payload;
+        j["run_id"] = job->run_id;
+        send(res, {{"job", j}});
+    });
+    add("POST", "/api/worker/event", kPublic, [&](auto& req, auto& res, Ctx&) {
+        std::string w = worker_of(req);
+        json b;
+        if (w.empty()) return fail(res, 401, "Unknown worker token.");
+        if (!parse_body(req, res, b)) return;
+        auto job = runner.hub().find(str(b, "run_id", 64), w);
+        if (!job) return fail(res, 404, "This run is not waiting for you any more.");
+        runner.hub().touch(job);
+        if (b.contains("events") && b["events"].is_array() && b["events"].size() <= 200)
+            for (auto& ev : b["events"]) if (job->on_event) job->on_event(ev);
+        send(res, {{"cancel", job->cancel.load()}});
+    });
+    add("POST", "/api/worker/finish", kPublic, [&](auto& req, auto& res, Ctx&) {
+        std::string w = worker_of(req);
+        json b;
+        if (w.empty()) return fail(res, 401, "Unknown worker token.");
+        if (!parse_body(req, res, b)) return;
+        auto job = runner.hub().find(str(b, "run_id", 64), w);
+        if (!job) return fail(res, 404, "This run is not waiting for you any more.");
+        runner.hub().finish(job, b.contains("result") && b["result"].is_object() ? b["result"] : json{{"status", "failed"}, {"error", "The worker sent no result."}});
+        send(res, {{"ok", true}});
+    });
+
+    // Files of the run's folder. hash = SHA-256; cached by (size, time) because big folders are listed for every run.
+    struct HashEntry { int64_t size = 0; long long time = 0; std::string hash; };
+    auto hash_cache = std::make_shared<std::map<std::string, HashEntry>>();
+    auto hash_mu = std::make_shared<std::mutex>();
+    constexpr int64_t kMirrorFileMax = 50ll * 1024 * 1024;
+    auto run_root = [&](const httplib::Request& req, httplib::Response& res, fs::path& root) -> std::shared_ptr<RemoteJob> {
+        std::string w = worker_of(req);
+        if (w.empty()) { fail(res, 401, "Unknown worker token."); return nullptr; }
+        auto job = runner.hub().find(req.get_param_value("run_id"), w);
+        if (!job) { fail(res, 404, "This run is not waiting for you any more."); return nullptr; }
+        if (!scope_root(job->scope, root)) { fail(res, 404, "The folder of this run is gone."); return nullptr; }
+        runner.hub().touch(job);
+        return job;
+    };
+    add("GET", "/api/worker/files", kPublic, [&](auto& req, auto& res, Ctx&) {
+        fs::path root;
+        if (!run_root(req, res, root)) return;
+        json list = json::array();
+        std::error_code ec;
+        for (auto it = fs::recursive_directory_iterator(root, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            if (ec || list.size() >= 5000) break;
+            if (it->path().filename() == L".Pc2") { it.disable_recursion_pending(); continue; }
+            if (!it->is_regular_file(ec)) continue;
+            int64_t size = (int64_t)it->file_size(ec);
+            if (size > kMirrorFileMax) continue;
+            long long t = (long long)it->last_write_time(ec).time_since_epoch().count();
+            std::string rel = Narrow(it->path().lexically_relative(root).generic_wstring()), hash;
+            {
+                std::lock_guard<std::mutex> lk(*hash_mu);
+                auto c = hash_cache->find(U8(it->path()));
+                if (c != hash_cache->end() && c->second.size == size && c->second.time == t) hash = c->second.hash;
+            }
+            if (hash.empty()) {
+                std::string data;
+                if (!read_file(it->path(), data)) continue;
+                hash = sha256_hex_of(data);
+                std::lock_guard<std::mutex> lk(*hash_mu);
+                if (hash_cache->size() > 20000) hash_cache->clear();
+                (*hash_cache)[U8(it->path())] = {size, t, hash};
+            }
+            list.push_back({{"path", rel}, {"size", size}, {"hash", hash}});
+        }
+        send(res, {{"files", list}});
+    });
+    add("GET", "/api/worker/file", kPublic, [&](auto& req, auto& res, Ctx&) {
+        fs::path root;
+        if (!run_root(req, res, root)) return;
+        fs::path p = safe_path(root, req.get_param_value("path"));
+        std::error_code ec;
+        std::string data;
+        if (p.empty() || !fs::is_regular_file(p, ec) || !read_file(p, data)) return fail(res, 404, "File not found");
+        res.set_content(data, "application/octet-stream");
+    });
+    add("PUT", "/api/worker/file", kPublic, [&](auto& req, auto& res, Ctx&) {
+        fs::path root;
+        if (!run_root(req, res, root)) return;
+        fs::path p = safe_path(root, req.get_param_value("path"));
+        if (p.empty() || (int64_t)req.body.size() > kMirrorFileMax) return fail(res, 400, "That file is not allowed.");
+        std::error_code ec;
+        if (fs::is_directory(p, ec)) return fail(res, 409, "A folder with this name exists.");
+        fs::create_directories(p.parent_path(), ec);
+        if (!write_file_atomic(p, req.body)) return fail(res, 500, "The file could not be saved.");
+        send(res, {{"ok", true}});
+    });
+
+    // File exchange: editors put files into the shared folder / a project folder and everybody can take them.
+    constexpr size_t kMaxUpload = 200u * 1024 * 1024;
+    add("GET", "/api/files/download", kViewer, [&](auto& req, auto& res, Ctx&) {
+        fs::path root;
+        if (!scope_root(req.get_param_value("scope"), root)) return fail(res, 404, "Unknown folder");
+        fs::path p = safe_path(root, req.get_param_value("path"));
+        std::error_code ec;
+        if (p.empty() || !fs::is_regular_file(p, ec)) return fail(res, 404, "File not found");
+        std::string data;
+        if (!read_file(p, data)) return fail(res, 500, "The file could not be read.");
+        std::string name = U8(p.filename());
+        for (char& ch : name) if (ch == '"' || ch == '\\' || (unsigned char)ch < 32) ch = '_';
+        res.set_header("Content-Disposition", "attachment; filename=\"" + name + "\"; filename*=UTF-8''" + pct_encode(name));
+        res.set_header("X-Content-Type-Options", "nosniff");
+        res.set_header("Content-Security-Policy", "sandbox");
+        res.set_content(data, "application/octet-stream");
+    });
+    add("PUT", "/api/files/upload", kEditor, [&](auto& req, auto& res, Ctx&) {
+        fs::path root;
+        if (!scope_root(req.get_param_value("scope"), root)) return fail(res, 404, "Unknown folder");
+        fs::path p = safe_path(root, req.get_param_value("path"));
+        if (p.empty()) return fail(res, 400, "That file name is not allowed.");
+        if (req.body.size() > kMaxUpload) return fail(res, 413, "The file is too large (limit 200 MB).");
+        std::error_code ec;
+        if (fs::is_directory(p, ec)) return fail(res, 409, "A folder with this name exists.");
+        if (fs::exists(p, ec) && req.get_param_value("overwrite") != "1") return fail(res, 409, "A file with this name already exists.");
+        fs::create_directories(p.parent_path(), ec);
+        if (!write_file_atomic(p, req.body)) return fail(res, 500, "The file could not be saved.");
+        send(res, {{"ok", true}, {"size", req.body.size()}}, 201);
+    });
+    add("POST", "/api/files/mkdir", kEditor, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        fs::path root;
+        if (!scope_root(str(b, "scope", 80), root)) return fail(res, 404, "Unknown folder");
+        fs::path p = safe_path(root, str(b, "path", 300));
+        if (p.empty()) return fail(res, 400, "That folder name is not allowed.");
+        std::error_code ec;
+        fs::create_directories(p, ec);
+        if (ec) return fail(res, 500, "The folder could not be created.");
+        send(res, {{"ok", true}}, 201);
+    });
+    add("DELETE", "/api/files", kOwner, [&](auto& req, auto& res, Ctx&) {
+        fs::path root;
+        if (!scope_root(req.get_param_value("scope"), root)) return fail(res, 404, "Unknown folder");
+        fs::path p = safe_path(root, req.get_param_value("path"));
+        std::error_code ec;
+        if (p.empty() || !fs::exists(p, ec)) return fail(res, 404, "Not found");
+        fs::remove_all(p, ec);
+        if (ec) return fail(res, 500, "It could not be deleted.");
+        send(res, {{"ok", true}});
     });
 
     // ============================================================== static UI

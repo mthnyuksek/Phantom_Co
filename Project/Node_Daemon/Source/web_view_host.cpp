@@ -237,5 +237,8 @@ void WebViewHost::Resize(int width, int height) {
 }
 void WebViewHost::Focus() { if (impl_->controller) impl_->controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC); }
 void WebViewHost::OpenDevTools() { if (impl_->view) impl_->view->OpenDevToolsWindow(); }
+void WebViewHost::PostToPage(const std::string& json_text) {
+    if (impl_->view) impl_->view->PostWebMessageAsJson(Widen(json_text).c_str());
+}
 
 }  // namespace pc2

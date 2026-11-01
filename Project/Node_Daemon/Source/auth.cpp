@@ -60,7 +60,7 @@ Auth::Auth(fs::path file) : file_(std::move(file)) { load(); }
 
 void Auth::load() {
     data_ = read_json(file_, json::object());
-    for (const char* k : {"users", "sessions", "invites"})
+    for (const char* k : {"users", "sessions", "invites", "workers"})
         if (!data_.contains(k) || !data_[k].is_object()) data_[k] = json::object();
     purge();
 }
@@ -98,7 +98,7 @@ void Auth::set_role(const std::string& id, const std::string& role) {
 void Auth::remove_user(const std::string& id) {
     std::lock_guard<std::mutex> l(mu_);
     data_["users"].erase(id);
-    for (const char* k : {"sessions", "invites"})
+    for (const char* k : {"sessions", "invites", "workers"})
         for (auto it = data_[k].begin(); it != data_[k].end();) {
             if (it->value("user", "") == id) it = data_[k].erase(it);
             else ++it;
@@ -116,10 +116,11 @@ void Auth::set_password(const std::string& id, const std::string& pw) {
     data_["users"][id]["salt"] = salt;
     data_["users"][id]["iter"] = kIterations;
     data_["users"][id]["hash"] = pbkdf2_hex(pw, salt, kIterations);
-    for (auto it = data_["sessions"].begin(); it != data_["sessions"].end();) {
-        if (it->value("user", "") == id) it = data_["sessions"].erase(it);
-        else ++it;
-    }
+    for (const char* k : {"sessions", "workers"})
+        for (auto it = data_[k].begin(); it != data_[k].end();) {
+            if (it->value("user", "") == id) it = data_[k].erase(it);
+            else ++it;
+        }
     save();
 }
 bool Auth::verify(const std::string& id, const std::string& pw) {
@@ -196,6 +197,35 @@ std::string Auth::invite_user(const std::string& tok) {
 void Auth::use_invite(const std::string& tok) {
     std::lock_guard<std::mutex> l(mu_);
     data_["invites"].erase(sha256_hex(tok));
+    save();
+}
+
+std::string Auth::new_worker_token(const std::string& id) {
+    std::lock_guard<std::mutex> l(mu_);
+    if (!data_["users"].contains(id)) return "";
+    for (auto it = data_["workers"].begin(); it != data_["workers"].end();) {
+        if (it->value("user", "") == id) it = data_["workers"].erase(it);
+        else ++it;
+    }
+    std::string tok = random_hex(24);
+    data_["workers"][sha256_hex(tok)] = {{"user", id}};
+    save();
+    return tok;
+}
+std::string Auth::worker_user(const std::string& tok) {
+    if (tok.size() != 48) return "";
+    std::lock_guard<std::mutex> l(mu_);
+    auto h = sha256_hex(tok);
+    if (!data_["workers"].contains(h)) return "";
+    std::string id = data_["workers"][h].value("user", "");
+    return data_["users"].contains(id) ? id : "";
+}
+void Auth::end_worker(const std::string& id) {
+    std::lock_guard<std::mutex> l(mu_);
+    for (auto it = data_["workers"].begin(); it != data_["workers"].end();) {
+        if (it->value("user", "") == id) it = data_["workers"].erase(it);
+        else ++it;
+    }
     save();
 }
 

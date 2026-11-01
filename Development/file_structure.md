@@ -18,6 +18,7 @@ Development (We keep files that are not part of the project but are about the pr
         0003_v1_local_only.md
         0004_desktop_exe_with_embedded_server.md
         0005_burrow_model_for_many_users.md
+        0006_provider_workers.md
 Project (We keep the project source files here. When we hand the project to someone else, we send this folder.)
     Node_Daemon (The Windows program phantom_co.exe: C++20 / CMake.)
         CMakeLists.txt (Build definition. Embeds Web_Ui, Vault_Template, Skill_Templates and the WebView2 loader.)
@@ -36,7 +37,11 @@ Project (We keep the project source files here. When we hand the project to some
             prompt.hpp/.cpp (Effective skills for a role, system prompt, parsing of <send> and <title>.)
             process.hpp/.cpp (Child process in a Job Object.)
             providers.hpp/.cpp (Claude and Codex command lines and output parsers.)
-            runner.hpp/.cpp (Job queue, execution, live state, demo provider, the reply-stack router.)
+            runner.hpp/.cpp (Job queue, execution, live state, demo provider, remote lanes, the reply-stack router.)
+            tunnel.hpp/.cpp (Cloudflare quick tunnel: install cloudflared, start/stop, read the https address.)
+            http_client.hpp/.cpp (WinHTTP client for http and https.)
+            worker_hub.hpp/.cpp (Host side of lent AIs: job queue per friend, polling, events, result.)
+            worker.hpp/.cpp (Friend side: polls the host, mirrors the run folder, runs claude/codex, sends results.)
             server.hpp/.cpp (REST API, role checks, static UI, sharing switch.)
             web_view_host.hpp/.cpp (WebView2 wrapper, navigation rules, page messages.)
             embedded.hpp (Declares the embedded files.)
@@ -45,6 +50,8 @@ Project (We keep the project source files here. When we hand the project to some
             Web_View2 (Microsoft WebView2 SDK pieces: Include headers, Bin/WebView2Loader.dll, LICENSE.txt.)
         Tests (Tests.)
             smoke_test.py (Starts the program on a temporary Vault and walks through the API; --real claude|codex.)
+            tunnel_test.py (Needs the internet: installs cloudflared in a temp folder, opens a real tunnel, checks access from outside and a lent AI over https.)
+            worker_test.py (Two programs on temporary folders, a fake claude on the friend's side: file exchange, worker API, remote run, session resume.)
         Build (Build output. Not kept in git.)
     Web_Ui (The web interface, embedded in the program. Plain ES modules, no build step.)
         index.html (Page skeleton.)
@@ -68,4 +75,4 @@ CLAUDE.md
 
 Not part of the source tree (created while the program runs):
     <Documents>\PC2_Vault (The Vault, see Docs/vault_format.md.)
-    %LOCALAPPDATA%\PC2 (node.json settings, auth.json accounts and sessions, webview_data, runtime\WebView2Loader.dll, Tmp.)
+    %LOCALAPPDATA%\PC2 (node.json settings, auth.json accounts and sessions, webview_data, runtime\WebView2Loader.dll, Tmp, Worker\<host>\<scope> = mirror folders of lent runs.)

@@ -40,6 +40,12 @@ public:
     std::string invite_user(const std::string& token);
     void use_invite(const std::string& token);
 
+    // Token a friend's program uses to lend its Claude/Codex to this company (one per user, no expiry;
+    // ended by a new token, a password change or removing the user).
+    std::string new_worker_token(const std::string& id);
+    std::string worker_user(const std::string& token);  // "" when unknown
+    void end_worker(const std::string& id);
+
 private:
     void load();
     void save();

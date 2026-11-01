@@ -15,6 +15,7 @@ struct Config {
     fs::path vault;  // Vault folder
     int port = 7777;
     bool share = false;  // listen on the network (all addresses) instead of this PC only
+    std::string worker_url, worker_token;  // lend this PC's Claude/Codex to that company (empty = off)
 };
 
 fs::path default_vault_path();  // <Documents>\PC2_Vault  (visible on purpose)

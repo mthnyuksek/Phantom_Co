@@ -41,4 +41,23 @@ export function senderInfo(from) {
   return { kind: 'system', name: '' };
 }
 
-export const providerLabel = (id) => S.state?.providers.find((p) => p.id === id)?.label.split(' ')[0] || id;
+export const providerLabel = (id) => {
+  const [base, who] = String(id).split('@');
+  const label = S.state?.providers.find((p) => p.id === base)?.label.split(' ')[0] || base;
+  if (!who) return label;
+  const w = S.state?.workers?.find((x) => x.user_id === who);
+  return `${label} @ ${w?.name || userById(who)?.name || who}`;
+};
+
+// Every brain an agent can use: this PC's CLIs and the CLIs of friends who currently lend theirs.
+export function brainOptions(current) {
+  const out = (S.state?.providers || []).map((p) => ({ id: p.id, label: p.label, available: p.available, note: p.available ? '' : ' — not installed on this PC' }));
+  for (const w of S.state?.workers || [])
+    for (const id of ['claude', 'codex']) {
+      const on = w.online && w.providers.includes(id);
+      const label = (id === 'claude' ? 'Claude Code' : 'Codex') + ` on ${w.name}'s PC`;
+      out.push({ id: `${id}@${w.user_id}`, label, available: on, note: on ? '' : ' — offline right now' });
+    }
+  if (current && !out.some((o) => o.id === current)) out.push({ id: current, label: providerLabel(current), available: true, note: '' });
+  return out;
+}

@@ -1,6 +1,6 @@
 import { api } from './api.js';
 import { ghostSVG } from './ghosts.js';
-import { S, FORMS, PALETTE, skillById, agentById } from './state.js';
+import { S, FORMS, PALETTE, skillById, agentById, brainOptions } from './state.js';
 import { $, esc, guard, modal, closeModal, toast, twoStep } from './ui.js';
 import { ghostPickerHTML, bindGhostPicker } from './pickers.js';
 
@@ -37,7 +37,7 @@ export function openAgentModal(agent, tpl) {
         <div class="two"><div><label>Name</label><input type="text" id="f-name" maxlength="40"></div>
           <div><label>Role</label><input type="text" id="f-role" maxlength="60"></div></div>
         <div id="f-pick">${ghostPickerHTML()}</div>
-        <div class="two"><div><label>Brain (provider)</label><select id="f-provider">${st.providers.map((p) => `<option value="${p.id}" ${p.available ? '' : 'disabled'}>${esc(p.label)}${p.available ? '' : ' — not installed on this PC'}</option>`).join('')}</select></div>
+        <div class="two"><div><label>Brain (provider)</label><select id="f-provider">${brainOptions(draft.provider).map((p) => `<option value="${esc(p.id)}" ${p.available || p.id === draft.provider ? '' : 'disabled'}>${esc(p.label)}${p.note}</option>`).join('')}</select></div>
           <div><label>Model (optional)</label><input type="text" id="f-model" placeholder="provider default"></div></div>
         <div class="two"><div><label>Reports to</label><select id="f-boss"><option value="">Nobody (top of the company)</option>${bosses.map((b) => `<option value="${esc(b.id)}">${esc(b.name)} — ${esc(b.role)}</option>`).join('')}</select></div>
           <div><label>Time limit per run (minutes)</label><input type="number" id="f-timeout" min="1" max="240"></div></div>
