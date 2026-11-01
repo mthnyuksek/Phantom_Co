@@ -178,7 +178,10 @@ async function route() {
     view.innerHTML = `<div class="empty">Something went wrong: ${esc(e.message)}</div>`;
   }
 }
-window.addEventListener('hashchange', () => { if (running) { paintShell(); route(); } });
+window.addEventListener('hashchange', () => {
+  if (running) { paintShell(); route(); }
+  else if (/^#\/join\//.test(location.hash)) boot();  // an invitation link opened on a page that is already loaded (same address, only the # part differs: no reload)
+});
 
 async function startApp() {
   stopApp();
