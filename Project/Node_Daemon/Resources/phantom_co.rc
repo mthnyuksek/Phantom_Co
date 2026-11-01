@@ -1,0 +1,28 @@
+#include <winuser.h>
+#include <winver.h>
+
+// Manifest: Windows 10/11 compatibility and per-monitor DPI awareness (the page stays sharp).
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "phantom_co.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "Phantom Co. - Ghost Company"
+            VALUE "ProductName", "Phantom Co."
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "OriginalFilename", "phantom_co.exe"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

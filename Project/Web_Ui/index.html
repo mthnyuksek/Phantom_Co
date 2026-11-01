@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phantom Co. · Ghost Company</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%91%BB%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="app" hidden>
+    <aside class="side">
+      <div class="brand"><span class="brand-ghost" id="brand-ghost"></span><div><b id="brand-name">Phantom Co.</b><small>ghost company</small></div></div>
+      <nav id="nav"></nav>
+      <div class="side-foot">
+        <div id="provider-chips"></div>
+        <button class="btn small" id="home-btn" hidden>← My own company</button>
+        <button class="me-chip" id="me-chip" title="Your profile"></button>
+      </div>
+    </aside>
+    <main id="view"></main>
+  </div>
+  <div id="auth-root" class="auth-root" hidden></div>
+  <div id="modal-root"></div>
+  <div id="toasts"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

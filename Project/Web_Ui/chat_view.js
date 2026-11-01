@@ -1,0 +1,76 @@
+import { api } from './api.js';
+import { S, me, agentById, senderInfo, agentGhost } from './state.js';
+import { $, esc, md, ago, sleep, guard } from './ui.js';
+
+// A conversation: messages, the live "is working" bubble and the composer.
+// Used by the Chats page and by the task page. Returns { destroy, data }.
+export function conversationView(el, id, { placeholder = 'Write a message…', onData } = {}) {
+  let alive = true, data = null, sig = '', sending = false;
+  el.innerHTML = `<div class="conv"><div class="transcript" id="cv-msgs"><div class="empty">Loading…</div></div>
+    <div class="composer"><textarea id="cv-input" rows="2" placeholder="${esc(placeholder)}"></textarea>
+    <button class="btn primary" id="cv-send">Send</button></div><div class="composer-note" id="cv-note"></div></div>`;
+  const msgsEl = $('#cv-msgs', el), input = $('#cv-input', el), sendBtn = $('#cv-send', el), note = $('#cv-note', el);
+
+  const renderMsg = (m) => {
+    const who = senderInfo(m.from || 'system');
+    if (who.kind === 'system') return `<div class="sys">${esc(m.text)}</div>`;
+    const mine = who.kind === 'user' && who.id === me().id;
+    return `<div class="msg ${mine ? 'mine' : ''}" style="--gc:${esc(who.color || '#888')}"><div class="mini">${who.svg}</div>
+      <div class="msg-body"><div class="who">${esc(who.name)} <span>${esc(ago(m.ts))}</span></div><div class="bubble">${md(m.text)}</div></div></div>`;
+  };
+  const renderLive = (d) => d.live.map((l) => {
+    const a = agentById(l.agent_id);
+    const acts = (l.activity || []).map((x) => `<div>${esc(x)}</div>`).join('');
+    return `<div class="msg" style="--gc:${esc(a?.color || '#888')}"><div class="mini">${agentGhost(a, { mood: l.status === 'running' ? 'working' : 'queued', size: 34 })}</div>
+      <div class="msg-body"><div class="who">${esc(a?.name || l.agent_id)}</div>
+      <div class="bubble typing"><span class="dots"><i></i><i></i><i></i></span> ${l.status === 'running' ? 'is working…' : 'is waiting in line…'}
+      ${acts ? `<div class="activity">${acts}</div>` : ''}
+      ${d.can_write || me().role === 'owner' ? `<button class="btn small" data-stop="1">Stop</button>` : ''}</div></div></div>`;
+  }).join('') || (d.busy ? `<div class="sys">Waiting for a colleague…</div>` : '');
+
+  function paint() {
+    const d = data;
+    const near = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 90;
+    msgsEl.innerHTML = (d.messages.map(renderMsg).join('') || '<div class="empty">No messages yet.</div>') + (d.busy ? renderLive(d) : '');
+    if (near || sending) msgsEl.scrollTop = msgsEl.scrollHeight;
+    const can = d.can_write && !d.busy;
+    input.disabled = !can;
+    sendBtn.disabled = !can;
+    note.textContent = !d.can_write ? (me().role === 'viewer' ? 'You can read this conversation but not write in it.' : 'This conversation is read-only for you.')
+      : d.busy ? 'The agent is working… you can write again when it is done.' : 'Enter sends, Shift+Enter adds a line.';
+  }
+
+  function apply(d) {
+    data = d;
+    const s = JSON.stringify([d.messages.length, d.busy, d.live, d.meta.title, d.can_write, d.meta.shared]);
+    onData?.(d);
+    if (s === sig) return;
+    sig = s;
+    paint();
+  }
+
+  async function load() {
+    try { apply(await api('GET', '/api/chats/' + id)); }
+    catch (e) { if (alive) msgsEl.innerHTML = `<div class="empty">${esc(e.message)}</div>`; alive = false; }
+  }
+  (async () => { while (alive) { await load(); await sleep(data?.busy ? 800 : 3000); } })();
+
+  const send = guard(async () => {
+    const text = input.value.trim();
+    if (!text || !data?.can_write || data.busy) return;
+    sending = true;
+    sendBtn.disabled = true;
+    try {
+      const d = await api('POST', `/api/chats/${id}/send`, { text });
+      input.value = '';
+      apply(d);
+    } finally { sending = false; }
+  });
+  sendBtn.onclick = send;
+  input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  msgsEl.onclick = guard(async (e) => {
+    if (e.target.closest('[data-stop]')) { await api('POST', `/api/chats/${id}/stop`, {}); load(); }
+  });
+
+  return { destroy: () => { alive = false; }, reload: load, get data() { return data; } };
+}

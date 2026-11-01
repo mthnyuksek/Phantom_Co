@@ -1,0 +1,23 @@
+#pragma once
+#include <functional>
+
+#include "auth.hpp"
+#include "runner.hpp"
+#include "store.hpp"
+
+namespace pc2 {
+
+struct ServerOptions {
+    fs::path ui_dir;  // when set, the UI is served from disk (live editing) instead of the embedded copy
+    Config* config = nullptr;
+    std::function<void(bool)> on_listening;  // called once the port is bound (true) or could not be bound (false)
+};
+
+// Web server: REST API + the browser UI. Listens on 127.0.0.1 only unless the owner
+// switched on network sharing. Every API call except sign-in needs a session.
+// Returns 0 on a normal stop, 2 when the port is in use. Sets `restart` when the
+// listening address changed and the caller should call run_server again.
+int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& opt, bool& restart);
+void stop_server();
+
+}  // namespace pc2
