@@ -17,7 +17,7 @@ function draw() {
       <label class="check"><input type="checkbox" id="s-share" ${s.share ? 'checked' : ''}> Let people on my network connect</label>
       ${s.share && net ? `<p class="hint">Friends connect to: ${net.addresses.map((a) => `<code>http://${esc(a.address)}:${net.port}</code> <span class="meta">(${esc(a.name)})</span>`).join(' &nbsp; ') || 'no network address found'}</p>` : ''}
       <p class="hint">Windows may ask once to allow the program through the firewall: allow it for <b>private</b> networks. The connection is not encrypted: use a home network or a private network app such as Tailscale, never the open internet. Sign-in is always required.</p></div>
-    <div class="card"><h3>Internet access</h3>
+    <div class="card" id="s-tunnel"><h3>Internet access</h3>
       <p class="hint" style="margin-top:0">For friends who are <b>not</b> on your network. Phantom Co. opens a free, encrypted Cloudflare tunnel (no account) and gives you a <code>https://…trycloudflare.com</code> address. It is off every time the program starts and the address changes each time. Sign-in is always required.</p>
       ${tunnelHTML()}</div>
     <div class="card"><h3>Limits</h3>
@@ -49,8 +49,8 @@ async function pollTunnel() {
   clearTimeout(tunTimer);
   tun = await api('GET', '/api/tunnel').catch(() => null);
   if (!view || !view.isConnected || !$('#s-name', view)) return;  // left the page
-  const card = [...view.querySelectorAll('.card')].find((c) => c.querySelector('h3')?.textContent === 'Internet access');
-  if (card) card.innerHTML = `<h3>Internet access</h3>` + card.querySelector('p.hint').outerHTML + tunnelHTML();
+  const card = $('#s-tunnel', view);  // not found by its title: the title is translated in the Turkish interface
+  if (card) card.innerHTML = card.querySelector('h3').outerHTML + card.querySelector('p.hint').outerHTML + tunnelHTML();
   if (tun && (tun.state === 'installing' || tun.state === 'starting')) tunTimer = setTimeout(pollTunnel, 1000);
 }
 

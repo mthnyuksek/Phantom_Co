@@ -54,6 +54,7 @@ Sessions: HttpOnly cookie `pc2_session_<port>` (the port is in the name because 
 - httplib here has no TLS: for https (tunnel) the friend's program uses `HttpClient` (WinHTTP).
 - Remote runs: the system prompt must not contain host paths (`@@WORKDIR@@` placeholder); Bash/PowerShell never go to a friend; strings from the host that reach a command line are validated on the friend's side.
 - Cookies are per host, not per port (see above).
+- UI code must not find elements by their visible text (`textContent === '...'`): the Turkish interface translates it. Use ids / `data-*`.
 - Prompts go through stdin; Codex waits for stdin to close, so the pipe is always closed after writing.
 - `windows.h` needs `WIN32_LEAN_AND_MEAN` + `<winsock2.h>` first when `<iphlpapi.h>` is used.
 
