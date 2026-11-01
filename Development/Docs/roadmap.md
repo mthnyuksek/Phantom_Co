@@ -8,6 +8,7 @@
 
 - Provider workers, first version (decision 0006): friends lend their Claude/Codex (profile → "Lend my AI"), agents can use `claude@<friend>`, the run folder is mirrored to the friend's PC and back. File upload/download in the Files page. Extra owner accounts from the sign-in screen (local only).
 
+- Turkish interface (English stays the default of the code): `i18n.js` + `i18n_tr.js`.
 - Internet access through a Cloudflare quick tunnel (friends outside the network), https for the friend's program.
 
 ## Next
@@ -16,7 +17,6 @@
 | 1 | Provider workers, next steps: send deletions back, big folders (UE assets) without full mirroring, queue a job until the friend's PC comes online, a usage gate per lent AI | The first version works (see Done) |
 | 2 | Wake-up scheduler (daily/weekly/every N minutes/one time) and the usage gate (5 h / 7 d Claude limits) | Port of Burrow features |
 | 3 | Token budgets (per agent, per company) and an Overview page with per-agent/per-person usage | Port of Burrow features |
-| 4 | Turkish / English interface (vault setting) | Burrow has it |
 | 5 | Retry of failed runs, chat export, notifications (Telegram) | Port of Burrow features |
 | 6 | Installer, app icon, light theme | Polish |
 | 7 | A fixed tunnel address (named Cloudflare tunnel with the owner's account) | The quick tunnel address changes at every start |

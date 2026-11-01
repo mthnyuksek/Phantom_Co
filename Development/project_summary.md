@@ -22,6 +22,7 @@ UI testing in the real window: set env `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--
 - `worker_hub` (host) / `worker` (friend): lending a friend's Claude/Codex, see below and `Decisions/0006_provider_workers.md`.
 - `runner` job queue (lanes per provider, `max_concurrent`, an agent never runs twice at once), run records, live events, the **router** (writes answers to conversations, forwards `<send>`, hands reports back along the reply stack). Built-in `demo` provider for tests/trying.
 - `server` REST API + static UI, auth gate, role checks, sharing switch (restarts the listener). `web_view_host` WebView2 wrapper. `main` window, server thread, single-instance mutex.
+- Interface language (English/Turkish): `Web_Ui/i18n.js` translates the text the pages put on the screen (text nodes, `placeholder`/`title`/`aria-label`) with `i18n_tr.js` (`EXACT` whole texts, `PATTERNS` with `{}`/`{#}`), at load and on every DOM change; chosen per browser/window (`localStorage pc2.lang`, profile or sign-in screen), default from the browser language. Chat bubbles, code and inputs are skipped. A new UI text needs an entry in `i18n_tr.js`; `window.__untranslated()` in the console lists what is still English. Server messages (errors, system lines in chats) are English in the files and translated in the browser.
 - `Web_Ui/` plain ES modules, no build step: `app.js` shell/auth/router, `pages/*` one module per tab, `chat_view.js` conversation component, `agent_editor.js`, `pickers.js`, `ghosts.js` (SVG ghosts), `state.js`, `ui.js`, `api.js`.
 
 ## Vault (version 2)
@@ -57,7 +58,7 @@ Sessions: HttpOnly cookie `pc2_session_<port>` (the port is in the name because 
 - `windows.h` needs `WIN32_LEAN_AND_MEAN` + `<winsock2.h>` first when `<iphlpapi.h>` is used.
 
 ## Not done yet
-Telegram, HTTPS built into the server (the tunnel covers the internet case), a fixed tunnel address (named Cloudflare tunnel with an account). Provider workers are in a first version (no deletions sent back, no huge-folder handling, fails when the friend is offline). Wake-up scheduler, usage gate and token budgets, overview/statistics page, Telegram, HTTPS, Turkish/English UI, installer and icon, light theme. See `Docs/roadmap.md`.
+Telegram, HTTPS built into the server (the tunnel covers the internet case), a fixed tunnel address (named Cloudflare tunnel with an account). Provider workers are in a first version (no deletions sent back, no huge-folder handling, fails when the friend is offline). Wake-up scheduler, usage gate and token budgets, overview/statistics page, Telegram, HTTPS, installer and icon, light theme. See `Docs/roadmap.md`.
 
 ## Naming
 The product is called **Phantom Co.** (exe `phantom_co.exe`, CMake target `phantom_co`). The folder `Projects/PC2` and these internal identifiers still say "pc2" on purpose, so existing Vaults and data keep working: C++ namespace `pc2`, header `X-PC2`, cookie `pc2_session_<port>`, hidden `.Pc2` project folder, `%LOCALAPPDATA%\PC2`, default Vault `Documents\PC2_Vault`, localStorage key and `pc2:*` window events.

@@ -56,6 +56,7 @@ Project (We keep the project source files here. When we hand the project to some
     Web_Ui (The web interface, embedded in the program. Plain ES modules, no build step.)
         index.html (Page skeleton.)
         app.css (Whole design: colours, layout, components, ghost animations.)
+        i18n.js, i18n_tr.js (Interface language: translates the screen text into Turkish with a dictionary; see project_summary.md.)
         app.js (Shell: sign-in/setup/join screens, sidebar, router, profile.)
         api.js, ui.js, state.js (Bridge to the server, helpers, shared state.)
         ghosts.js (SVG ghosts: 11 forms, 5 moods.)

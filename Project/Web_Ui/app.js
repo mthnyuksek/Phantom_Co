@@ -1,3 +1,4 @@
+import { lang, setLang, LANGS } from './i18n.js';  // first: it translates what the other modules put on the screen
 import { api } from './api.js';
 import { ghostSVG } from './ghosts.js';
 import { $, $$, esc, guard, modal, closeModal, toast, ROLE_TEXT } from './ui.js';
@@ -28,8 +29,13 @@ function authCard(title, sub, body, mood = 'idle', form = 'wizard') {
   authRoot.hidden = false;
   authRoot.innerHTML = `<div class="auth-card">
     <div class="auth-ghost">${ghostSVG({ form, color: '#b69cff', mood, size: 120 })}</div>
-    <h1>${esc(title)}</h1><p class="sub">${esc(sub)}</p>${body}</div>`;
+    <h1>${esc(title)}</h1><p class="sub">${esc(sub)}</p>${body}${langSwitchHTML()}</div>`;
 }
+const langSwitchHTML = () => `<div class="auth-alt" data-no-i18n>${LANGS.map((l) => `<a href="#" data-lang="${l.id}" ${l.id === lang ? 'style="font-weight:700;pointer-events:none"' : ''}>${l.label}</a>`).join(' · ')}</div>`;
+authRoot.addEventListener('click', (e) => {
+  const a = e.target.closest('[data-lang]');
+  if (a) { e.preventDefault(); setLang(a.dataset.lang); }
+});
 const bridge = window.chrome?.webview;  // present when this page runs inside the Phantom Co. program window
 const isRemote = !['127.0.0.1', 'localhost'].includes(location.hostname);
 const companies = () => { try { return JSON.parse(localStorage.getItem('pc2.companies') || '[]'); } catch { return []; } };
@@ -250,6 +256,8 @@ function openProfile() {
       <h3 class="subhead">Change password</h3>
       <div class="two"><div><label>Current password</label><input type="password" id="p-old" autocomplete="current-password"></div>
         <div><label>New password</label><input type="password" id="p-new" autocomplete="new-password"></div></div>
+      <h3 class="subhead">Language</h3>
+      <select id="p-lang" data-no-i18n>${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang ? 'selected' : ''}>${l.label}</option>`).join('')}</select>
       ${lendHTML()}
     </div></div>
     <div class="modal-foot"><button class="btn danger" id="p-out" style="margin-right:auto">Sign out</button>
@@ -260,6 +268,7 @@ function openProfile() {
     $('#p-name', el).oninput = prev;
     prev();
     bindLend(el);
+    $('#p-lang', el).onchange = (e) => setLang(e.target.value);
     el.addEventListener('click', guard(async (e) => {
       if (e.target.id === 'p-cancel') return closeModal();
       if (e.target.id === 'p-out') { await api('POST', '/api/auth/logout', {}); closeModal(); return boot(); }
