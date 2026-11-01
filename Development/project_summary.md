@@ -61,7 +61,7 @@ Sessions: HttpOnly cookie `pc2_session_<port>` (the port is in the name because 
 - `windows.h` needs `WIN32_LEAN_AND_MEAN` + `<winsock2.h>` first when `<iphlpapi.h>` is used.
 
 ## Not done yet
-Telegram, HTTPS built into the server (the tunnel covers the internet case), a fixed tunnel address (named Cloudflare tunnel with an account). Provider workers are in a first version (no deletions sent back, no huge-folder handling, fails when the friend is offline). One-time and weekly wake-ups, usage gate and token budgets, overview/statistics page, Telegram, HTTPS, installer and icon, light theme. See `Docs/roadmap.md`.
+Telegram, HTTPS built into the server (the tunnel covers the internet case), a fixed tunnel address (named Cloudflare tunnel with an account). Provider workers are in a first version (no deletions sent back, no huge-folder handling, fails when the friend is offline). One-time and weekly wake-ups, usage gate and token budgets, overview/statistics page, Telegram, HTTPS, installer, light theme. See `Docs/roadmap.md`.
 
 ## Naming
 The product is called **Phantom Co.** (exe `phantom_co.exe`, CMake target `phantom_co`). The folder `Projects/PC2` and these internal identifiers still say "pc2" on purpose, so existing Vaults and data keep working: C++ namespace `pc2`, header `X-PC2`, cookie `pc2_session_<port>`, hidden `.Pc2` project folder, `%LOCALAPPDATA%\PC2`, default Vault `Documents\PC2_Vault`, localStorage key and `pc2:*` window events.

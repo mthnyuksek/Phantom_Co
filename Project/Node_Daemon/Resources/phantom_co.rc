@@ -1,6 +1,9 @@
 #include <winuser.h>
 #include <winver.h>
 
+// Program icon (the ghost). Resource id 1 is what Explorer and the taskbar show; make_icon.py draws the file.
+1 ICON "phantom_co.ico"
+
 // Manifest: Windows 10/11 compatibility and per-monitor DPI awareness (the page stays sharp).
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "phantom_co.manifest"
 

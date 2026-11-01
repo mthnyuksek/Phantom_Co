@@ -124,11 +124,14 @@ HWND make_window(HINSTANCE inst) {
     wc.lpszClassName = kWindowClass;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = CreateSolidBrush(RGB(12, 10, 20));
-    wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    wc.hIcon = LoadIconW(inst, MAKEINTRESOURCEW(1));
     RegisterClassW(&wc);
     int w = 1360, h = 860;
     int x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2, y = (GetSystemMetrics(SM_CYSCREEN) - h) / 2;
     HWND hwnd = CreateWindowExW(0, kWindowClass, L"Phantom Co. · Ghost Company", WS_OVERLAPPEDWINDOW, std::max(0, x), std::max(0, y), w, h, nullptr, nullptr, inst, nullptr);
+    // the right icon size for the title bar and for the taskbar / Alt+Tab
+    SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+    SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
     BOOL dark = TRUE;
     DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof(dark));
     return hwnd;
