@@ -82,27 +82,43 @@ std::string Runner::enqueue_internal(Job job, std::string& error, bool user_star
     Lane* lane = lane_for(provider);
     if (!lane) { error = "Unknown provider: " + provider; return ""; }
 
-    if (user_started) {
-        int limit = store_.setting_int("max_queue_per_user"), mine = 0;
-        std::lock_guard<std::mutex> lk(reg_mu_);
-        for (auto& [k, o] : registry_) if (!o->finished && o->job.user_id == job.user_id) ++mine;
-        if (limit > 0 && mine >= limit) { error = "You already have " + std::to_string(mine) + " runs waiting. Wait for some to finish."; return ""; }
-    }
-
     job.id = new_id();
     auto js = std::make_shared<JobState>();
     js->job = job;
-    json rec = {{"id", job.id}, {"kind", job.kind}, {"task_id", job.task_id}, {"agent_id", job.agent_id}, {"user_id", job.user_id},
-                {"provider", provider}, {"model", agent->value("model", "")}, {"conversation_id", job.conv()},
-                {"status", "queued"}, {"created", now_iso()}};
-    store_.run_save(rec);
-    js->events_file.open(store_.run_events_path(job.id), std::ios::app | std::ios::binary);
     {
+        // The duplicate checks and the registration happen under one lock: two requests arriving at the same
+        // moment (double click, manual run + wake-up) cannot both pass the check.
         std::lock_guard<std::mutex> lk(reg_mu_);
+        int mine = 0;
+        for (auto& [k, o] : registry_) {
+            if (o->finished) continue;
+            if (o->job.user_id == job.user_id) ++mine;
+            if (user_started) {
+                // A person never gives work to a conversation that is already being worked on.
+                for (auto& f : o->job.stack)
+                    if (f.conv == job.conv()) { error = "The agent is still working here."; return ""; }
+            } else if (o->job.kind == job.kind && o->job.agent_id == job.agent_id && o->job.stack.size() == job.stack.size() &&
+                       o->job.stack.back().conv == job.stack.back().conv && o->job.prompt == job.prompt) {
+                error = "The same request is already being worked on.";  // identical report/request still pending
+                return "";
+            }
+        }
+        if (user_started) {
+            int limit = store_.setting_int("max_queue_per_user");
+            if (limit > 0 && mine >= limit) { error = "You already have " + std::to_string(mine) + " runs waiting. Wait for some to finish."; return ""; }
+        }
         registry_[job.id] = js;
         if (registry_.size() > 300)  // keep memory small: forget the oldest finished runs (their logs stay on disk)
             for (auto it = registry_.begin(); it != registry_.end() && registry_.size() > 200;)
                 it = it->second->finished ? registry_.erase(it) : std::next(it);
+    }
+    json rec = {{"id", job.id}, {"kind", job.kind}, {"task_id", job.task_id}, {"agent_id", job.agent_id}, {"user_id", job.user_id},
+                {"provider", provider}, {"model", agent->value("model", "")}, {"conversation_id", job.conv()},
+                {"status", "queued"}, {"created", now_iso()}};
+    store_.run_save(rec);
+    {
+        std::lock_guard<std::mutex> lk(js->mu);
+        js->events_file.open(store_.run_events_path(job.id), std::ios::app | std::ios::binary);
     }
     emit(*js, {{"kind", "status"}, {"text", "Queued"}});
     {
@@ -554,7 +570,7 @@ void Runner::handle_send(const std::shared_ptr<JobState>& js, const SendBlock& b
         say(conv, "⚠ " + sender_name + " reached the limit of hand-overs between agents.");
         return;
     }
-    if (blk.reply && has_pending_request(job.agent_id, blk.to)) {
+    if (has_pending_request(job.agent_id, blk.to)) {  // also for information-only sends: never ask a ghost twice while it is still on it
         say(conv, "⚠ " + sender_name + " is already waiting for " + target->value("name", blk.to) + ".");
         return;
     }
