@@ -101,7 +101,9 @@ std::string build_system_prompt(Store& store, const PromptInput& in) {
     if (!team.empty())
         p += "\n## Team\n" + team +
              "To ask a colleague for help put a block in your answer: <send to=\"agent_id\" title=\"Short title\">what you need</send>. "
-             "Their answer comes back to you as a report; then answer the person. Use reply=\"no\" for information only. "
+             "Their answer comes back to you as a report; then answer the person. "
+             "If you want a result, an answer or a report back, leave reply out. Add reply=\"no\" only for news that needs no answer at all "
+             "(you will not hear back and cannot continue the work with their result). "
              "Only use ids from this list, never yourself. Text outside blocks is shown to the person who asked.\n";
     return p;
 }

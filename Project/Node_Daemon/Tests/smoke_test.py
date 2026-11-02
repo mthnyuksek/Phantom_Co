@@ -206,6 +206,15 @@ def main():
         check("agent conversation has both sides", [m["from"] for m in x["messages"]] == ["agent:casper", "agent:wisp"], x["messages"])
         check("agent conversation read-only", not x["can_write"])
         check("other users do not see it", all(c["kind"] != "agents" for c in vera.get("/api/chats")[1]["chats"]))
+        # information only (reply="no"): the asker is not woken up, but the chat shows how the work ended
+        st, c3 = ece.post("/api/chats", {"agent_id": "casper"})
+        ece.post(f"/api/chats/{c3['meta']['id']}/send", {"text": "just tell demo:tell:wisp"})
+        v = ece.wait_idle(c3["meta"]["id"])
+        texts = [m["text"] for m in v["messages"]]
+        check("information-only send marked", any("asked Wisp (information only)" in t for t in texts), texts)
+        check("information-only result shown without a report run",
+              any(t.startswith("ℹ Wisp finished (Casper did not ask for an answer): Boo! Wisp here.") for t in texts)
+              and not any("Thanks, I got the report" in t or "reported back" in t for t in texts), texts)
         st, state = ece.get("/api/runs")
         kinds = {r["kind"] for r in state["runs"]}
         check("run kinds recorded", {"chat", "msg", "report"} <= kinds, kinds)

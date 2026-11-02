@@ -341,6 +341,8 @@ export const PATTERNS = [
   ['⏸ {} reached the step limit. Write "continue" to go on.', '⏸ {0} adım sınırına ulaştı. Devam etmek için “devam et” yaz.'],
   ['→ {} asked {}.', '→ {0}, {1} kişisine sordu.'], ['→ {} asked {} (information only).', '→ {0}, {1} kişisine sordu (yalnızca bilgi).'],
   ['↩ {} reported back to {}.', '↩ {0}, {1} kişisine rapor verdi.'],
+  ['ℹ {} finished ({} did not ask for an answer): {}', 'ℹ {0} işi bitirdi ({1} cevap istememişti): {2}'],
+  ['ℹ {} could not finish ({} did not ask for an answer): {}', 'ℹ {0} işi bitiremedi ({1} cevap istememişti): {2}'],
   ['⚠ {} reached the limit of hand-overs between agents.', '⚠ {0}, ajanlar arası devir sınırına ulaştı.'],
   ['⚠ {} is already waiting for {}.', '⚠ {0}, {1} kişisini zaten bekliyor.'],
   ['⚠ {} tried to ask "{}", who is not available.', '⚠ {0}, ulaşılamayan “{1}” kişisine sormaya çalıştı.'],

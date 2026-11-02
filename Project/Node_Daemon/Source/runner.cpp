@@ -537,11 +537,12 @@ Runner::Outcome Runner::run_demo(const std::shared_ptr<JobState>& js, const Agen
         for (char& ch : shown) if (ch == '<') ch = '[';
         text += "\n[system prompt]\n" + shown;
     }
-    size_t s = p.find("demo:send:");
-    if (s != std::string::npos && job.kind != "report") {
+    for (const char* kw : {"demo:send:", "demo:tell:"}) {  // tell = information only (reply="no")
+        size_t s = p.find(kw);
+        if (s == std::string::npos || job.kind == "report") continue;
         std::string target;
         for (size_t i = s + 10; i < p.size() && (isalnum((unsigned char)p[i]) || p[i] == '_' || p[i] == '-'); ++i) target += p[i];
-        text += "\n<send to=\"" + target + "\" title=\"Demo request\">Please say hi to the user.</send>";
+        text += "\n<send to=\"" + target + "\" title=\"Demo request\"" + (kw[5] == 't' ? " reply=\"no\"" : "") + ">Please say hi to the user.</send>";
     }
     step({{"kind", "message"}, {"text", text}}, 300);
     o.text = text;
@@ -644,6 +645,12 @@ void Runner::route(const std::shared_ptr<JobState>& js, const Outcome& o) {
             if (enqueue_internal(rj, err, false).empty()) say(rj.stack.back().conv, "⚠ Could not hand the report to " + agent_name(store_, top.id) + ": " + err);
             else say(rj.stack.back().conv, "↩ " + name + " reported back to " + agent_name(store_, top.id) + ".");
         }
+    } else if (top.kind == "agent" && job.stack.size() >= 2) {
+        // Information only: the asker is not woken up, but the people following the work see how it ended
+        // (agents sometimes use reply="no" by mistake; the work must not vanish without a trace).
+        const std::string where = job.stack[job.stack.size() - 2].conv, asker = agent_name(store_, top.id);
+        if (o.status == "done") say(where, "ℹ " + name + " finished (" + asker + " did not ask for an answer): " + truncate_utf8(text.empty() ? "(no answer)" : text, 400));
+        else say(where, "ℹ " + name + " could not finish (" + asker + " did not ask for an answer): " + (o.error.empty() ? o.status : o.error));
     }
 }
 
