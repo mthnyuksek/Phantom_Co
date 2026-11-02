@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { S, projectById, canEdit, isOwner } from '../state.js';
+import { S, projectById, agentById, agentGhost, canEdit, isOwner } from '../state.js';
 import { $, esc, guard, modal, closeModal, twoStep, toast, ago } from '../ui.js';
 import { openNewChatModal } from './chats.js';
 import { openTaskModal } from './tasks.js';
@@ -27,7 +27,36 @@ function detail(p) {
       <p class="hint">Notes that are switched on are sent to every ghost working in this project. Ghosts with the Project notes skill can write notes too.</p>
       ${p.notes.map((n) => `<div class="note ${n.enabled ? '' : 'off'}"><div class="note-top"><b>${esc(n.name)}</b>
         ${ro ? '' : `<label class="check"><input type="checkbox" data-act="note-toggle" data-id="${esc(n.id)}" ${n.enabled ? 'checked' : ''}> on</label>
-        <button class="btn small" data-act="note-edit" data-id="${esc(n.id)}">Edit</button>`}</div><div class="note-body">${esc(n.body)}</div></div>`).join('') || '<div class="empty small">No notes yet.</div>'}</div></div>`;
+        <button class="btn small" data-act="note-edit" data-id="${esc(n.id)}">Edit</button>`}</div><div class="note-body">${esc(n.body)}</div></div>`).join('') || '<div class="empty small">No notes yet.</div>'}</div>
+    ${rolesCard(p, ro)}</div>`;
+}
+
+// What each ghost does in this project: added to that ghost's prompt only while it works here.
+function rolesCard(p, ro) {
+  const roles = p.roles || {};
+  const ids = Object.keys(roles).filter((id) => agentById(id));
+  return `<div class="card wide"><div class="card-head"><h3>Ghost jobs in this project</h3>${ro ? '' : '<button class="btn small" data-act="role-new">+ Set a job</button>'}</div>
+    <p class="hint">A ghost keeps its persona everywhere. The job written here is added to its instructions only while it works in this project, and its colleagues see the first line.</p>
+    ${ids.map((id) => { const a = agentById(id); return `<div class="note"><div class="note-top"><div class="mini">${agentGhost(a, { size: 28 })}</div><b>${esc(a.name)}</b>
+      ${ro ? '' : `<button class="btn small" data-act="role-edit" data-id="${esc(id)}">Edit</button>`}</div><div class="note-body">${esc(roles[id])}</div></div>`; }).join('') || '<div class="empty small">No jobs yet. Every ghost works here with its usual role.</div>'}</div>`;
+}
+
+function roleModal(p, agentId) {
+  const agents = S.state.agents.filter((a) => a.id === agentId || !(p.roles || {})[a.id]);
+  if (!agents.length) return toast('Every ghost already has a job here.', true);
+  modal(`<h2>Ghost job in ${esc(p.name)}</h2>
+    <label>Ghost</label><select id="r-agent" ${agentId ? 'disabled' : ''}>${agents.map((a) => `<option value="${esc(a.id)}" ${a.id === agentId ? 'selected' : ''}>${esc(a.name)} — ${esc(a.role)}</option>`).join('')}</select>
+    <label>Job in this project <span class="hint-inline">the first line is shown to colleagues</span></label>
+    <textarea id="r-text" style="min-height:140px" maxlength="4000" placeholder="e.g. Writes the scripts of the videos. Hands finished scripts to the editor.">${esc((p.roles || {})[agentId] || '')}</textarea>
+    <div class="modal-foot">${agentId ? '<button class="btn danger" id="r-del" style="margin-right:auto">Remove</button>' : ''}<button class="btn" id="r-cancel">Cancel</button><button class="btn primary" id="r-save">Save</button></div>`,
+  (m) => m.addEventListener('click', guard(async (e) => {
+    if (e.target.id === 'r-cancel') return closeModal();
+    const id = $('#r-agent', m).value;
+    if (e.target.id === 'r-del') return twoStep(e.target, 'Really remove?', async () => { await api('PUT', `/api/projects/${p.id}/roles/${id}`, { text: '' }); closeModal(); window.dispatchEvent(new Event('pc2:changed')); });
+    if (e.target.id !== 'r-save') return;
+    await api('PUT', `/api/projects/${p.id}/roles/${id}`, { text: $('#r-text', m).value });
+    closeModal(); toast('Saved'); window.dispatchEvent(new Event('pc2:changed'));
+  })));
 }
 
 function paint() {
@@ -78,6 +107,8 @@ export async function render(v, arg) {
     else if (act === 'task') openTaskModal(undefined, p.id);
     else if (act === 'note-new') noteModal(p, null);
     else if (act === 'note-edit') noteModal(p, p.notes.find((n) => n.id === el.dataset.id));
+    else if (act === 'role-new') roleModal(p, '');
+    else if (act === 'role-edit') roleModal(p, el.dataset.id);
   });
   view.onchange = guard(async (e) => {
     if (e.target.dataset.act === 'note-toggle') {

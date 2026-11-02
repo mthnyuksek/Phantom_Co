@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { S, skillById, isOwner, canEdit } from '../state.js';
+import { S, skillById, skillScopeBadge, isOwner, canEdit } from '../state.js';
 import { $, esc, guard, modal, closeModal, twoStep, toast } from '../ui.js';
 
 let view, selected = '';
@@ -7,7 +7,7 @@ const TOOL_HELP = { Read: 'read files', Glob: 'find files', Grep: 'search in fil
 const DIR_HELP = { Agents: 'ghost definitions', Skills: 'skills', Rules: 'company rules', Projects: 'projects and notes' };
 
 const listHTML = () => S.state.skills.map((s) => `<a class="chat-item ${s.id === selected ? 'on' : ''}" href="#/skills/${esc(s.id)}"><div class="mini big-emoji">🧰</div>
-  <div class="ci-body"><div class="ci-title">${esc(s.name)}${s.min_role === 'owner' ? ' <span class="badge">owner</span>' : ''}${s.enabled ? '' : ' <span class="badge">off</span>'}</div>
+  <div class="ci-body"><div class="ci-title">${esc(s.name)}${s.min_role === 'owner' ? ' <span class="badge">owner</span>' : ''}${s.enabled ? '' : ' <span class="badge">off</span>'}${skillScopeBadge(s)}</div>
   <div class="ci-prev">${esc(s.description)}</div></div><div class="ci-time">${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}</div></a>`).join('') || '<div class="empty small">No skills yet.</div>';
 
 function detail(s) {
@@ -20,6 +20,8 @@ function detail(s) {
       <div class="skill-list">${S.state.tools.map((t) => `<label class="check"><input type="checkbox" data-tool="${t}" ${s.tools.includes(t) ? 'checked' : ''} ${ro ? 'disabled' : ''}> ${t} <span class="hint-inline">${esc(TOOL_HELP[t] || '')}</span></label>`).join('')}</div>
       <label>May touch these parts of the Vault</label>
       <div class="skill-list">${Object.keys(DIR_HELP).map((d) => `<label class="check"><input type="checkbox" data-dir="${d}" ${s.dirs.includes(d) ? 'checked' : ''} ${ro ? 'disabled' : ''}> ${d} <span class="hint-inline">${esc(DIR_HELP[d])}</span></label>`).join('')}</div>
+      <label>Only in these projects <span class="hint-inline">none ticked = everywhere; otherwise the ghost gets this skill only while it works in a ticked project</span></label>
+      <div class="skill-list">${S.state.projects.map((p) => `<label class="check"><input type="checkbox" data-proj="${esc(p.id)}" ${(s.projects || []).includes(p.id) ? 'checked' : ''} ${ro ? 'disabled' : ''}> 📁 ${esc(p.name)}</label>`).join('') || '<span class="hint">No projects yet.</span>'}</div>
       <label>How to use it <span class="hint-inline">sent to the ghost on every run, keep it short</span></label>
       ${canEdit() ? `<textarea id="sk-body" style="min-height:160px" maxlength="8000" ${ro ? 'disabled' : ''}>${esc(s.body || '')}</textarea>` : '<div class="hint">Only editors can read the instructions.</div>'}
       <p class="hint">Needs role: <b>${esc(s.min_role)}</b> ${s.min_role === 'owner' ? '— commands and Vault access are owner-only: a ghost only gets this skill when the owner asks it.' : '— anyone who can chat can use it through a ghost.'}</p>
@@ -61,7 +63,8 @@ export async function render(v, arg) {
       location.hash = '#/skills/' + s.id; window.dispatchEvent(new Event('pc2:changed'));
     } else if (act === 'save') {
       const tools = [...view.querySelectorAll('[data-tool]:checked')].map((x) => x.dataset.tool), dirs = [...view.querySelectorAll('[data-dir]:checked')].map((x) => x.dataset.dir);
-      await api('PUT', '/api/skills/' + selected, { name: $('#sk-name', view).value, description: $('#sk-desc', view).value, tools, dirs, body: $('#sk-body', view)?.value ?? '', enabled: $('#sk-on', view).checked });
+      const projects = [...view.querySelectorAll('[data-proj]:checked')].map((x) => x.dataset.proj);
+      await api('PUT', '/api/skills/' + selected, { name: $('#sk-name', view).value, description: $('#sk-desc', view).value, tools, dirs, projects, body: $('#sk-body', view)?.value ?? '', enabled: $('#sk-on', view).checked });
       toast('Saved'); window.dispatchEvent(new Event('pc2:changed'));
     } else if (act === 'del') twoStep(el, 'Really delete?', async () => { await api('DELETE', '/api/skills/' + selected); toast('Skill deleted'); location.hash = '#/skills'; window.dispatchEvent(new Event('pc2:changed')); });
   });

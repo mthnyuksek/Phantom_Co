@@ -19,7 +19,9 @@ struct AgentContext {
     bool has_tool(const std::string& t) const;
 };
 
-AgentContext resolve_agent(Store& store, const json& agent, const std::string& user_role);
+// Skills with a project list are used only in those projects (project_id "" = shared files).
+bool skill_fits_project(const json& skill, const std::string& project_id);
+AgentContext resolve_agent(Store& store, const json& agent, const std::string& user_role, const std::string& project_id);
 
 struct PromptInput {
     const AgentContext* ctx = nullptr;

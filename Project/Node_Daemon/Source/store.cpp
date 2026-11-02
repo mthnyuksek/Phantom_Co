@@ -63,7 +63,7 @@ static const std::vector<Field> kAgentF = {
 static const std::vector<Field> kSkillF = {
     {"name", "name", 'S', ""}, {"description", "description", 'S', ""}, {"tools", "tools", 'C', ""},
     {"dirs", "dirs", 'C', ""}, {"min_role", "min_role", 'S', "editor"}, {"enabled", "enabled", 'B', "true"},
-    {"default", "default", 'B', "false"}};
+    {"default", "default", 'B', "false"}, {"projects", "projects", 'C', ""}};  // projects: empty = every project
 static const std::vector<Field> kRuleF = {{"name", "name", 'S', ""}, {"enabled", "enabled", 'B', "true"}};
 static const std::vector<Field> kProjectF = {{"name", "name", 'S', ""}, {"created", "created", 'S', ""}};
 static const std::vector<Field> kTaskF = {
@@ -73,6 +73,10 @@ static const std::vector<Field> kTaskF = {
     // wake-up schedule: wake = "" | "interval" | "daily"; wake_last = unix seconds of the last wake-up (or of the moment it was set)
     {"wake", "wake", 'S', ""}, {"wake_every", "wake_every", 'I', "0"}, {"wake_at", "wake_at", 'S', ""},
     {"wake_on", "wake_on", 'B', "false"}, {"wake_last", "wake_last", 'S', ""}};
+static const std::vector<Field> kTemplateF = {  // task templates: a ready-made task, body = task details
+    {"name", "name", 'S', ""}, {"agent", "agent_id", 'S', ""}, {"project", "project_id", 'S', ""},
+    {"created_by", "created_by", 'S', ""}, {"created", "created", 'S', ""},
+    {"wake", "wake", 'S', ""}, {"wake_every", "wake_every", 'I', "0"}, {"wake_at", "wake_at", 'S', ""}};
 static const std::vector<Field> kUserF = {
     {"name", "name", 'S', ""}, {"form", "form", 'S', "classic"}, {"color", "color", 'S', "#9ff0d4"},
     {"created", "created", 'S', ""}, {"disabled", "disabled", 'B', "false"}};
@@ -188,7 +192,7 @@ void init_vault(const fs::path& root) {
         fresh = true;
     }
 
-    for (const wchar_t* d : {L"Company", L"Users", L"Agents", L"Skills", L"Rules", L"Projects", L"Tasks", L"Conversations", L"Runs", L"Shared_Files"})
+    for (const wchar_t* d : {L"Company", L"Users", L"Agents", L"Skills", L"Rules", L"Projects", L"Tasks", L"Task_Templates", L"Conversations", L"Runs", L"Shared_Files"})
         fs::create_directories(root / d, ec);
 
     for (size_t i = 0; i < kEmbeddedCount; ++i) {  // starting files from the template; existing files are kept
@@ -284,6 +288,7 @@ SIMPLE_ENTITY(users, user, L"Users", kUserF, nullptr, "created")
 SIMPLE_ENTITY(agents, agent, L"Agents", kAgentF, "persona", "created")
 SIMPLE_ENTITY(skills, skill, L"Skills", kSkillF, "body", "name")
 SIMPLE_ENTITY(rules, rule, L"Rules", kRuleF, "body", "name")
+SIMPLE_ENTITY(task_templates, task_template, L"Task_Templates", kTemplateF, "description", "name")
 
 json Store::save_user(json u) {
     std::lock_guard<std::recursive_mutex> l(mu_);
@@ -314,6 +319,16 @@ json Store::save_rule(json r) {
     if (!r.contains("id") || r["id"].get<std::string>().empty()) r["id"] = unique_id(root_ / L"Rules", r.value("name", "rule"), false);
     write_entity(root_ / L"Rules" / P(r["id"].get<std::string>() + ".md"), r, kRuleF, "body");
     return r;
+}
+
+json Store::save_task_template(json t) {
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    if (!t.contains("id") || t["id"].get<std::string>().empty()) {
+        t["id"] = unique_id(root_ / L"Task_Templates", t.value("name", "template"), false);
+        t["created"] = now_iso();
+    }
+    write_entity(root_ / L"Task_Templates" / P(t["id"].get<std::string>() + ".md"), t, kTemplateF, "description");
+    return t;
 }
 
 std::vector<json> Store::skill_templates() { return embedded_skills(); }
@@ -350,6 +365,9 @@ std::optional<json> Store::project(const std::string& id) {
     std::error_code ec;
     for (auto& n : read_dir(meta / L"Notes", kRuleF, "body")) notes.push_back(std::move(n));
     (*p)["notes"] = notes;
+    json roles = json::object();  // .Pc2/Roles/<agent id>.md: what that agent does in this project
+    for (auto& r : read_dir(meta / L"Roles", kRuleF, "body")) roles[r["id"].get<std::string>()] = r.value("body", "");
+    (*p)["roles"] = roles;
     return p;
 }
 json Store::save_project(json p) {
@@ -379,6 +397,16 @@ json Store::save_note(const std::string& project_id, json n) {
     if (!n.contains("id") || n["id"].get<std::string>().empty()) n["id"] = unique_id(dir, n.value("name", "note"), false);
     write_entity(dir / P(n["id"].get<std::string>() + ".md"), n, kRuleF, "body");
     return n;
+}
+bool Store::set_project_role(const std::string& project_id, const std::string& agent_id, const std::string& text) {
+    if (!valid_id(project_id) || !valid_id(agent_id)) return false;
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    fs::path dir = root_ / L"Projects" / P(project_id) / L".Pc2" / L"Roles";
+    std::error_code ec;
+    if (text.find_first_not_of(" \t\r\n") == std::string::npos) { fs::remove(dir / P(agent_id + ".md"), ec); return true; }
+    fs::create_directories(dir, ec);
+    write_entity(dir / P(agent_id + ".md"), json{{"name", agent_id}, {"body", text}}, kRuleF, "body");
+    return true;
 }
 bool Store::remove_note(const std::string& project_id, const std::string& note_id) {
     if (!valid_id(project_id) || !valid_id(note_id)) return false;

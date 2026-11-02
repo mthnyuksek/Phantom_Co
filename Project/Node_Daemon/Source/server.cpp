@@ -588,6 +588,11 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             if (t.is_string() && kTools.count(t.get<std::string>())) out["tools"].push_back(t);
         for (auto& d : in.contains("dirs") ? in["dirs"] : base.value("dirs", json::array()))
             if (d.is_string() && kDirs.count(d.get<std::string>())) out["dirs"].push_back(d);
+        out["projects"] = json::array();  // empty = every project
+        if (in.contains("projects") && in["projects"].is_array()) {
+            for (auto& p : in["projects"])
+                if (p.is_string() && store.project(p.get<std::string>())) out["projects"].push_back(p);
+        } else out["projects"] = base.value("projects", json::array());
         // Powerful skills are owner-only: agents act with the rights of the person who asks.
         bool powerful = false;
         for (auto& t : out["tools"]) if (t == "Bash" || t == "PowerShell") powerful = true;
@@ -700,6 +705,15 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
     add("DELETE", "/api/projects/" + ID + "/notes/" + ID, kEditor, [&](auto& req, auto& res, Ctx&) {
         if (!store.remove_note(req.matches[1], req.matches[2])) return fail(res, 404, "Note not found");
         send(res, {{"ok", true}});
+    });
+    // What one ghost does in this project (added to its prompt there); empty text removes it.
+    add("PUT", "/api/projects/" + ID + "/roles/" + ID, kEditor, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        if (!store.project(req.matches[1])) return fail(res, 404, "Project not found");
+        if (!store.agent(req.matches[2])) return fail(res, 404, "Ghost not found");
+        store.set_project_role(req.matches[1], req.matches[2], str(b, "text", 4000));
+        send(res, *store.project(req.matches[1]));
     });
 
     // ================================================================= chats
@@ -814,6 +828,24 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
     });
 
     // ================================================================= tasks
+    // Reads a wake-up setting {wake: none|interval|daily, every_min, at} into t (wake, wake_every, wake_at). False + err when invalid.
+    auto read_wake = [](const json& b, json& t, std::string& err) {
+        std::string kind = str(b, "wake", 16);
+        if (kind.empty() || kind == "none") {
+            t["wake"] = ""; t["wake_every"] = 0; t["wake_at"] = "";
+        } else if (kind == "interval") {
+            long long every = b.contains("every_min") && b["every_min"].is_number() ? b["every_min"].get<long long>() : 0;
+            if (every < 1 || every > 10080) { err = "Pick between 1 minute and 7 days (10080 minutes)."; return false; }
+            t["wake"] = "interval"; t["wake_every"] = every; t["wake_at"] = "";
+        } else if (kind == "daily") {
+            std::string at = str(b, "at", 8);
+            bool okat = at.size() == 5 && at[2] == ':' && isdigit((unsigned char)at[0]) && isdigit((unsigned char)at[1]) && isdigit((unsigned char)at[3]) && isdigit((unsigned char)at[4]) &&
+                        std::stoi(at.substr(0, 2)) < 24 && std::stoi(at.substr(3, 2)) < 60;
+            if (!okat) { err = "Give the time as HH:MM."; return false; }
+            t["wake"] = "daily"; t["wake_at"] = at; t["wake_every"] = 0;
+        } else { err = "Unknown wake-up kind."; return false; }
+        return true;
+    };
     auto task_view = [&](json t) {
         std::string conv = t.value("conversation_id", "");
         std::string status = runner.task_state(conv);
@@ -838,8 +870,13 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         if (title.empty()) return fail(res, 400, "The task needs a title.");
         if (!a || !a->value("enabled", true)) return fail(res, 400, "Pick a ghost for this task.");
         if (!project_id.empty() && !store.project(project_id)) return fail(res, 400, "Unknown project.");
-        std::string description = str(b, "description", 20000);
-        json t = store.save_task({{"title", title}, {"description", description}, {"agent_id", agent_id}, {"project_id", project_id}, {"created_by", c.id}});
+        std::string description = str(b, "description", 20000), werr;
+        json t = {{"title", title}, {"description", description}, {"agent_id", agent_id}, {"project_id", project_id}, {"created_by", c.id}};
+        if (b.contains("wake")) {  // optional wake-up, e.g. from a task template
+            if (!read_wake(b, t, werr)) return fail(res, 400, werr);
+            if (!t.value("wake", "").empty()) { t["wake_on"] = true; t["wake_last"] = std::to_string((long long)std::time(nullptr)); }
+        }
+        t = store.save_task(t);
         std::string conv = store.conv_create({{"kind", "task"}, {"title", title}, {"agent_id", agent_id}, {"user_id", c.id}, {"project_id", project_id},
                                               {"task_id", t["id"]}, {"shared", true}});
         t["conversation_id"] = conv;
@@ -886,21 +923,10 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         auto t = store.task(req.matches[1]);
         if (!t) return fail(res, 404, "Task not found");
         if (t->value("created_by", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who created this task can change its wake-up.");
-        std::string kind = str(b, "wake", 16);
-        if (kind.empty() || kind == "none") {
-            (*t)["wake"] = ""; (*t)["wake_every"] = 0; (*t)["wake_at"] = ""; (*t)["wake_on"] = false; (*t)["wake_last"] = "";
-        } else if (kind == "interval") {
-            long long every = b.contains("every_min") && b["every_min"].is_number() ? b["every_min"].get<long long>() : 0;
-            if (every < 1 || every > 10080) return fail(res, 400, "Pick between 1 minute and 7 days (10080 minutes).");
-            (*t)["wake"] = "interval"; (*t)["wake_every"] = every; (*t)["wake_at"] = "";
-        } else if (kind == "daily") {
-            std::string at = str(b, "at", 8);
-            bool okat = at.size() == 5 && at[2] == ':' && isdigit((unsigned char)at[0]) && isdigit((unsigned char)at[1]) && isdigit((unsigned char)at[3]) && isdigit((unsigned char)at[4]) &&
-                        std::stoi(at.substr(0, 2)) < 24 && std::stoi(at.substr(3, 2)) < 60;
-            if (!okat) return fail(res, 400, "Give the time as HH:MM.");
-            (*t)["wake"] = "daily"; (*t)["wake_at"] = at; (*t)["wake_every"] = 0;
-        } else return fail(res, 400, "Unknown wake-up kind.");
-        if (!t->value("wake", "").empty()) {
+        std::string err;
+        if (!read_wake(b, *t, err)) return fail(res, 400, err);
+        if (t->value("wake", "").empty()) { (*t)["wake_on"] = false; (*t)["wake_last"] = ""; }
+        else {
             (*t)["wake_on"] = b.value("on", true);
             (*t)["wake_last"] = std::to_string((long long)std::time(nullptr));  // counts from now
         }
@@ -915,6 +941,47 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         if (runner.conversation_busy(conv)) return fail(res, 409, "Stop the work first.");
         store.conv_delete(conv);
         store.remove_task(req.matches[1]);
+        send(res, {{"ok", true}});
+    });
+
+    // ========================================================= task templates
+    // A ready-made task (title, details, ghost, project, wake-up) that people start again and again.
+    auto clean_template = [&](const json& in, json base, std::string& err) -> std::optional<json> {
+        base["name"] = str(in, "name", 120, base.value("name", ""));
+        base["description"] = str(in, "description", 20000, base.value("description", ""));
+        base["agent_id"] = str(in, "agent_id", 64, base.value("agent_id", ""));
+        base["project_id"] = str(in, "project_id", 64, base.value("project_id", ""));
+        if (base["name"].get<std::string>().empty()) { err = "The template needs a name."; return std::nullopt; }
+        if (!base["agent_id"].get<std::string>().empty() && !store.agent(base["agent_id"])) { err = "Unknown ghost."; return std::nullopt; }
+        if (!base["project_id"].get<std::string>().empty() && !store.project(base["project_id"])) { err = "Unknown project."; return std::nullopt; }
+        if (in.contains("wake") && !read_wake(in, base, err)) return std::nullopt;
+        return base;
+    };
+    add("GET", "/api/task_templates", kViewer, [&](auto&, auto& res, Ctx&) { send(res, {{"templates", store.task_templates()}}); });
+    add("POST", "/api/task_templates", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        std::string err;
+        auto t = clean_template(b, {{"created_by", c.id}}, err);
+        if (!t) return fail(res, 400, err);
+        send(res, store.save_task_template(*t), 201);
+    });
+    add("PUT", "/api/task_templates/" + ID, kEditor, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        auto cur = store.task_template(req.matches[1]);
+        if (!cur) return fail(res, 404, "Template not found");
+        if (cur->value("created_by", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who made this template can change it.");
+        std::string err;
+        auto t = clean_template(b, *cur, err);
+        if (!t) return fail(res, 400, err);
+        send(res, store.save_task_template(*t));
+    });
+    add("DELETE", "/api/task_templates/" + ID, kEditor, [&](auto& req, auto& res, Ctx& c) {
+        auto cur = store.task_template(req.matches[1]);
+        if (!cur) return fail(res, 404, "Template not found");
+        if (cur->value("created_by", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who made this template can delete it.");
+        store.remove_task_template(req.matches[1]);
         send(res, {{"ok", true}});
     });
 

@@ -73,11 +73,18 @@ public:
     bool remove_project(const std::string& id);     // removes the .Pc2 metadata only, never the files
     json save_note(const std::string& project_id, json n);
     bool remove_note(const std::string& project_id, const std::string& note_id);
+    // What one agent does in one project (.Pc2/Roles/<agent id>.md); empty text removes it.
+    bool set_project_role(const std::string& project_id, const std::string& agent_id, const std::string& text);
 
     std::vector<json> tasks();                      // newest first
     std::optional<json> task(const std::string& id);
     json save_task(json t);
     bool remove_task(const std::string& id);
+
+    std::vector<json> task_templates();             // Task_Templates/<id>.md, by name
+    std::optional<json> task_template(const std::string& id);
+    json save_task_template(json t);
+    bool remove_task_template(const std::string& id);
 
     // Conversations: Conversations/<id>.jsonl, one JSON object per line
     //   {"t":"meta",...} {"t":"msg","from":"user:ID|agent:ID|system","text":..} {"t":"title"} {"t":"share"}

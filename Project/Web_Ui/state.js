@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { ghostSVG, FORMS, PALETTE } from './ghosts.js';
+import { esc } from './ui.js';
 
 export { FORMS, PALETTE };
 export const S = { state: null };
@@ -23,6 +24,9 @@ export const agentById = (id) => S.state?.agents.find((a) => a.id === id);
 export const userById = (id) => S.state?.users.find((u) => u.id === id);
 export const projectById = (id) => S.state?.projects.find((p) => p.id === id);
 export const skillById = (id) => S.state?.skills.find((s) => s.id === id);
+// Badge for a skill that is used only in some projects ('' when it is used everywhere).
+export const skillScopeBadge = (s) => s?.projects?.length
+  ? ` <span class="badge" title="Only in these projects">📁 ${esc(s.projects.map((id) => projectById(id)?.name || id).join(', '))}</span>` : '';
 
 export const agentGhost = (a, { mood, size = 110 } = {}) =>
   ghostSVG({ form: a?.form || 'classic', color: a?.color || '#8f89a8', mood: mood || (a?.activity?.state === 'working' ? 'working' : a?.activity?.state === 'queued' ? 'queued' : 'idle'), size });

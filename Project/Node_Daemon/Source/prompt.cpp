@@ -10,7 +10,14 @@ int role_rank(const std::string& r) { return r == "viewer" ? 0 : r == "editor" ?
 bool AgentContext::has_tool(const std::string& t) const { return std::find(tools.begin(), tools.end(), t) != tools.end(); }
 bool AgentContext::can_write() const { return has_tool("Write") || has_tool("Edit") || has_tool("Bash") || has_tool("PowerShell"); }
 
-AgentContext resolve_agent(Store& store, const json& agent, const std::string& user_role) {
+bool skill_fits_project(const json& skill, const std::string& project_id) {
+    const json& ps = skill.contains("projects") && skill["projects"].is_array() ? skill["projects"] : json::array();
+    if (ps.empty()) return true;  // no project list = every project and the shared files
+    for (auto& p : ps) if (p.is_string() && p.get<std::string>() == project_id) return true;
+    return false;
+}
+
+AgentContext resolve_agent(Store& store, const json& agent, const std::string& user_role, const std::string& project_id) {
     AgentContext c;
     c.agent = agent;
     static const std::set<std::string> kDirs = {"Agents", "Skills", "Rules", "Projects"};
@@ -20,6 +27,7 @@ AgentContext resolve_agent(Store& store, const json& agent, const std::string& u
         auto s = store.skill(id.get<std::string>());
         if (!s || !s->value("enabled", true)) continue;
         if (role_rank(s->value("min_role", "editor")) > rank) continue;
+        if (!skill_fits_project(*s, project_id)) continue;  // project skills stay out of other work
         for (auto& t : (*s)["tools"]) tools.insert(t.get<std::string>());
         for (auto& d : (*s)["dirs"]) if (kDirs.count(d.get<std::string>())) dirs.insert(d.get<std::string>());
         c.skills.push_back(*s);
@@ -75,11 +83,17 @@ std::string build_system_prompt(Store& store, const PromptInput& in) {
         for (auto& n : in.project.value("notes", json::array()))
             if (n.value("enabled", true) && !trim(n.value("body", "")).empty()) p += "- " + n.value("name", "Note") + ": " + trim(n.value("body", "")) + "\n";
     }
+    // What each agent does in this project (set on the project page); the agent's own part comes in full.
+    const json roles = in.project.is_object() && in.project.contains("roles") && in.project["roles"].is_object() ? in.project["roles"] : json::object();
+    auto role_of = [&](const json& id) { return roles.contains(id.get<std::string>()) ? trim(roles[id.get<std::string>()].get<std::string>()) : std::string(); };
+    if (!role_of(a["id"]).empty()) p += "\n## Your job in this project\n" + role_of(a["id"]) + "\n";
 
     std::string team;
     for (auto& o : store.agents()) {
         if (o["id"] == a["id"] || !o.value("enabled", true)) continue;
         team += "- " + o["id"].get<std::string>() + ": " + o.value("name", "") + (o.value("role", "").empty() ? "" : ", " + o.value("role", ""));
+        if (std::string r = role_of(o["id"]); !r.empty())
+            team += "; in this project: " + truncate_utf8(r.substr(0, r.find('\n')), 120);
         if (o.value("reports_to", "") == a["id"].get<std::string>()) team += " (reports to you)";
         if (a.value("reports_to", "") == o["id"].get<std::string>()) team += " (your boss)";
         team += "\n";

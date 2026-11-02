@@ -105,7 +105,7 @@ private:
     void worker_loop(Lane& lane);
     std::deque<std::shared_ptr<JobState>>::iterator pick(Lane& lane);
     void execute(const std::shared_ptr<JobState>& js);
-    Outcome run_demo(const std::shared_ptr<JobState>& js, const AgentContext& ctx, const std::string& workdir);
+    Outcome run_demo(const std::shared_ptr<JobState>& js, const AgentContext& ctx, const std::string& workdir, const std::string& system_prompt);
     void route(const std::shared_ptr<JobState>& js, const Outcome& o);
     void handle_send(const std::shared_ptr<JobState>& js, const SendBlock& blk, const std::string& sender_name);
     bool has_pending_request(const std::string& sender, const std::string& target);

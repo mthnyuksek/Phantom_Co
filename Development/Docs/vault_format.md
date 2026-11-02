@@ -9,12 +9,14 @@ The Vault is a folder of plain files you can open with any editor (Obsidian styl
   Company/company.json          {name, goal}
   Users/<id>.md                 name, form, color, created        (profile only; role and password live in %LOCALAPPDATA%\PC2\auth.json)
   Agents/<id>.md                name, role, reports_to, provider, model, form, color, enabled, timeout_min, skill: <id> (repeat), created; body = persona
-  Skills/<id>.md                name, description, tools: Read, Glob, ..., dirs: Projects, min_role: editor|owner, enabled; body = how to use it
+  Skills/<id>.md                name, description, tools: Read, Glob, ..., dirs: Projects, min_role: editor|owner, enabled, projects: a, b (empty = everywhere; else only in those projects); body = how to use it
   Rules/<id>.md                 name, enabled; body = the rule (added to every agent's prompt)
   Projects/<id>/                the project's work folder; agents run here
     .Pc2/project.md             name, created; body = summary        (hidden folder)
     .Pc2/Notes/<id>.md          name, enabled; body = the note       (shared memory)
-  Tasks/<id>.md                 name, agent, project, created_by, created, updated, conversation; body = description
+    .Pc2/Roles/<agent id>.md    name; body = that agent's job in this project (added to its prompt only here)
+  Tasks/<id>.md                 name, agent, project, created_by, created, updated, conversation, wake, wake_every, wake_at, wake_on, wake_last; body = description
+  Task_Templates/<id>.md        name, agent (may be empty), project, created_by, created, wake, wake_every, wake_at; body = task details
   Conversations/<id>.jsonl      one JSON object per line (see below)
   Runs/<id>.md                  kind, task, agent, user, provider, model, conversation, status, created, started, ended, exit_code, tokens_in, tokens_out, cost, error; body = result
   Runs/<id>.jsonl               event log of the run (message, tool_use, tool_result, thinking, error, done)

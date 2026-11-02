@@ -99,7 +99,7 @@ def main():
         owner, ece, vera, anon = Client(), Client(), Client(), Client()
 
         # ---------------------------------------------------------- first start
-        for p in ["vault.json", "README.md", "Company/company.json", "Agents", "Skills", "Rules", "Projects", "Tasks", "Conversations", "Runs", "Shared_Files"]:
+        for p in ["vault.json", "README.md", "Company/company.json", "Agents", "Skills", "Rules", "Projects", "Tasks", "Task_Templates", "Conversations", "Runs", "Shared_Files"]:
             check("vault has " + p, os.path.exists(os.path.join(vault, p)))
         skills = sorted(os.listdir(os.path.join(vault, "Skills")))
         check("default skills installed", "read_files.md" in skills and "agent_management.md" in skills and "shell_commands.md" not in skills, skills)
@@ -258,6 +258,37 @@ def main():
         check("viewer cannot add notes", vera.post("/api/projects/moon_base/notes", {"name": "x"})[0] == 403)
         check("editor cannot delete project", ece.delete("/api/projects/moon_base")[0] == 403)
 
+        # ------------------------------------------- project skills and ghost jobs
+        def ask(client, agent, project, text):  # one demo chat, returns the agent's answer
+            st, ch = client.post("/api/chats", {"agent_id": agent, "project_id": project})
+            client.post(f"/api/chats/{ch['meta']['id']}/send", {"text": text})
+            client.wait_idle(ch["meta"]["id"])
+            msgs = client.get("/api/chats/" + ch["meta"]["id"])[1]["messages"]
+            return "\n".join(m["text"] for m in msgs if m["from"] == "agent:" + agent)
+        st, ms = owner.post("/api/skills", {"name": "Moon writing", "tools": ["Write"], "body": "Write the moon diary.", "projects": ["moon_base", "no_such_project"]})
+        check("project skill created, unknown project dropped", st == 201 and ms["projects"] == ["moon_base"], ms)
+        check("project skill file lists the project", "projects: moon_base" in open(os.path.join(vault, "Skills", "moon_writing.md"), encoding="utf-8").read())
+        st, scribe = owner.post("/api/agents", {"name": "Scribe", "role": "Writer", "provider": "demo", "skills": ["read_files", "moon_writing"]})
+        check("scribe hired", st == 201, scribe)
+        st, p2 = ece.put("/api/projects/moon_base/roles/scribe", {"text": "Writes the moon diary.\nOne page a day."})
+        check("ghost job set", st == 200 and p2["roles"].get("scribe", "").startswith("Writes the moon diary."), p2)
+        check("ghost job is a file", os.path.exists(os.path.join(vault, "Projects", "moon_base", ".Pc2", "Roles", "scribe.md")))
+        check("job for unknown ghost refused", ece.put("/api/projects/moon_base/roles/nobody", {"text": "x"})[0] == 404)
+        check("viewer cannot set ghost jobs", vera.put("/api/projects/moon_base/roles/scribe", {"text": "x"})[0] == 403)
+        before = len(os.listdir(os.path.join(vault, "Projects", "moon_base")))
+        ans = ask(ece, "scribe", "moon_base", "demo:write demo:prompt")
+        check("project skill works in its project", len(os.listdir(os.path.join(vault, "Projects", "moon_base"))) == before + 1, ans[:300])
+        check("prompt has the project skill", "### Moon writing" in ans, ans)
+        check("prompt has the ghost job", "## Your job in this project\nWrites the moon diary.\nOne page a day." in ans, ans)
+        shared_before = len(os.listdir(os.path.join(vault, "Shared_Files")))
+        ans = ask(ece, "scribe", "", "demo:write demo:prompt")
+        check("project skill left out elsewhere", len(os.listdir(os.path.join(vault, "Shared_Files"))) == shared_before and "Moon writing" not in ans, ans)
+        check("ghost job left out elsewhere", "Your job in this project" not in ans, ans)
+        ans = ask(ece, "casper", "moon_base", "demo:prompt")
+        check("colleagues see the first line of a job", "Scribe, Writer; in this project: Writes the moon diary.\n" in ans, ans)
+        check("ghost job removed", ece.put("/api/projects/moon_base/roles/scribe", {"text": " "})[1]["roles"] == {}
+              and not os.path.exists(os.path.join(vault, "Projects", "moon_base", ".Pc2", "Roles", "scribe.md")))
+
         # ---------------------------------------------------------------- tasks
         st, t = ece.post("/api/tasks", {"title": "Write a plan", "description": "Plan the first milestone. demo:write", "agent_id": "casper", "project_id": "moon_base"})
         check("task created", st == 201 and t["conversation_id"], t)
@@ -277,6 +308,25 @@ def main():
         ece.wait_idle(t["conversation_id"])
         check("rerun finished", len(ece.get("/api/tasks/" + t["id"])[1]["runs"]) == 2)
         check("only creator or owner delete task", vera.delete("/api/tasks/" + t["id"])[0] == 403)
+
+        # -------------------------------------------------------- task templates
+        st, tp = ece.post("/api/task_templates", {"name": "Moon report", "description": "Report the day.", "agent_id": "casper", "project_id": "moon_base", "wake": "daily", "at": "09:30"})
+        check("template created", st == 201 and tp["id"] == "moon_report" and tp["wake"] == "daily" and tp["wake_at"] == "09:30", tp)
+        check("template is a markdown file", os.path.exists(os.path.join(vault, "Task_Templates", "moon_report.md")))
+        check("template bad time refused", ece.post("/api/task_templates", {"name": "X", "wake": "daily", "at": "25:00"})[0] == 400)
+        check("template unknown ghost refused", ece.post("/api/task_templates", {"name": "X", "agent_id": "nobody"})[0] == 400)
+        check("viewer cannot make templates", vera.post("/api/task_templates", {"name": "X"})[0] == 403)
+        check("viewer can list templates", [x["id"] for x in vera.get("/api/task_templates")[1]["templates"]] == ["moon_report"])
+        st, otp = owner.post("/api/task_templates", {"name": "Owner only"})
+        check("only maker or owner edits a template", ece.put("/api/task_templates/" + otp["id"], {"name": "Mine"})[0] == 403
+              and owner.put("/api/task_templates/moon_report", {"name": "Moon report daily"})[1]["name"] == "Moon report daily")
+        st, tt = ece.post("/api/tasks", {"title": tp["name"], "description": tp["description"], "agent_id": "casper", "project_id": "moon_base",
+                                         "run": False, "wake": "daily", "every_min": 0, "at": "09:30"})
+        check("task from template keeps the wake-up", st == 201 and tt["wake"] == "daily" and tt["wake_at"] == "09:30" and tt["wake_on"], tt)
+        check("task with bad wake-up refused", ece.post("/api/tasks", {"title": "X", "agent_id": "casper", "run": False, "wake": "interval", "every_min": 0})[0] == 400)
+        ece.delete("/api/tasks/" + tt["id"])
+        check("template deleted", ece.delete("/api/task_templates/moon_report")[0] == 200 and owner.delete("/api/task_templates/" + otp["id"])[0] == 200
+              and ece.get("/api/task_templates")[1]["templates"] == [])
 
         # ----------------------------------------------------- skills and rules
         st, s = owner.post("/api/skills", {"name": "Shell stuff", "tools": ["Bash", "Read"], "body": "Be careful.", "min_role": "editor"})

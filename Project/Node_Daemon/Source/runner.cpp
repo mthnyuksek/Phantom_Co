@@ -359,7 +359,7 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     std::error_code ec;
     fs::create_directories(workdir, ec);
 
-    AgentContext ctx = resolve_agent(store_, *agent, job.user_role);
+    AgentContext ctx = resolve_agent(store_, *agent, job.user_role, project.is_object() ? job.project_id : "");
     PromptInput pin;
     pin.ctx = &ctx;
     pin.user_name = user.is_object() ? user.value("name", "") : "";
@@ -398,7 +398,7 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     if (spec.model.empty() && spec.provider == "claude") spec.model = store_.settings().value("default_model", "");  // a Claude model name
 
     if (spec.provider == "demo") {
-        o = run_demo(js, ctx, U8(workdir));
+        o = run_demo(js, ctx, U8(workdir), spec.system_prompt);
         finish(o);
         return;
     }
@@ -500,8 +500,8 @@ Runner::Outcome Runner::run_remote(const std::shared_ptr<JobState>& js, const Ru
 }
 
 // A scripted agent that needs no subscription: for trying the app and for tests.
-// Keywords in the message steer it: demo:send:<agent_id>, demo:write, demo:slow, demo:fail.
-Runner::Outcome Runner::run_demo(const std::shared_ptr<JobState>& js, const AgentContext& ctx, const std::string& workdir) {
+// Keywords in the message steer it: demo:send:<agent_id>, demo:write, demo:slow, demo:fail, demo:prompt (shows the system prompt).
+Runner::Outcome Runner::run_demo(const std::shared_ptr<JobState>& js, const AgentContext& ctx, const std::string& workdir, const std::string& system_prompt) {
     Outcome o;
     const Job& job = js->job;
     auto step = [&](json ev, int ms) {
@@ -531,6 +531,11 @@ Runner::Outcome Runner::run_demo(const std::shared_ptr<JobState>& js, const Agen
         if (!js->cancel) write_file_atomic(P(workdir) / P(file), "# Demo\n\nWritten by " + name + ".\n");
         step({{"kind", "tool_result"}, {"is_error", false}, {"text", "Wrote " + file}}, 200);
         text += " I saved " + file + ".";
+    }
+    if (p.find("demo:prompt") != std::string::npos && job.kind != "report") {
+        std::string shown = system_prompt;  // without '<', or the router would act on the <send> example inside it
+        for (char& ch : shown) if (ch == '<') ch = '[';
+        text += "\n[system prompt]\n" + shown;
     }
     size_t s = p.find("demo:send:");
     if (s != std::string::npos && job.kind != "report") {

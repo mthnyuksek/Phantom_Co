@@ -210,6 +210,10 @@ export const EXACT = {
   'An agent cannot report to itself, directly or through others.': 'Bir ajan doğrudan ya da başkaları üzerinden kendine bağlı olamaz.', 'The boss does not exist.': 'Bağlı olduğu kişi yok.',
   'Agent not found': 'Ajan bulunamadı', 'Chat not found': 'Sohbet bulunamadı', 'Project not found': 'Proje bulunamadı', 'Note not found': 'Not bulunamadı',
   'Rule not found': 'Kural bulunamadı', 'Run not found': 'Çalıştırma bulunamadı', 'Skill not found': 'Yetenek bulunamadı', 'Task not found': 'Görev bulunamadı',
+  'Ghost not found': 'Hayalet bulunamadı', 'Template not found': 'Şablon bulunamadı', 'Unknown ghost.': 'Bilinmeyen hayalet.',
+  'The template needs a name.': 'Şablonun bir adı olmalı.',
+  'Only the person who made this template can change it.': 'Bu şablonu yalnızca onu oluşturan kişi değiştirebilir.',
+  'Only the person who made this template can delete it.': 'Bu şablonu yalnızca onu oluşturan kişi silebilir.',
   'User not found': 'Kullanıcı bulunamadı', 'Template not found': 'Şablon bulunamadı', 'File not found': 'Dosya bulunamadı', 'Not found': 'Bulunamadı',
   'Unknown folder': 'Bilinmeyen klasör', 'Forbidden': 'Yasak', 'Forbidden host': 'Yasak sunucu adı',
   'Pick a ghost for this task.': 'Bu görev için bir hayalet seç.', 'Pick an agent to chat with.': 'Sohbet için bir ajan seç.', 'Write something first.': 'Önce bir şey yaz.',
@@ -263,6 +267,27 @@ export const EXACT = {
   'The task runs again by itself. It uses the rights of the person who made it and is skipped while it is still running. It only wakes while Phantom Co. is open.':
     'Görev kendi kendine yeniden çalışır. Görevi oluşturan kişinin yetkileriyle çalışır; hâlâ çalışıyorsa o seferlik atlanır. Yalnızca Phantom Co. açıkken uyanır.',
   '⏰ Wake-up: running this task again.': '⏰ Uyanış: görev yeniden çalıştırılıyor.',
+  // ---- project skills
+  'Only in these projects': 'Yalnızca bu projelerde',
+  'none ticked = everywhere; otherwise the ghost gets this skill only while it works in a ticked project':
+    'hiçbiri işaretli değilse her yerde; aksi halde hayalet bu yeteneği yalnızca işaretli bir projede çalışırken kullanır',
+  // ---- ghost jobs in a project
+  'Ghost jobs in this project': 'Bu projedeki hayalet görevleri', '+ Set a job': '+ Görev tanımla', 'Ghost': 'Hayalet',
+  'A ghost keeps its persona everywhere. The job written here is added to its instructions only while it works in this project, and its colleagues see the first line.':
+    'Hayaletin kişiliği her yerde aynı kalır. Burada yazılan görev, yalnızca bu projede çalışırken talimatlarına eklenir; iş arkadaşları ilk satırını görür.',
+  'No jobs yet. Every ghost works here with its usual role.': 'Henüz görev yok. Her hayalet burada her zamanki rolüyle çalışır.',
+  'Every ghost already has a job here.': 'Her hayaletin burada zaten bir görevi var.',
+  'Job in this project': 'Bu projedeki görevi', 'the first line is shown to colleagues': 'ilk satır iş arkadaşlarına gösterilir',
+  'e.g. Writes the scripts of the videos. Hands finished scripts to the editor.': 'örn. Videoların senaryolarını yazar. Biten senaryoları kurgucuya verir.',
+  // ---- task templates
+  'Task templates': 'Görev şablonları', 'New task template': 'Yeni görev şablonu', 'Edit template': 'Şablonu düzenle',
+  'A template is a task you start again and again: pick it in "New task" and only change what is different.':
+    'Şablon, tekrar tekrar başlattığın bir görevdir: "Yeni görev"de seç ve yalnızca farklı olanı değiştir.',
+  'e.g. Polar video': 'örn. Kutup videosu', 'The steps and what the result should look like.': 'Adımlar ve sonucun nasıl görünmesi gerektiği.',
+  'Pick when using it': 'Kullanırken seç', 'Template deleted': 'Şablon silindi', 'Template saved': 'Şablon kaydedildi',
+  'Ready-made tasks. Use one to open "New task" filled in.': 'Hazır görevler. Birini kullanınca "Yeni görev" dolu açılır.',
+  'Any ghost': 'Herhangi bir hayalet', 'Use': 'Kullan', 'No templates yet.': 'Henüz şablon yok.', '+ New template': '+ Yeni şablon',
+  'Start from a template': 'Şablondan başla', 'No template': 'Şablon yok', 'Save as template': 'Şablon olarak kaydet',
 };
 
 export const PATTERNS = [
@@ -273,6 +298,7 @@ export const PATTERNS = [
   ['⏰ Wakes every {#} min', '⏰ Her {0} dakikada bir uyanır'], ['⏰ ⏸ Wakes every {#} min', '⏰ ⏸ Her {0} dakikada bir uyanır (duraklatıldı)'],
   ['⏰ Wakes every day at {}', '⏰ Her gün {0} saatinde uyanır'], ['⏰ ⏸ Wakes every day at {}', '⏰ ⏸ Her gün {0} saatinde uyanır (duraklatıldı)'],
   ['⚠ Wake-up skipped: {}', '⚠ Uyanış atlandı: {0}'],
+  ['Ghost job in {}', '{0} projesindeki hayalet görevi'],
   // time
   ['{#} min ago', '{0} dk önce'], ['{#} h ago', '{0} sa önce'], ['{#} d ago', '{0} gün önce'], ['just now', 'az önce'],
   ['{#} min {#} s', '{0} dk {1} sn'], ['{#} s', '{0} sn'],

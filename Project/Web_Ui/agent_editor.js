@@ -1,6 +1,6 @@
 import { api } from './api.js';
 import { ghostSVG } from './ghosts.js';
-import { S, FORMS, PALETTE, skillById, agentById, brainOptions } from './state.js';
+import { S, FORMS, PALETTE, skillById, skillScopeBadge, agentById, brainOptions } from './state.js';
 import { $, esc, guard, modal, closeModal, toast, twoStep } from './ui.js';
 import { ghostPickerHTML, bindGhostPicker } from './pickers.js';
 
@@ -42,7 +42,7 @@ export function openAgentModal(agent, tpl) {
         <div class="two"><div><label>Reports to</label><select id="f-boss"><option value="">Nobody (top of the company)</option>${bosses.map((b) => `<option value="${esc(b.id)}">${esc(b.name)} — ${esc(b.role)}</option>`).join('')}</select></div>
           <div><label>Time limit per run (minutes)</label><input type="number" id="f-timeout" min="1" max="240"></div></div>
         <label>Skills <span class="hint-inline">what this ghost may do - agents act with the rights of the person asking</span></label>
-        <div class="skill-list" id="f-skills">${st.skills.map((s) => `<label class="check" title="${esc(s.description)}"><input type="checkbox" value="${esc(s.id)}"> ${esc(s.name)}${s.min_role === 'owner' ? ' <span class="badge">owner</span>' : ''}${s.enabled ? '' : ' <span class="badge">off</span>'}</label>`).join('') || '<span class="hint">No skills yet. The owner can add some in Skills.</span>'}</div>
+        <div class="skill-list" id="f-skills">${st.skills.map((s) => `<label class="check" title="${esc(s.description)}"><input type="checkbox" value="${esc(s.id)}"> ${esc(s.name)}${s.min_role === 'owner' ? ' <span class="badge">owner</span>' : ''}${s.enabled ? '' : ' <span class="badge">off</span>'}${skillScopeBadge(s)}</label>`).join('') || '<span class="hint">No skills yet. The owner can add some in Skills.</span>'}</div>
         <label>Personality &amp; instructions</label><textarea id="f-persona" maxlength="8000" placeholder="How should this ghost think, talk and work? Keep it short: it is paid on every run."></textarea>
         <label class="check"><input type="checkbox" id="f-enabled"> Switched on</label>
       </div></div>

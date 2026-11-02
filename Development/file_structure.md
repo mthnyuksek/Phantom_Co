@@ -72,7 +72,7 @@ Project (We keep the project source files here. When we hand the project to some
         app_info.md, read_files.md, write_files.md, shell_commands.md, web_research.md, project_notes.md, agent_management.md, rule_editing.md
     Vault_Template (Starting files of the Vault. Embedded into the program; the program creates the Vault from it on first run.)
         Company (Holds company.json.)
-        Users, Agents, Skills, Rules, Projects, Tasks, Conversations, Runs, Shared_Files (Empty folders that exist in every Vault.)
+        Users, Agents, Skills, Rules, Projects, Tasks, Task_Templates, Conversations, Runs, Shared_Files (Empty folders that exist in every Vault.)
         README.md (Explains the Vault to people who open it.)
     Protocol (Reserved for the messages between Phantom Co. programs, see roadmap item 1. Empty.)
 CLAUDE.md
