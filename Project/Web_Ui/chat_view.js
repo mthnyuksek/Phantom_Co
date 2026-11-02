@@ -42,7 +42,7 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
 
   function apply(d) {
     data = d;
-    const s = JSON.stringify([d.messages.length, d.busy, d.live, d.meta.title, d.can_write, d.meta.shared]);
+    const s = JSON.stringify([d.messages.length, d.busy, d.live, d.meta.title, d.can_write, d.meta.shared, (S.state?.users || []).map((u) => u.online)]);
     onData?.(d);
     if (s === sig) return;
     sig = s;

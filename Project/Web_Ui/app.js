@@ -203,8 +203,14 @@ async function startApp() {
   running = true;
   paintShell();
   await route();
+  let hiddenTicks = 0;
   timer = setInterval(guard(async () => {
-    if (document.hidden || !running) return;
+    if (!running) return;
+    if (document.hidden) {  // still say "I am here" every 30 s: a minimized window is not asleep
+      if (++hiddenTicks % 15 === 0) await api('GET', '/api/auth/status');
+      return;
+    }
+    hiddenTicks = 0;
     const changed = await refreshState();
     if (changed) paintShell();
     await current?.tick?.(changed);

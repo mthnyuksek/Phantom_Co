@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { S, me, isOwner, userGhost } from '../state.js';
-import { $, esc, guard, modal, closeModal, twoStep, toast, copyText, ROLE_TEXT } from '../ui.js';
+import { $, esc, guard, modal, closeModal, twoStep, toast, copyText, ago, ROLE_TEXT } from '../ui.js';
 
 let view, users = [];
 const ROLE_INFO = { owner: 'Everything, including people, skills, settings and commands.', editor: 'Chats with ghosts, creates tasks and projects, hires ghosts.', viewer: 'Looks around, reads shared chats and tasks. Cannot change anything.' };
@@ -42,20 +42,32 @@ function addModal() {
   });
 }
 
+const presence = (u) => u.online ? '<div class="presence on">Online</div>'
+  : `<div class="presence">${u.last_seen ? `<span>Asleep · last seen</span> <span>${esc(ago(u.last_seen))}</span>` : 'Asleep'}</div>`;
+
 const load = async () => { users = isOwner() ? (await api('GET', '/api/users')).users : S.state.users; };
 
 function draw() {
   view.innerHTML = `<div class="page-head"><div><h1>Team</h1><p>The people who work in this ghost company. Ghosts act with the rights of the person who asks them.</p></div><div class="spacer"></div>
     ${isOwner() ? '<button class="btn primary" data-act="add">+ Add a person</button>' : ''}</div>
-    <div class="grid">${users.map((u) => `<div class="gcard" style="--gc:${esc(u.color)}"><div class="stage"><div class="shadow"></div>${userGhost(u, 96)}</div>
+    <div class="grid">${users.map((u) => `<div class="gcard ${u.online ? '' : 'asleep'}" style="--gc:${esc(u.color)}"><div class="stage"><div class="shadow"></div>${userGhost(u, 96)}</div>
       <div class="gname">${esc(u.name)}${u.id === me().id ? ' <span class="badge">you</span>' : ''}</div>
       <div class="grole">${esc(ROLE_TEXT[u.role] || u.role)}</div>
+      ${presence(u)}
       ${isOwner() ? `<div class="gstatus">${u.has_password ? 'Signed up' : '⏳ Invitation not used yet'}</div>
         <div class="gactions"><select data-role="${esc(u.id)}" style="width:auto">${Object.keys(ROLE_TEXT).map((r) => `<option value="${r}" ${r === u.role ? 'selected' : ''}>${ROLE_TEXT[r]}</option>`).join('')}</select>
         <button class="btn small" data-act="invite" data-id="${esc(u.id)}" title="New invitation link (also resets a forgotten password)">Link</button>
         ${u.id === me().id ? '' : `<button class="btn small danger" data-act="del" data-id="${esc(u.id)}">Remove</button>`}</div>` : '<div class="gstatus"></div>'}</div>`).join('')}</div>
     <div class="card" style="margin-top:26px"><h3>Roles</h3>${Object.keys(ROLE_INFO).map((r) => `<p><b>${ROLE_TEXT[r]}</b> — ${esc(ROLE_INFO[r])}</p>`).join('')}
       <p class="hint">Chats are private to the person who started them unless shared. The owner can see everything in the Vault.</p></div>`;
+}
+
+// redraw when someone comes online or goes to sleep (not while a role menu is open)
+export async function tick(changed) {
+  if (!changed || view.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;
+  const before = JSON.stringify(users.map((u) => [u.id, u.online, u.last_seen]));
+  await load();
+  if (JSON.stringify(users.map((u) => [u.id, u.online, u.last_seen])) !== before) draw();
 }
 
 export async function render(v) {

@@ -62,7 +62,7 @@ Project (We keep the project source files here. When we hand the project to some
         i18n.js, i18n_tr.js (Interface language: translates the screen text into Turkish with a dictionary; see project_summary.md.)
         app.js (Shell: sign-in/setup/join screens, sidebar, router, profile.)
         api.js, ui.js, state.js (Bridge to the server, helpers, shared state.)
-        ghosts.js (SVG ghosts: 11 forms, 5 moods.)
+        ghosts.js (SVG ghosts: 11 forms, 6 moods incl. asleep for offline people.)
         pickers.js (Form and colour picker.)
         agent_editor.js (Hire / edit a ghost.)
         chat_view.js (Conversation component used by chats and tasks.)

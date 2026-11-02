@@ -13,6 +13,7 @@
 #include <functional>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <regex>
 #include <set>
 
@@ -109,6 +110,32 @@ struct Ctx {
     json profile;
 };
 
+// ---------------------------------------------------------------- presence
+// Who has a window open: every signed-in request marks its user as seen. Open pages poll every few
+// seconds (a hidden page still pings every 30 s), so a user not seen for kOnlineSeconds is "asleep".
+// In memory only (static: survives the listener restart of the sharing switch).
+constexpr std::time_t kOnlineSeconds = 75;
+struct Seen { std::time_t at = 0; std::string iso; };
+static std::mutex g_seen_mu;
+static std::map<std::string, Seen> g_seen;
+static void mark_seen(const std::string& id) {
+    std::lock_guard<std::mutex> l(g_seen_mu);
+    g_seen[id] = {std::time(nullptr), now_iso()};
+}
+static void forget_seen(const std::string& id) {
+    std::lock_guard<std::mutex> l(g_seen_mu);
+    auto it = g_seen.find(id);
+    if (it != g_seen.end()) it->second.at = 0;  // offline now, keep the "last seen" time
+}
+// {online, last_seen}: last_seen (ISO) only while offline, so polling does not change the snapshot.
+static std::pair<bool, std::string> presence_of(const std::string& id) {
+    std::lock_guard<std::mutex> l(g_seen_mu);
+    auto it = g_seen.find(id);
+    if (it == g_seen.end()) return {false, ""};
+    if (it->second.at && std::time(nullptr) - it->second.at <= kOnlineSeconds) return {true, ""};
+    return {false, it->second.iso};
+}
+
 void stop_server() { if (g_server) g_server->stop(); }
 
 int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& opt, bool& restart) {
@@ -140,11 +167,16 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         c.role = auth.role(id);
         c.name = u->value("name", id);
         c.profile = *u;
+        mark_seen(id);
         return c;
     };
     auto public_user = [&](const json& u) {
-        return json{{"id", u["id"]}, {"name", u.value("name", "")}, {"form", u.value("form", "classic")},
-                    {"color", u.value("color", "#9ff0d4")}, {"role", auth.role(u["id"].get<std::string>())}};
+        std::string id = u["id"].get<std::string>();
+        auto [online, last_seen] = presence_of(id);
+        json p{{"id", u["id"]}, {"name", u.value("name", "")}, {"form", u.value("form", "classic")},
+               {"color", u.value("color", "#9ff0d4")}, {"role", auth.role(id)}, {"online", online}};
+        if (!last_seen.empty()) p["last_seen"] = last_seen;
+        return p;
     };
     auto set_cookie = [&](httplib::Response& res, const std::string& tok, int max_age) {
         res.set_header("Set-Cookie", cookie_name + tok + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + std::to_string(max_age));
@@ -276,7 +308,8 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         start_session(res, uid);
     });
 
-    add("POST", "/api/auth/logout", kPublic, [&](auto& req, auto& res, Ctx&) {
+    add("POST", "/api/auth/logout", kPublic, [&](auto& req, auto& res, Ctx& c) {
+        if (c.ok) forget_seen(c.id);
         std::string cookie = req.get_header_value("Cookie");
         size_t p = cookie.find(cookie_name);
         if (p != std::string::npos) auth.end_session(cookie.substr(p + cookie_name.size(), 48));

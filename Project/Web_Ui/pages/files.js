@@ -3,6 +3,12 @@ import { S, isOwner, canEdit } from '../state.js';
 import { $, esc, guard, toast, twoStep, modal, closeModal } from '../ui.js';
 
 let view, scope = 'shared', folder = '';  // folder: where uploads go ('' = top of the scope)
+// Folders start closed; a left click opens/closes one, a right click (long press on a phone) picks it as the
+// place for uploads and new folders. Remembered per scope while the program runs.
+const opened = new Map();  // scope -> Set of open folder paths
+const openSet = () => { if (!opened.has(scope)) opened.set(scope, new Set()); return opened.get(scope); };
+const parents = (path) => { const parts = path.split('/'), out = []; for (let i = 1; i < parts.length; i++) out.push(parts.slice(0, i).join('/')); return out; };
+const openUpTo = (path) => { for (const p of [...parents(path), path]) if (p) openSet().add(p); };
 
 const q = () => '&scope=' + encodeURIComponent(scope);
 const size = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
@@ -11,11 +17,18 @@ async function load(ctx) {
   const r = await api('GET', '/api/files?scope=' + encodeURIComponent(scope));
   if (!ctx.isCurrent()) return;
   const list = r.files.sort((a, b) => a.path.localeCompare(b.path));
-  $('#tree', view).innerHTML = list.length ? list.map((f) => {
-    const depth = f.path.split('/').length - 1, name = f.path.split('/').pop();
-    return `<div class="f ${f.dir ? 'd' : ''} ${f.dir && f.path === folder ? 'on' : ''}" style="padding-left:${12 + depth * 16}px" data-act="${f.dir ? 'pick-folder' : 'view'}" data-path="${esc(f.path)}">${f.dir ? '📁' : '📄'} ${esc(name)}${f.dir ? '' : ` <span style="color:var(--muted);font-size:11px">${size(f.size)}</span>`}</div>`;
+  if (folder && !list.some((f) => f.dir && f.path === folder)) folder = '';  // the picked folder is gone
+  const open = openSet(), count = {};
+  for (const f of list) { const up = parents(f.path).pop(); if (up) count[up] = (count[up] || 0) + 1; }
+  const shown = list.filter((f) => parents(f.path).every((p) => open.has(p)));
+  $('#tree', view).innerHTML = list.length ? shown.map((f) => {
+    const depth = f.path.split('/').length - 1, name = f.path.split('/').pop(), isOpen = open.has(f.path);
+    if (f.dir) return `<div class="f d ${f.path === folder ? 'dest' : ''}" style="padding-left:${12 + depth * 16}px" data-act="toggle" data-path="${esc(f.path)}" title="Click: open or close · Right click: put new files here"><span class="caret">${isOpen ? '▾' : '▸'}</span> ${isOpen ? '📂' : '📁'} ${esc(name)} <span class="fmeta">${count[f.path] || 0}</span>${f.path === folder ? ' <span class="badge">⬆ here</span>' : ''}</div>`;
+    return `<div class="f" style="padding-left:${12 + depth * 16 + 16}px" data-act="view" data-path="${esc(f.path)}">📄 ${esc(name)} <span class="fmeta">${size(f.size)}</span></div>`;
   }).join('') : '<div class="empty">Nothing here yet.<br>Ghosts save their work here, and you can upload files.</div>';
   $('#dest', view).textContent = folder ? folder + '/' : 'the top level';
+  const reset = $('#dest-reset', view);
+  if (reset) reset.hidden = !folder;
 }
 
 const askReplace = (name) => new Promise((resolve) => {
@@ -32,6 +45,7 @@ async function sendFiles(files, ctx) {
     try {
       await upload('/api/files/upload?path=' + encodeURIComponent(path) + q(), f);
       toast('Uploaded ' + f.name);
+      if (folder) openUpTo(folder);
     } catch (e) {
       if (/already exists/.test(e.message)) {
         if (await askReplace(f.name)) { await upload('/api/files/upload?overwrite=1&path=' + encodeURIComponent(path) + q(), f); toast('Replaced ' + f.name); }
@@ -51,7 +65,7 @@ export async function render(v, arg, ctx) {
     <button class="btn" data-act="refresh">Refresh</button>
     ${editor ? '<button class="btn primary" data-act="upload">⬆ Upload</button><button class="btn" data-act="mkdir">New folder</button>' : ''}
     ${isOwner() ? '<button class="btn" data-act="vault">Open Vault in Explorer</button>' : ''}<input type="file" id="pick" multiple hidden></div>
-    ${editor ? '<p style="color:var(--muted);margin:0 0 8px">Uploads go to <b id="dest">the top level</b> (click a folder to change it).</p>' : '<span id="dest" hidden></span>'}
+    ${editor ? '<p style="color:var(--muted);margin:0 0 8px">New files and folders go to <b id="dest">the top level</b> <button class="btn small" data-act="dest-top" id="dest-reset" hidden>× Top level</button> (right click a folder to change it, click a folder to open or close it).</p>' : '<span id="dest" hidden></span>'}
     <div class="files" id="drop"><div class="tree" id="tree"></div><div class="viewer" id="viewer"><span style="color:var(--muted)">Pick a file to preview it.</span></div></div>`;
   await guard(() => load(ctx))();
 
@@ -76,6 +90,7 @@ export async function render(v, arg, ctx) {
           const name = m.querySelector('#m-name').value.trim();
           if (!name) return;
           await api('POST', '/api/files/mkdir', { scope, path: (folder ? folder + '/' : '') + name });
+          if (folder) openUpTo(folder);
           closeModal();
           await load(ctx);
         });
@@ -83,7 +98,8 @@ export async function render(v, arg, ctx) {
         m.querySelector('#m-name').onkeydown = (e) => { if (e.key === 'Enter') go(); };
       });
     }
-    if (act === 'pick-folder') { folder = folder === el.dataset.path ? '' : el.dataset.path; return load(ctx); }
+    if (act === 'toggle') { const s = openSet(), path = el.dataset.path; if (s.has(path)) s.delete(path); else s.add(path); return load(ctx); }
+    if (act === 'dest-top') { folder = ''; return load(ctx); }
     if (act === 'delete') {
       return twoStep(el, 'Really?', async () => {
         await api('DELETE', '/api/files?path=' + encodeURIComponent(el.dataset.path) + q());
@@ -101,6 +117,15 @@ export async function render(v, arg, ctx) {
       const r = await api('GET', '/api/files/read?path=' + encodeURIComponent(p) + q());
       v2.innerHTML = bar + (r.binary ? '<span style="color:var(--muted)">Binary file — download it to open it.</span>' : `<pre>${esc(r.text)}</pre>${r.truncated ? '<p style="color:var(--muted)">… truncated</p>' : ''}`);
     }
+  });
+  // right click on a folder: new files and folders go there (again: back to the top level)
+  view.oncontextmenu = guard(async (e) => {
+    const el = e.target.closest('.tree [data-act="toggle"]');
+    if (!el || !editor) return;
+    e.preventDefault();
+    folder = folder === el.dataset.path ? '' : el.dataset.path;
+    if (folder) openUpTo(folder);
+    await load(ctx);
   });
   view.onchange = (e) => { if (e.target.id === 'scope') location.hash = '#/files/' + encodeURIComponent(e.target.value); };
 }

@@ -95,6 +95,14 @@ main#view { overflow: auto; padding: 28px 34px 60px; }
 .poof { animation: poof .55s ease-in-out; }
 .mini .ghost, .tiny .ghost { animation: none; filter: none; }
 .mini .ghost .eyes, .tiny .ghost .eyes { animation: none; }
+/* a person whose window is closed: asleep, faded (presence from the server) */
+.ghost.g-asleep, .mini .ghost.g-asleep, .tiny .ghost.g-asleep { animation-duration: 6s; opacity: .55; filter: grayscale(.6); }
+.mini .ghost.g-asleep, .tiny .ghost.g-asleep { animation: none; }
+.gcard.asleep .gname { opacity: .7; }
+.presence { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.presence::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #6b6585; }
+.presence.on { color: var(--accent2); }
+.presence.on::before { background: #5ee6a8; box-shadow: 0 0 6px #5ee6a8; }
 
 @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
 @keyframes shadow { 0%, 100% { transform: scaleX(1); opacity: .45; } 50% { transform: scaleX(.78); opacity: .28; } }
@@ -181,7 +189,11 @@ label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px
 .tree .f { padding: 4px 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
 .tree .f:hover { background: #1c1730; }
 .tree .f.on { background: #2a2050; }
-.tree .f.d { color: var(--muted); cursor: default; }
+.tree .f.d { color: var(--muted); user-select: none; -webkit-touch-callout: none; }
+.tree .f.d.dest { background: #2a2050; color: var(--text, #fff); }
+.tree .f .caret { display: inline-block; width: 12px; color: var(--muted); }
+.tree .f .fmeta { color: var(--muted); font-size: 11px; }
+.tree .f .badge { margin-top: 0; }
 .viewer { padding: 14px 18px; }
 .viewer pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.55 var(--mono); }
 .viewer img { max-width: 100%; border-radius: 8px; }

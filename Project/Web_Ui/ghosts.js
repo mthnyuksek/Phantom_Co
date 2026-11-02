@@ -140,7 +140,7 @@ function eyesFor(mood, style) {
   const fill = style && style.fill ? style.fill : INK;
   const pupil = style && style.pupil;
   const L = 47, R = 73, Y = 66;
-  if (mood === 'queued')
+  if (mood === 'queued' || mood === 'asleep')
     return `<path d="M41 ${Y + 2} Q${L} ${Y + 7} 53 ${Y + 2} M67 ${Y + 2} Q${R} ${Y + 7} 79 ${Y + 2}" stroke="${INK}" stroke-width="3" fill="none" stroke-linecap="round"/>`;
   if (mood === 'done')
     return `<path d="M41 ${Y + 3} Q${L} ${Y - 6} 53 ${Y + 3} M67 ${Y + 3} Q${R} ${Y - 6} 79 ${Y + 3}" stroke="${INK}" stroke-width="3.2" fill="none" stroke-linecap="round"/>`;
@@ -158,7 +158,7 @@ function eyesFor(mood, style) {
 function mouthFor(mood) {
   if (mood === 'working' || mood === 'done') return `<path d="M52 85 Q60 94 68 85" stroke="${INK}" stroke-width="3" fill="none" stroke-linecap="round"/>`;
   if (mood === 'failed') return `<path d="M52 91 Q56 85 60 90 Q64 95 68 89" stroke="${INK}" stroke-width="3" fill="none" stroke-linecap="round"/>`;
-  if (mood === 'queued') return `<ellipse cx="60" cy="88" rx="3" ry="2.4" fill="${INK}" opacity=".8"/>`;
+  if (mood === 'queued' || mood === 'asleep') return `<ellipse cx="60" cy="88" rx="3" ry="2.4" fill="${INK}" opacity=".8"/>`;
   return `<ellipse cx="60" cy="87" rx="4" ry="5" fill="${INK}"/>`;
 }
 
@@ -166,7 +166,7 @@ function moodExtras(mood) {
   if (mood === 'working')
     return `<g class="sparkle"><path d="M104 24 l2.5 -7 l2.5 7 l7 2.5 l-7 2.5 l-2.5 7 l-2.5 -7 l-7 -2.5z" fill="#ffe27a"/></g>
             <g class="sparkle s2"><path d="M12 40 l1.8 -5 l1.8 5 l5 1.8 l-5 1.8 l-1.8 5 l-1.8 -5 l-5 -1.8z" fill="#9ff0d4"/></g>`;
-  if (mood === 'queued')
+  if (mood === 'queued' || mood === 'asleep')
     return `<text x="98" y="22" font-size="16" font-weight="700" fill="#b8b2d6" class="zzz">z</text><text x="108" y="10" font-size="11" font-weight="700" fill="#b8b2d6" class="zzz z2">z</text>`;
   if (mood === 'failed') return `<g fill="#ff7a7a"><circle cx="100" cy="20" r="2.4"/><circle cx="108" cy="30" r="1.8"/></g>`;
   return '';

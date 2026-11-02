@@ -150,6 +150,16 @@ def main():
         check("viewer cannot create agents", vera.post("/api/agents", {"name": "Nope"})[0] == 403)
         check("viewer can read state", vera.get("/api/state")[0] == 200)
         check("last owner protected", owner.put("/api/users/meto_y", {"role": "editor"})[0] == 409)
+        # presence: a user with a recent request is online; signing out puts them to sleep at once
+        pres = lambda: {u["id"]: u for u in owner.get("/api/state")[1]["users"]}
+        check("signed-in users online", pres()["ece"]["online"] and pres()["meto_y"]["online"] and "last_seen" not in pres()["ece"], pres())
+        v2 = Client()
+        v2.post("/api/auth/login", {"name": "Vera", "password": "vera password 1"})
+        v2.post("/api/auth/logout")
+        p = pres()["vera"]
+        check("signed-out user asleep", p["online"] is False and p.get("last_seen", "").endswith("Z"), p)
+        vera.get("/api/state")
+        check("back online after a request", pres()["vera"]["online"], pres()["vera"])
 
         # --------------------------------------------------------------- agents
         st, casper = owner.post("/api/agents", {"name": "Casper", "role": "Planner", "provider": "demo", "form": "royal",

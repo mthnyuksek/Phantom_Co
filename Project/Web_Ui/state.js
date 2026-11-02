@@ -30,7 +30,8 @@ export const skillScopeBadge = (s) => s?.projects?.length
 
 export const agentGhost = (a, { mood, size = 110 } = {}) =>
   ghostSVG({ form: a?.form || 'classic', color: a?.color || '#8f89a8', mood: mood || (a?.activity?.state === 'working' ? 'working' : a?.activity?.state === 'queued' ? 'queued' : 'idle'), size });
-export const userGhost = (u, size = 34) => ghostSVG({ form: u?.form || 'classic', color: u?.color || '#9ff0d4', mood: 'idle', size });
+// a person sleeps while none of their windows is open (u.online from the server)
+export const userGhost = (u, size = 34) => ghostSVG({ form: u?.form || 'classic', color: u?.color || '#9ff0d4', mood: u && u.online === false ? 'asleep' : 'idle', size });
 
 // a person's or agent's small avatar by sender string ("user:id" / "agent:id")
 export function senderInfo(from) {
