@@ -2,14 +2,25 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0a14">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Phantom Co. · Ghost Company</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%91%BB%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
   <div id="app" hidden>
-    <aside class="side">
+    <header class="topbar">
+      <button class="icon-btn" id="menu-btn" aria-label="Menu" aria-expanded="false">☰</button>
+      <span class="brand-ghost" id="top-ghost"></span>
+      <b class="top-title" id="top-title"></b>
+      <button class="icon-btn mini" id="top-me" aria-label="Your profile"></button>
+    </header>
+    <div class="scrim" id="scrim"></div>
+    <aside class="side" id="side">
       <div class="brand"><span class="brand-ghost" id="brand-ghost"></span><div><b id="brand-name">Phantom Co.</b><small>ghost company</small></div></div>
       <nav id="nav"></nav>
       <div class="side-foot">

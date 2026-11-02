@@ -155,7 +155,18 @@ function paintShell() {
   const busyChats = s.jobs.length;
   $('#nav').innerHTML = NAV.filter((n) => !n.owner || m.role === 'owner')
     .map((n) => `<a href="#/${n.id}" data-page="${n.id}" class="${n.id === page ? 'on' : ''}"><i>${n.icon}</i> ${n.label}${n.id === 'runs' && busyChats ? `<span class="count">${busyChats}</span>` : ''}</a>`).join('');
+  // phone top bar: page name, small ghost, profile button
+  $('#top-ghost').innerHTML = ghostSVG({ form: 'classic', color: '#b69cff', size: 26 });
+  $('#top-title').textContent = (NAV.find((n) => n.id === page) || NAV[0]).label;
+  $('#top-me').innerHTML = userGhost(m, 30);
 }
+
+// phone: the sidebar is a drawer opened from the top bar
+const setMenu = (open) => { document.body.classList.toggle('nav-open', open); $('#menu-btn').setAttribute('aria-expanded', String(open)); };
+$('#menu-btn').onclick = () => setMenu(!document.body.classList.contains('nav-open'));
+$('#scrim').onclick = () => setMenu(false);
+$('#nav').addEventListener('click', (e) => { if (e.target.closest('a')) setMenu(false); });
+$('#top-me').onclick = () => openProfile();
 
 async function route() {
   if (!running) return;
@@ -179,7 +190,8 @@ async function route() {
   }
 }
 window.addEventListener('hashchange', () => {
-  if (running) { paintShell(); route(); }
+  setMenu(false);
+  if (running) { closeModal(); paintShell(); route(); }  // a phone's back button must not leave a dialog over the next page
   else if (/^#\/join\//.test(location.hash)) boot();  // an invitation link opened on a page that is already loaded (same address, only the # part differs: no reload)
 });
 
@@ -247,7 +259,7 @@ function bindLend(el) {
 }
 
 // ------------------------------------------------------------------- profile
-$('#me-chip').onclick = () => openProfile();
+$('#me-chip').onclick = () => { setMenu(false); openProfile(); };
 $('#home-btn').onclick = () => bridge?.postMessage({ cmd: 'home' });
 function openProfile() {
   const m = me();

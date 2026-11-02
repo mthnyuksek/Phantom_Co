@@ -8,6 +8,7 @@ export const EXACT = {
   'ghost company': 'hayalet şirketi',
   '← My own company': '← Kendi şirketim',
   'Your profile': 'Profilin',
+  'Menu': 'Menü', 'Back to chats': 'Sohbetlere dön',
   'The Haunt': 'Hayalet Evi', 'Chats': 'Sohbetler', 'Projects': 'Projeler', 'Tasks': 'Görevler', 'Skills': 'Yetenekler',
   'Rules': 'Kurallar', 'Runs': 'Çalıştırmalar', 'Files': 'Dosyalar', 'Team': 'Ekip', 'Settings': 'Ayarlar',
   'Found on this PC': 'Bu bilgisayarda bulundu', 'Not found on this PC': 'Bu bilgisayarda bulunamadı',

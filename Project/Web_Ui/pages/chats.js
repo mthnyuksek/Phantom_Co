@@ -41,13 +41,14 @@ function paintHeader(d) {
   const el = $('#chat-head', view);
   if (!el || !d) return;
   const m = d.meta, own = m.user_id === me().id || me().role === 'owner';
+  const back = '<a class="btn small back-btn" href="#/chats" aria-label="Back to chats">←</a>';  // shown on phones only
   if (m.kind === 'agents') {
     const [x, y] = (m.participants || []).map(agentById);
-    el.innerHTML = `<div><h2>${esc(m.title)}</h2><div class="meta">${esc(x?.name || '?')} ↔ ${esc(y?.name || '?')} · agents talking to each other${m.user_id ? ' for ' + esc(userById(m.user_id)?.name || 'someone') : ''}</div></div>`;
+    el.innerHTML = `${back}<div class="grow"><h2>${esc(m.title)}</h2><div class="meta">${esc(x?.name || '?')} ↔ ${esc(y?.name || '?')} · agents talking to each other${m.user_id ? ' for ' + esc(userById(m.user_id)?.name || 'someone') : ''}</div></div>`;
     return;
   }
   const a = agentById(m.agent_id), p = projectById(m.project_id), u = userById(m.user_id);
-  el.innerHTML = `<div class="mini" style="--gc:${esc(a?.color || '#888')}">${agentGhost(a, { mood: d.busy ? 'working' : 'idle', size: 44 })}</div>
+  el.innerHTML = `${back}<div class="mini" style="--gc:${esc(a?.color || '#888')}">${agentGhost(a, { mood: d.busy ? 'working' : 'idle', size: 44 })}</div>
     <div class="grow"><h2 id="ch-title" title="${own && canEdit() ? 'Click to rename' : ''}">${esc(m.title)}</h2>
       <div class="meta">${esc(a?.name || 'removed ghost')}${a ? ' · ' + esc(a.role) : ''}${u && u.id !== me().id ? ' · chat of ' + esc(u.name) : ''}</div></div>
     ${canEdit() && own ? `<select id="ch-project" title="Project"><option value="">No project</option>${S.state.projects.map((x) => `<option value="${esc(x.id)}" ${x.id === m.project_id ? 'selected' : ''}>📁 ${esc(x.name)}</option>`).join('')}</select>
@@ -61,6 +62,7 @@ async function open(id) {
   selected = id;
   paintList();
   const pane = $('#chat-pane', view);
+  $('.chats-layout', view)?.classList.toggle('has-chat', !!id);  // phones show either the list or the open chat
   if (!id) { pane.innerHTML = `<div class="empty big"><div class="mini">${userGhost(me(), 90)}</div><p>Pick a chat on the left or start a new one.</p></div>`; return; }
   pane.innerHTML = `<div class="chat-head" id="chat-head"></div><div id="chat-conv" class="chat-conv"></div>`;
   conv = conversationView($('#chat-conv', pane), id, { onData: (d) => { paintHeader(d); } });
