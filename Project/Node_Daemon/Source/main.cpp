@@ -107,6 +107,11 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             MessageBoxW(hwnd, L"Phantom Co. could not start its local server. Another copy of Phantom Co. may already be running, or the port is in use.\n\nTry the option --port <number>.", L"Phantom Co.", MB_OK | MB_ICONERROR);
             DestroyWindow(hwnd);
             return 0;
+        case WM_QUERYENDSESSION:
+            // Windows wants to shut down / restart / sign out while the company is open: say no, so Windows shows
+            // "Phantom Co. is preventing shutdown" with the reason below and a "Shut down anyway" button.
+            // A critical shutdown (power failure, forced update) cannot be stopped.
+            return (lp & ENDSESSION_CRITICAL) ? TRUE : FALSE;
         case WM_CLOSE:
             DestroyWindow(hwnd);
             return 0;
@@ -233,12 +238,18 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
             } else {
                 ShowWindow(hwnd, SW_SHOW);
                 UpdateWindow(hwnd);
+                // While the window is open the PC stays awake (ghosts work, friends connect). The screen may still
+                // turn off. This only stops sleep when the PC is idle: Start > Sleep, the power button or closing
+                // a laptop lid still put it to sleep (Windows power settings decide those).
+                SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
+                ShutdownBlockReasonCreate(hwnd, L"Phantom Co. is open: your ghosts and friends use this PC. Close Phantom Co. first, or shut down anyway.");
                 MSG msg;
                 while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
                     TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 }
             }
+            SetThreadExecutionState(ES_CONTINUOUS);  // the window is gone: the PC may sleep again
             g_host = nullptr;
             g_worker.stop();
             stop_server();  // the window was closed: stop serving
