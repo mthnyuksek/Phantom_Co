@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { t } from '../i18n.js';
 import { S, skillById, skillScopeBadge, isOwner, canEdit } from '../state.js';
 import { $, esc, guard, modal, closeModal, twoStep, toast } from '../ui.js';
 
@@ -59,7 +60,7 @@ export async function render(v, arg) {
     const act = el.dataset.act;
     if (act === 'tpl') return templateModal();
     if (act === 'new') {
-      const s = await api('POST', '/api/skills', { name: 'New skill', description: 'What this skill is for', tools: ['Read'], body: 'Explain how to use it.' });
+      const s = await api('POST', '/api/skills', { name: t('New skill'), description: t('What this skill is for'), tools: ['Read'], body: t('Explain how to use it.') });
       location.hash = '#/skills/' + s.id; window.dispatchEvent(new Event('pc2:changed'));
     } else if (act === 'save') {
       const tools = [...view.querySelectorAll('[data-tool]:checked')].map((x) => x.dataset.tool), dirs = [...view.querySelectorAll('[data-dir]:checked')].map((x) => x.dataset.dir);

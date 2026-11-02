@@ -52,6 +52,8 @@ export const t = (en) => translate(en);
 
 // ---- the screen
 const SKIP = 'script,style,textarea,input,pre,code,.bubble,.think,[data-no-i18n]';
+const SKIP_ALL = 'script,style,pre,code,.bubble,.think,[data-no-i18n]';  // not even the attributes
+const FIELDS = 'textarea,input';  // what people typed is left alone, but their placeholder/title is translated
 const ATTRS = ['placeholder', 'title', 'aria-label', 'alt'];
 
 function node(n) {
@@ -60,8 +62,9 @@ function node(n) {
     const v = translate(n.nodeValue);
     if (v !== n.nodeValue) n.nodeValue = v;
   } else if (n.nodeType === 1) {
-    if (n.matches(SKIP) || n.closest(SKIP)) return;
+    if (n.closest(SKIP_ALL)) return;
     for (const a of ATTRS) if (n.hasAttribute(a)) { const v = translate(n.getAttribute(a)); if (v !== n.getAttribute(a)) n.setAttribute(a, v); }
+    if (n.matches(FIELDS)) return;
     for (const c of n.childNodes) node(c);
   }
 }
@@ -89,9 +92,9 @@ window.__untranslated = () => {
     if (n.nodeType === 3) {
       const s = n.nodeValue.trim();
       if (s && /[A-Za-z]{3}/.test(s) && !n.parentElement.closest(SKIP) && !done.has(s) && translate(s) === s) seen.add(s);
-    } else if (n.nodeType === 1 && !n.matches(SKIP)) {
+    } else if (n.nodeType === 1 && !n.matches(SKIP_ALL)) {
       for (const a of ATTRS) { const v = n.getAttribute(a); if (v && /[A-Za-z]{3}/.test(v) && !done.has(v) && translate(v) === v) seen.add('[' + a + '] ' + v); }
-      n.childNodes.forEach(walk);
+      if (!n.matches(FIELDS)) n.childNodes.forEach(walk);
     }
   };
   walk(document.body);

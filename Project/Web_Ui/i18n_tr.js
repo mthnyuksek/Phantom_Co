@@ -131,6 +131,10 @@ export const EXACT = {
   'Add a skill from a template': 'Şablondan yetenek ekle', 'Templates are ready-made skills. You can edit them afterwards.': 'Şablonlar hazır yeteneklerdir. Sonradan düzenleyebilirsin.',
   'Templates': 'Şablonlar', 'Skill added': 'Yetenek eklendi', 'Skill deleted': 'Yetenek silindi',
   'Pick one on the left, or add one from a template.': 'Soldan birini seç veya şablondan ekle.', 'Pick one on the left to read it.': 'Okumak için soldan birini seç.',
+  'read files': 'dosyaları okur', 'find files': 'dosya bulur', 'search in files': 'dosyalarda arar', 'create files': 'dosya oluşturur',
+  'change files': 'dosyaları değiştirir', 'run commands': 'komut çalıştırır', 'search the web': 'internette arar', 'read web pages': 'web sayfalarını okur',
+  'ghost definitions': 'hayalet tanımları', 'skills': 'yetenekler', 'company rules': 'şirket kuralları', 'projects and notes': 'projeler ve notlar',
+  'editor': 'editör', 'viewer': 'izleyici',
   'New skill': 'Yeni yetenek', 'What this skill is for': 'Bu yetenek ne işe yarar', 'Read': 'Oku', 'Explain how to use it.': 'Nasıl kullanılacağını anlat.',
 
   // ---- rules
@@ -353,7 +357,7 @@ export const PATTERNS = [
 
   ['{} ghost', '{0} hayalet'],
   ['{} · {} · for {}', '{0} · {1} · {2} için'], ['{} · {} · by {}', '{0} · {1} · {2} tarafından'],
-  ['{#} tokens', '{0} token'], ['— {}', '— {0}'], ['Tools: {}', 'Araçlar: {0}'],
+  ['🔤 {} tokens', '🔤 {0} token'], ['{#} tokens', '{0} token'], ['— {}', '— {0}'], ['Tools: {}', 'Araçlar: {0}'],
   ['{} · {}', '{0} · {1}'],
   ['{} file(s) were sent back to the company.', '{0} dosya şirkete geri gönderildi.'],
 ];

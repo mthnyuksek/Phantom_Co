@@ -18,6 +18,7 @@
   --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }  /* also beats display rules like .check's */
 html, body { margin: 0; height: 100%; }
 body {
   background: radial-gradient(1200px 700px at 70% -10%, #1d1536 0%, transparent 60%), var(--bg);
