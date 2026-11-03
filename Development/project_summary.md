@@ -8,7 +8,7 @@ It is a normal Windows program, **`phantom_co.exe`** (GUI subsystem, one static 
 C++20, CMake + Ninja + MinGW. Libraries (single headers in `Third_Party`): cpp-httplib 0.26, nlohmann/json 3.11. WebView2 SDK headers + loader DLL (from Burrow). Windows only.
 
 ## Build, run, test
-See `Docs/running.md`. Short: `cmake -S Project/Node_Daemon -B Project/Node_Daemon/Build -G Ninja -DCMAKE_BUILD_TYPE=Release`, `cmake --build ...`, `Build\phantom_co.exe`. Options: `--vault`, `--port`, `--share`, `--data`, `--no-window` (server only, used by tests), `--devtools`, `--ui-dir <Project\Web_Ui>` (read the UI from disk, no rebuild for UI edits).
+See `Docs/running.md`. `Build/phantom_co.exe` is committed on purpose (friends run it without building; it needs only system DLLs); the rest of `Build/` is ignored. Rebuild before committing it. Short: `cmake -S Project/Node_Daemon -B Project/Node_Daemon/Build -G Ninja -DCMAKE_BUILD_TYPE=Release`, `cmake --build ...`, `Build\phantom_co.exe`. Options: `--vault`, `--port`, `--share`, `--data`, `--no-window` (server only, used by tests), `--devtools`, `--ui-dir <Project\Web_Ui>` (read the UI from disk, no rebuild for UI edits).
 Test: `python -X utf8 -I Project/Node_Daemon/Tests/smoke_test.py <absolute path of phantom_co.exe> [--real claude|codex]` (about 150 checks; the demo keyword `demo:prompt` echoes the system prompt, isolated temp Vault and data folder, port 7791).
 UI testing in the real window: set env `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223 --remote-allow-origins=*`, then drive it with a CDP client (Node 24 has a global WebSocket).
 
