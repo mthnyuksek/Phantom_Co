@@ -63,6 +63,7 @@ Sessions: HttpOnly cookie `pc2_session_<port>` (the port is in the name because 
 - An invitation link to an address that is already open only changes the `#` part (no reload, `boot()` does not run again): `app.js` listens to `hashchange` for `#/join/` while signed out.
 - UI code must not find elements by their visible text (`textContent === '...'`): the Turkish interface translates it. Use ids / `data-*`.
 - Prompts go through stdin; Codex waits for stdin to close, so the pipe is always closed after writing.
+- The UI is embedded in the exe at build time: a `Web_Ui` edit saved after the last build is not in the exe (looks like "the feature does not work"). Rebuild as the last step, or check with `grep -c '<new text>' Build/phantom_co.exe`.
 - `windows.h` needs `WIN32_LEAN_AND_MEAN` + `<winsock2.h>` first when `<iphlpapi.h>` is used.
 
 ## Not done yet
