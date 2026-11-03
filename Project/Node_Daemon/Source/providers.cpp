@@ -73,7 +73,11 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
             return false;
         }
         // Codex has no system prompt option: the persona travels in front of the message.
-        out.stdin_data = rs.system_prompt + "\n\n---\n\n" + rs.prompt;
+        out.stdin_data = rs.system_prompt;
+        if (rs.can_write)
+            out.stdin_data += "\n\nImages you generate are copied into the Generated_Images folder of your working folder automatically when you"
+                              " finish. Do not copy or re-encode them yourself; just name that folder in your answer.";
+        out.stdin_data += "\n\n---\n\n" + rs.prompt;
         const std::string sandbox = rs.can_write ? "workspace-write" : "read-only";
         if (rs.session_id.empty()) {
             out.args = {"exec", "--json", "--skip-git-repo-check", "-s", sandbox, "-C", rs.workdir};
@@ -87,6 +91,31 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
     }
     error = "Unknown provider: " + rs.provider;
     return false;
+}
+
+std::vector<std::string> collect_codex_images(const std::string& session_id, fs::file_time_type since, const fs::path& workdir) {
+    std::vector<std::string> out;
+    if (session_id.empty() || session_id.find_first_not_of("abcdefABCDEF0123456789-") != std::string::npos) return out;
+    const std::string home = env(L"CODEX_HOME");
+    const fs::path dir = (home.empty() ? P(env(L"USERPROFILE")) / L".codex" : P(home)) / L"generated_images" / P(session_id);
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec)) return out;
+    for (auto it = fs::recursive_directory_iterator(dir, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (ec) break;
+        if (!it->is_regular_file(ec) || it->last_write_time(ec) < since) continue;
+        const fs::path dest = workdir / L"Generated_Images" / it->path().filename();
+        if (fs::exists(dest, ec)) continue;
+        fs::create_directories(dest.parent_path(), ec);
+        if (fs::copy_file(it->path(), dest, ec)) out.push_back("Generated_Images/" + U8(it->path().filename()));
+    }
+    return out;
+}
+
+std::string images_note(const std::vector<std::string>& images) {
+    if (images.empty()) return "";
+    std::string s = "\n\n(Images made in this run were saved in the work folder:";
+    for (auto& i : images) s += " " + i;
+    return s + ")";
 }
 
 // ------------------------------------------------------------------- parsing

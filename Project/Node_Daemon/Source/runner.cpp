@@ -394,6 +394,9 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
         spec.tools = keep;
         spec.add_dirs.clear();
         spec.can_write = std::find(keep.begin(), keep.end(), "Write") != keep.end() || std::find(keep.begin(), keep.end(), "Edit") != keep.end();
+        // Agents on this PC hand over host paths ("C:\Users\...\Projects\x\Assets"): point them at the friend's mirror instead.
+        const std::string host_dir = U8(workdir);
+        spec.prompt = replace_all(replace_all(spec.prompt, host_dir, "@@WORKDIR@@"), replace_all(host_dir, "\\", "/"), "@@WORKDIR@@");
     }
     if (spec.model.empty() && spec.provider == "claude") spec.model = store_.settings().value("default_model", "");  // a Claude model name
 
@@ -420,6 +423,7 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     std::string error;
     if (!build_command(spec, ps, error)) { o.status = "failed"; o.error = error; finish(o); return; }
 
+    const auto started_at = fs::file_time_type::clock::now() - std::chrono::seconds(2);
     Process proc;
     if (!proc.start(ps, error)) { o.status = "failed"; o.error = error; fs::remove(sysfile, ec); finish(o); return; }
     { std::lock_guard<std::mutex> lk(js->mu); js->proc = &proc; }
@@ -445,6 +449,8 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     fs::remove(sysfile, ec);
 
     o.text = parser.result_text;
+    if (spec.provider == "codex" && spec.can_write && !js->cancel)
+        o.text += images_note(collect_codex_images(parser.session_id, started_at, workdir));
     o.session_id = parser.session_id;
     o.tokens_in = parser.tokens_in;
     o.tokens_out = parser.tokens_out;

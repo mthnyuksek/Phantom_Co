@@ -33,11 +33,6 @@ static std::string pct(const std::string& s) {
     return o;
 }
 
-static std::string replace_all(std::string s, const std::string& from, const std::string& to) {
-    for (size_t p = 0; (p = s.find(from, p)) != std::string::npos; p += to.size()) s.replace(p, from.size(), to);
-    return s;
-}
-
 bool WorkerClient::start(const std::string& base_url, const std::string& token, std::string& error) {
     stop();
     bool ok = (base_url.rfind("http://", 0) == 0 || base_url.rfind("https://", 0) == 0) && base_url.size() < 300 && base_url.find_first_of(" \t\r\n\"<>") == std::string::npos;
@@ -238,6 +233,7 @@ void WorkerClient::run_job(const json& job) {
     LineParser parser(provider);
     int exit_code = 0;
     bool timed_out = false;
+    const auto started_at = fs::file_time_type::clock::now() - std::chrono::seconds(2);
     if (!build_command(spec, ps, error)) {
         result["error"] = error;
     } else {
@@ -270,6 +266,8 @@ void WorkerClient::run_job(const json& job) {
     int sent = 0;
     if (!cancel && !stopping_ && error.empty()) {
         push({{"kind", "status"}, {"text", "Sending the changed files back"}});
+        if (provider == "codex" && spec.can_write)  // Codex saves images outside the mirror: bring them in so they travel back
+            parser.result_text += images_note(collect_codex_images(parser.session_id, started_at, mirror_canon));
         for (auto it = fs::recursive_directory_iterator(mirror_canon, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
             if (ec) break;
             if (!it->is_regular_file(ec)) continue;

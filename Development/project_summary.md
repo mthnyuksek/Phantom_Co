@@ -64,6 +64,7 @@ Sessions: HttpOnly cookie `pc2_session_<port>` (the port is in the name because 
 - UI code must not find elements by their visible text (`textContent === '...'`): the Turkish interface translates it. Use ids / `data-*`.
 - Prompts go through stdin; Codex waits for stdin to close, so the pipe is always closed after writing.
 - The UI is embedded in the exe at build time: a `Web_Ui` edit saved after the last build is not in the exe (looks like "the feature does not work"). Rebuild as the last step, or check with `grep -c '<new text>' Build/phantom_co.exe`.
+- Codex's image tool saves into `%CODEX_HOME%\generated_images\<session id>\` (default `~\.codex`), outside the work folder, and the model cannot copy big files with a command (base64 in the command line -> error 206). After a writing Codex run, `collect_codex_images` (providers) copies that session's new images into `<work folder>\Generated_Images\` and adds a note to the answer; on a friend's PC this happens before the sync back. A host path in the prompt of a remote run is turned into `@@WORKDIR@@` (agents on this PC pass on their own absolute paths).
 - `windows.h` needs `WIN32_LEAN_AND_MEAN` + `<winsock2.h>` first when `<iphlpapi.h>` is used.
 
 ## Not done yet

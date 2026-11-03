@@ -117,6 +117,12 @@ bool valid_id(const std::string& s) {
     return true;
 }
 
+std::string replace_all(std::string s, const std::string& from, const std::string& to) {
+    if (from.empty()) return s;
+    for (size_t p = 0; (p = s.find(from, p)) != std::string::npos; p += to.size()) s.replace(p, from.size(), to);
+    return s;
+}
+
 std::string truncate_utf8(const std::string& s, size_t max_bytes) {
     if (s.size() <= max_bytes) return s;
     size_t n = max_bytes;

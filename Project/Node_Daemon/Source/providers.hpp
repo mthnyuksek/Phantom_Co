@@ -33,6 +33,11 @@ struct RunSpec {
 
 bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error);
 
+// Codex's image tool saves into %CODEX_HOME%\generated_images\<session>\, outside the work folder. Copies the images of
+// this session made since `since` into <workdir>\Generated_Images\ and returns their paths relative to the work folder.
+std::vector<std::string> collect_codex_images(const std::string& session_id, fs::file_time_type since, const fs::path& workdir);
+std::string images_note(const std::vector<std::string>& images);  // "" or a line to add to the answer
+
 // Turns the raw JSON lines of a CLI into the common event format:
 //   {kind: status|message|thinking|tool_use|tool_result|log|error, text, ...}
 class LineParser {
