@@ -14,6 +14,7 @@
 #include <set>
 #include <thread>
 
+#include "accounts.hpp"
 #include "auth.hpp"
 #include "runner.hpp"
 #include "server.hpp"
@@ -484,7 +485,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         bool vault_existed = fs::exists(cfg.vault, vault_ec);
         Store store(cfg.vault);
         Auth auth(cfg.file.parent_path() / L"auth.json");
+        Accounts accounts(cfg.file.parent_path());  // extra Claude/Codex sign-ins of this copy (Settings > Secrets)
         Runner runner(store);
+        runner.set_accounts(&accounts);
         g_cfg = &cfg;
         g_store = &store;
         g_runner = &runner;

@@ -16,6 +16,7 @@ struct ProviderInfo {
 
 std::vector<ProviderInfo> detect_providers();
 bool provider_known(const std::string& id);
+std::string provider_exe(const std::string& id);  // full path of the claude / codex CLI, "" when not found
 
 struct RunSpec {
     std::string provider;
@@ -29,13 +30,14 @@ struct RunSpec {
     std::string session_id;                // resume this session ("" = new)
     int max_turns = 40;
     bool can_write = false;                // maps to the Codex sandbox mode
+    std::vector<std::pair<std::string, std::string>> env;  // account of this run (CLAUDE_CONFIG_DIR / CODEX_HOME), empty = Auto
 };
 
 bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error);
 
-// Codex's image tool saves into %CODEX_HOME%\generated_images\<session>\, outside the work folder. Copies the images of
+// Codex's image tool saves into %CODEX_HOME% (`codex_home`, empty = the CODEX_HOME variable or ~\.codex)\generated_images\<session>\, outside the work folder. Copies the images of
 // this session made since `since` into <workdir>\Generated_Images\ and returns their paths relative to the work folder.
-std::vector<std::string> collect_codex_images(const std::string& session_id, fs::file_time_type since, const fs::path& workdir);
+std::vector<std::string> collect_codex_images(const std::string& session_id, fs::file_time_type since, const fs::path& workdir, const fs::path& codex_home = {});
 std::string images_note(const std::vector<std::string>& images);  // "" or a line to add to the answer
 
 // Turns the raw JSON lines of a CLI into the common event format:

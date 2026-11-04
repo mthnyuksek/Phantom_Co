@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { S, agentById, agentGhost, projectById, userById, canEdit, me, isOwner } from '../state.js';
+import { S, agentById, agentGhost, projectById, userById, canEdit, me, isOwner, providerLabel } from '../state.js';
 import { $, esc, guard, ago, sleep, pill, moodOfStatus, modal, closeModal, twoStep, duration, toast } from '../ui.js';
 import { conversationView } from '../chat_view.js';
 import { openRunModal } from './runs.js';
@@ -153,7 +153,7 @@ async function renderTask(id, ctx) {
     $('#runs', view).innerHTML = d.runs.length ? `<div class="table">${d.runs.slice().reverse().map((r) => {
       const ag = agentById(r.agent_id);
       return `<div class="row run-row" data-act="run" data-id="${esc(r.id)}"><div class="mini">${agentGhost(ag, { size: 34 })}</div>
-        <div><div class="title">${esc(r.kind)} · ${esc(ag?.name || r.agent_id)}</div><div class="meta">${esc(r.provider)} · ${esc(duration(r.started, r.ended))}</div></div>
+        <div><div class="title">${esc(r.kind)} · ${esc(ag?.name || r.agent_id)}</div><div class="meta">${esc(providerLabel(r.provider))} · ${esc(duration(r.started, r.ended))}</div></div>
         <div class="meta hide-s">${r.tokens_in || r.tokens_out ? (r.tokens_in + r.tokens_out).toLocaleString() + ' tokens' : ''}</div><div>${pill(r.status)}</div><div class="hide-s"></div></div>`;
     }).join('')}</div>` : '';
   };

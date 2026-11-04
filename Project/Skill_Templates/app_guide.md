@@ -22,7 +22,8 @@ Closing the window does not stop the company: it keeps running in the hidden ico
 - **Runs**: every run live, with Stop, tokens and cost.
 - **Files**: the shared files and project folders. Left click opens a folder, right click picks it as the place for uploads and new folders.
 - **Team**: people. "+ Add a person" creates an invitation link. Roles: owner (everything), editor (chat, tasks, projects, hire ghosts), viewer (read only).
-- **Settings** (owner): Company name and goal, Brains on this PC, Sharing with friends (local network), Internet access (a temporary Cloudflare link, the address changes every time), Limits, Vault folder.
+- **Settings** (owner): Company name and goal, Sharing with friends (local network), Internet access (a temporary Cloudflare link, the address changes every time), Limits, Vault folder, Secrets.
+- **Secrets** (in Settings): the Claude Code and Codex sign-ins. "Auto" is the sign-in the tool already has on this PC (nothing to set up). "Add account" adds another subscription account (e.g. a work account): pick Claude Code or Codex, give it a name, and a sign-in window opens (the tool's own sign-in in the browser). Then that account appears in a ghost's Brain list as "Claude Code · <name>". Each account has its own limits and runs next to the others. Removing an account puts its ghosts back on Auto. Sign-ins stay on this PC, never in the Vault. API keys and Gemini are not supported yet.
 - Profile (bottom left): name, look, language, and for friends "Lend my AI" (run the company's ghosts on their own Claude/Codex).
 
 ## Skills that come with the program

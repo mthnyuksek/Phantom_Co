@@ -50,10 +50,27 @@ static bool split_provider(const std::string& full, std::string& base, std::stri
     return true;
 }
 
+// "claude#<account id>" = Claude Code with another sign-in of this PC (Accounts). "" account = Auto.
+static std::string split_account(std::string full, std::string& base) {  // by value: callers pass base as full
+    size_t h = full.find('#');
+    base = h == std::string::npos ? full : full.substr(0, h);
+    return h == std::string::npos ? "" : full.substr(h + 1);
+}
+
 Runner::Lane* Runner::lane_for(const std::string& provider) {
     std::lock_guard<std::mutex> lk(lanes_mu_);
     auto it = lanes_.find(provider);
     if (it != lanes_.end()) return it->second.get();
+    if (provider.find('#') != std::string::npos) {  // an account: its own lane, so two sign-ins never wait for each other
+        std::string base, acc = split_account(provider, base);
+        auto a = accounts_ ? accounts_->get(acc) : std::nullopt;
+        if (stopping_ || !a || (*a)["provider"] != base) return nullptr;
+        auto lane = std::make_unique<Lane>();
+        Lane* raw = lane.get();
+        for (int i = 0; i < kWorkersPerLane; ++i) raw->workers.emplace_back([this, raw] { worker_loop(*raw); });
+        lanes_[provider] = std::move(lane);
+        return raw;
+    }
     std::string base, worker;
     if (stopping_ || !split_provider(provider, base, worker) || worker.empty() || (base != "claude" && base != "codex")) return nullptr;
     auto lane = std::make_unique<Lane>();
@@ -80,11 +97,13 @@ std::string Runner::enqueue_internal(Job job, std::string& error, bool user_star
     if (job.stack.empty()) { error = "Internal error: empty reply stack."; return ""; }
     const std::string provider = agent->value("provider", "claude");
     Lane* lane = lane_for(provider);
+    if (!lane && provider.find('#') != std::string::npos) { error = "The account this ghost used was removed. Pick another brain for it."; return ""; }
     if (!lane) { error = "Unknown provider: " + provider; return ""; }
 
     job.id = new_id();
     auto js = std::make_shared<JobState>();
     js->job = job;
+    js->brain = provider;
     {
         // The duplicate checks and the registration happen under one lock: two requests arriving at the same
         // moment (double click, manual run + wake-up) cannot both pass the check.
@@ -153,7 +172,22 @@ void Runner::worker_loop(Lane& lane) {
         try {
             execute(js);
         } catch (const std::exception& e) {
-            emit(*js, {{"kind", "error"}, {"text", std::string("Internal error: ") + e.what()}});
+            // Close the run like any failure, so the record does not stay "running" and the asker (person or agent) hears of it.
+            Outcome o;
+            o.status = "failed";
+            o.error = std::string("Internal error: ") + e.what();
+            emit(*js, {{"kind", "error"}, {"text", o.error}});
+            { std::lock_guard<std::mutex> lk(js->mu); js->status = "failed"; }
+            try {
+                if (auto rec = store_.run_get(js->job.id)) {
+                    (*rec)["status"] = "failed";
+                    (*rec)["ended"] = now_iso();
+                    (*rec)["error"] = o.error;
+                    store_.run_save(*rec);
+                }
+                emit(*js, {{"kind", "done"}, {"status", "failed"}, {"text", o.error}});
+                route(js, o);
+            } catch (const std::exception&) {}
         }
         js->finished = true;
         { std::lock_guard<std::mutex> lk(js->mu); if (js->events_file.is_open()) js->events_file.close(); }
@@ -277,6 +311,13 @@ std::string Runner::task_state(const std::string& conv) {
     return state;
 }
 
+bool Runner::brain_busy(const std::string& brain) {
+    std::lock_guard<std::mutex> lk(reg_mu_);
+    for (auto& [k, js] : registry_)
+        if (!js->finished && js->brain == brain) return true;
+    return false;
+}
+
 bool Runner::any_active() {
     std::lock_guard<std::mutex> lk(reg_mu_);
     for (auto& [id, js] : registry_) if (!js->finished) return true;
@@ -354,7 +395,8 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     if (!job.project_id.empty()) if (auto p = store_.project(job.project_id)) project = *p;
     fs::path workdir = project.is_object() ? store_.project_dir(job.project_id) : store_.files_root();
     std::string base_provider, worker;
-    const bool remote = split_provider(agent->value("provider", "claude"), base_provider, worker);
+    const bool remote = split_provider(js->brain, base_provider, worker);  // the lane it was queued on, even if the agent changed since
+    const std::string account = remote ? "" : split_account(base_provider, base_provider);
     const std::string scope = project.is_object() ? "project:" + job.project_id : "shared";
     std::error_code ec;
     fs::create_directories(workdir, ec);
@@ -379,13 +421,15 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     spec.add_dirs = ctx.add_dirs;
     spec.can_write = ctx.can_write();
     spec.max_turns = (job.kind == "chat" || job.kind == "task") ? 40 : 25;
-    // A session lives on the PC that ran it: remote ids are stored as "@<worker>:<id>".
+    // A session lives on the PC and in the sign-in that ran it: remote ids are stored as "@<worker>:<id>", account ids as
+    // "#<account>:<id>", Auto ids plain. Another brain starts a new session.
     if (conv && (*conv)["sessions"].contains(job.agent_id)) {
         std::string sid = (*conv)["sessions"][job.agent_id].get<std::string>();
-        const std::string prefix = "@" + worker + ":";
-        if (remote) spec.session_id = sid.rfind(prefix, 0) == 0 ? sid.substr(prefix.size()) : "";
-        else spec.session_id = !sid.empty() && sid[0] == '@' ? "" : sid;
+        const std::string prefix = remote ? "@" + worker + ":" : !account.empty() ? "#" + account + ":" : "";
+        if (!prefix.empty()) spec.session_id = sid.rfind(prefix, 0) == 0 ? sid.substr(prefix.size()) : "";
+        else spec.session_id = !sid.empty() && (sid[0] == '@' || sid[0] == '#') ? "" : sid;
     }
+    if (!account.empty() && accounts_) spec.env = accounts_->env(base_provider, account);
     if (remote) {
         // The owner of this company must not be able to run commands on a friend's PC: only file and web tools, no extra folders.
         static const std::set<std::string> allowed = {"Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"};
@@ -450,8 +494,8 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
 
     o.text = parser.result_text;
     if (spec.provider == "codex" && spec.can_write && !js->cancel)
-        o.text += images_note(collect_codex_images(parser.session_id, started_at, workdir));
-    o.session_id = parser.session_id;
+        o.text += images_note(collect_codex_images(parser.session_id, started_at, workdir, account.empty() || !accounts_ ? fs::path() : accounts_->home(account)));
+    o.session_id = parser.session_id.empty() || account.empty() ? parser.session_id : "#" + account + ":" + parser.session_id;
     o.tokens_in = parser.tokens_in;
     o.tokens_out = parser.tokens_out;
     o.cost = parser.cost_usd;
@@ -462,6 +506,9 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     else if (o.exit_code != 0 || parser.is_error) {
         o.status = "failed";
         o.error = parser.is_error && !parser.result_text.empty() ? parser.result_text : "The CLI exited with code " + std::to_string(o.exit_code) + ".";
+        const std::string& t = o.error;
+        if (!account.empty() && (t.find("/login") != std::string::npos || t.find("ot logged in") != std::string::npos || t.find("codex login") != std::string::npos))
+            o.error += " (This ghost uses another account: sign in to it in Settings > Secrets.)";
     }
     finish(o);
 }

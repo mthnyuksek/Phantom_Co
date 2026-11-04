@@ -13,7 +13,12 @@ struct ProcessSpec {
     std::vector<std::string> args;  // plain arguments (no shell metacharacters expected)
     std::string cwd;                // working directory (UTF-8)
     std::string stdin_data;         // written to stdin, then stdin is closed
+    // Changes to the inherited environment: {name, value}; an empty value removes the variable.
+    std::vector<std::pair<std::string, std::string>> env;
 };
+
+// The inherited environment with these changes, as a CreateProcessW(CREATE_UNICODE_ENVIRONMENT) block ("" = no change).
+std::wstring environment_block(const std::vector<std::pair<std::string, std::string>>& changes);
 
 // A child process with merged stdout+stderr, owned by a Job Object so that
 // kill() (or closing the Node) also terminates every grandchild.

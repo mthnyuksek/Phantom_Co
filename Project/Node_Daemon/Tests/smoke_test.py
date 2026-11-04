@@ -161,8 +161,37 @@ def main():
         vera.get("/api/state")
         check("back online after a request", pres()["vera"]["online"], pres()["vera"])
 
+        # ------------------------------------------------- accounts (Settings > Secrets)
+        check("no accounts at first", owner.get("/api/state")[1]["accounts"] == [])
+        check("editor cannot add accounts", ece.post("/api/accounts", {"provider": "claude", "name": "Work"})[0] == 403)
+        check("unknown account provider refused", owner.post("/api/accounts", {"provider": "demo", "name": "X"})[0] == 400)
+        st, acct = owner.post("/api/accounts", {"provider": "claude", "name": "Work"})
+        check("account added", st == 201 and acct["id"].startswith("acct_") and acct["provider"] == "claude", acct)
+        check("account folder outside the vault", os.path.isdir(os.path.join(data, "Accounts", acct["id"])) and os.path.exists(os.path.join(data, "accounts.json")))
+        check("editor sees account names", [a["name"] for a in ece.get("/api/state")[1]["accounts"]] == ["Work"])
+        check("account renamed", owner.put("/api/accounts/" + acct["id"], {"name": "Job"})[1].get("name") == "Job")
+        brain = "claude#" + acct["id"]
+        st, ab = owner.post("/api/agents", {"name": "Acct Bot", "provider": brain})
+        check("agent with an account", st == 201 and ab["provider"] == brain, ab)
+        check("unknown account refused", owner.post("/api/agents", {"name": "Z", "provider": "claude#acct_nope"})[0] == 400)
+        check("account of another provider refused", owner.post("/api/agents", {"name": "Z", "provider": "codex#" + acct["id"]})[0] == 400)
+        check("demo with an account refused", owner.post("/api/agents", {"name": "Z", "provider": "demo#" + acct["id"]})[0] == 400)
+        check("editor cannot read sign-in states", ece.get("/api/accounts/status")[0] == 403)
+        st, ss = owner.get("/api/accounts/status")
+        mine = [a for a in ss.get("accounts", []) if a["id"] == acct["id"]]
+        check("sign-in states listed", st == 200 and len(ss["auto"]) == 2 and mine and mine[0]["agents"] == ["Acct Bot"], ss)
+        if mine and mine[0]["status"].get("error") != "not_installed":
+            check("new account is not signed in (own folder)", mine[0]["status"]["signed_in"] is False, mine[0]["status"])
+        check("sign-in only at this PC", owner.post("/api/accounts/login", {"id": acct["id"]}, headers={"X-Forwarded-For": "1.2.3.4"})[0] == 403)
+        st, r = owner.delete("/api/accounts/" + acct["id"])
+        check("account removed, its ghosts back to Auto", st == 200 and r["moved"] == ["Acct Bot"] and owner.get("/api/state")[1]["accounts"] == [], r)
+        ab_after = [a for a in owner.get("/api/state")[1]["agents"] if a["id"] == ab["id"]]
+        check("ghost uses Auto", ab_after and ab_after[0]["provider"] == "claude", ab_after)
+        check("account folder deleted", not os.path.exists(os.path.join(data, "Accounts", acct["id"])))
+        owner.delete("/api/agents/" + ab["id"])
+
         # --------------------------------------------------------------- agents
-        st, casper = owner.post("/api/agents", {"name": "Casper", "role": "Planner", "provider": "demo", "form": "royal",
+        st, casper =owner.post("/api/agents", {"name": "Casper", "role": "Planner", "provider": "demo", "form": "royal",
                                                 "skills": ["read_files", "write_files", "nonexistent"], "persona": "Be brief."})
         check("agent created", st == 201 and casper["id"] == "casper" and casper["skills"] == ["read_files", "write_files"], casper)
         text = open(os.path.join(vault, "Agents", "casper.md"), encoding="utf-8").read()

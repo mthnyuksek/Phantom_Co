@@ -9,6 +9,7 @@
 #include <set>
 #include <thread>
 
+#include "accounts.hpp"
 #include "process.hpp"
 #include "prompt.hpp"
 #include "providers.hpp"
@@ -51,6 +52,7 @@ struct JobState {
     std::vector<json> events;
     std::ofstream events_file;
     std::deque<std::string> activity;  // last short lines, for the live view
+    std::string brain;  // the agent's provider when queued: "claude", "claude#<account>", "claude@<friend>" (= its lane)
     std::atomic<bool> cancel{false};
     std::atomic<bool> finished{false};
     Process* proc = nullptr;
@@ -78,6 +80,9 @@ public:
     bool any_active();
     void shutdown();
     WorkerHub& hub() { return hub_; }  // friends' PCs that lend their Claude/Codex
+    void set_accounts(Accounts* a) { accounts_ = a; }  // extra sign-ins of this PC ("claude#<id>")
+    Accounts* accounts() { return accounts_; }
+    bool brain_busy(const std::string& brain);  // a queued or running job uses this provider string
 
 private:
     struct Lane {
@@ -100,7 +105,7 @@ private:
 
     std::string enqueue_internal(Job job, std::string& error, bool user_started);
     std::shared_ptr<JobState> find(const std::string& run_id);
-    Lane* lane_for(const std::string& provider);  // creates the lane of a remote provider ("claude@<user>") on demand
+    Lane* lane_for(const std::string& provider);  // creates the lane of a remote provider ("claude@<user>") or an account ("claude#<id>") on demand
     Outcome run_remote(const std::shared_ptr<JobState>& js, const RunSpec& spec, const std::string& worker, const std::string& scope, int timeout_min);
     void worker_loop(Lane& lane);
     std::deque<std::shared_ptr<JobState>>::iterator pick(Lane& lane);
@@ -118,6 +123,7 @@ private:
     std::mutex lanes_mu_;
     std::map<std::string, std::unique_ptr<Lane>> lanes_;
     WorkerHub hub_;
+    Accounts* accounts_ = nullptr;
     std::atomic<bool> stopping_{false};
 };
 

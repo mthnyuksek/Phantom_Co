@@ -46,17 +46,30 @@ export function senderInfo(from) {
   return { kind: 'system', name: '' };
 }
 
+// Brains: "claude" (Auto: the CLI's own sign-in), "claude#<account id>" (another sign-in, Settings > Secrets),
+// "claude@<user id>" (a friend's PC lends its CLI).
+export const accountById = (id) => S.state?.accounts?.find((a) => a.id === id);
 export const providerLabel = (id) => {
-  const [base, who] = String(id).split('@');
+  const [rest, who] = String(id).split('@');
+  const [base, acc] = rest.split('#');
   const label = S.state?.providers.find((p) => p.id === base)?.label.split(' ')[0] || base;
+  if (acc) return `${label} · ${accountById(acc)?.name || '?'}`;
   if (!who) return label;
   const w = S.state?.workers?.find((x) => x.user_id === who);
   return `${label} @ ${w?.name || userById(who)?.name || who}`;
 };
 
-// Every brain an agent can use: this PC's CLIs and the CLIs of friends who currently lend theirs.
+// Every brain an agent can use: this PC's CLIs (Auto + extra accounts) and the CLIs of friends who currently lend theirs.
+// Without extra accounts the list looks exactly as before ("Claude Code", "Codex", "Demo").
 export function brainOptions(current) {
-  const out = (S.state?.providers || []).map((p) => ({ id: p.id, label: p.label, available: p.available, note: p.available ? '' : ' — not installed on this PC' }));
+  const out = [];
+  const accounts = S.state?.accounts || [];
+  for (const p of S.state?.providers || []) {
+    const mine = accounts.filter((a) => a.provider === p.id);
+    const note = p.available ? '' : ' — not installed on this PC';
+    out.push({ id: p.id, label: mine.length ? `${p.label} · Auto (this PC's sign-in)` : p.label, available: p.available, note });
+    for (const a of mine) out.push({ id: `${p.id}#${a.id}`, label: `${p.label} · ${a.name}`, available: p.available, note });
+  }
   for (const w of S.state?.workers || [])
     for (const id of ['claude', 'codex']) {
       const on = w.online && w.providers.includes(id);

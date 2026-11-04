@@ -1,6 +1,7 @@
 #include "process.hpp"
 
 #include <algorithm>
+#include <map>
 
 #include "util.hpp"
 
@@ -32,6 +33,29 @@ static bool is_script(const std::wstring& exe) {
     std::wstring l = exe;
     for (auto& c : l) c = (wchar_t)towlower(c);
     return l.ends_with(L".cmd") || l.ends_with(L".bat");
+}
+
+std::wstring environment_block(const std::vector<std::pair<std::string, std::string>>& changes) {
+    if (changes.empty()) return L"";
+    auto upper = [](std::wstring s) { for (auto& c : s) c = (wchar_t)towupper(c); return s; };
+    std::map<std::wstring, std::wstring> vars;  // UPPER name -> "Name=value"
+    if (wchar_t* all = GetEnvironmentStringsW()) {
+        for (const wchar_t* p = all; *p; p += wcslen(p) + 1) {
+            std::wstring kv = p;
+            size_t eq = kv.find(L'=', 1);  // "=C:=C:\..." entries start with '='
+            if (eq != std::wstring::npos) vars[upper(kv.substr(0, eq))] = kv;
+        }
+        FreeEnvironmentStringsW(all);
+    }
+    for (auto& [name, value] : changes) {
+        std::wstring n = Widen(name);
+        if (value.empty()) vars.erase(upper(n));
+        else vars[upper(n)] = n + L"=" + Widen(value);
+    }
+    std::wstring block;
+    for (auto& [k, kv] : vars) { block += kv; block.push_back(L'\0'); }
+    block.push_back(L'\0');
+    return block;
 }
 
 Process::~Process() {
@@ -78,8 +102,9 @@ bool Process::start(const ProcessSpec& spec, std::string& error) {
         SetInformationJobObject(job_, JobObjectExtendedLimitInformation, &info, sizeof(info));
     }
 
+    std::wstring env = environment_block(spec.env);
     BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE,
-                             CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, nullptr,
+                             CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, env.empty() ? nullptr : env.data(),
                              cwd.empty() ? nullptr : cwd.c_str(), &si, &pi);
     CloseHandle(out_w);
     CloseHandle(in_r);

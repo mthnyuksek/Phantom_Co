@@ -1,8 +1,9 @@
 import { api } from '../api.js';
-import { S, isOwner } from '../state.js';
-import { $, esc, guard, toast, copyText } from '../ui.js';
+import { S, isOwner, refreshState } from '../state.js';
+import { $, esc, guard, toast, copyText, twoStep } from '../ui.js';
 
 let view, net = null, tun = null, tunTimer = null;
+let acc = null, accTimer = null, accUntil = 0;  // sign-in states (Secrets), polled for a while after a sign-in window opened
 
 function draw() {
   const s = S.state, c = s.company, set = s.settings;
@@ -29,9 +30,50 @@ function draw() {
     <div class="card"><h3>Vault folder</h3>
       <p class="hint" style="margin-top:0">Everything lives here as plain files: people, ghosts, skills, rules, projects, chats, runs. Pointing to a new empty folder creates a fresh Vault there (old files are not moved).</p>
       <div class="inline"><input type="text" id="s-vault" value="${esc(s.vault_path)}"><button class="btn" data-act="save-vault">Use this folder</button><button class="btn" data-act="open-vault">Open</button></div></div>
-    <div class="card"><h3>Brains on this PC</h3>
-      ${s.providers.map((p) => `<div style="display:flex;gap:10px;align-items:center;padding:4px 0"><span class="chip ${p.available ? 'ok' : ''}">${p.available ? 'Ready' : 'Not found'}</span> ${esc(p.label)}</div>`).join('')}
-      <p class="hint">Claude and Codex are used through their own command-line tools, signed in on this PC.</p></div>`;
+    <div class="card" id="s-secrets"><h3>Secrets</h3>
+      <p class="hint" style="margin-top:0">The Claude Code and Codex sign-ins your ghosts can use. <b>Auto</b> is the sign-in the command-line tool already has on this PC. Add more accounts to give ghosts another subscription, then pick one as a ghost's brain. Sign-ins stay in this PC's settings folder, never in the Vault.</p>
+      <div id="s-acc-list">${secretsHTML()}</div>
+      <div class="inline acc-add"><select id="s-acc-prov"><option value="claude">Claude Code</option><option value="codex">Codex</option></select><input type="text" id="s-acc-name" maxlength="40" placeholder="Account name, e.g. Work"><button class="btn" data-act="acc-add">Add account</button></div></div>`;
+}
+
+const PROV = { claude: 'Claude Code', codex: 'Codex' };
+function statusHTML(st, available) {
+  if (available === false || st?.error === 'not_installed') return '<span class="chip">Not installed</span>';
+  if (!st) return '<span class="chip">Checking…</span>';
+  if (!st.signed_in) return '<span class="chip">Not signed in</span>';
+  return `<span class="chip ok">Signed in</span>${st.email ? ` <span class="acc-email">${esc(st.email)}</span>` : ''}${st.plan ? ` <span class="badge">${esc(st.plan)}</span>` : ''}`;
+}
+function usedHTML(names) {
+  return names?.length ? `<div class="meta"><span>Used by:</span> ${names.map(esc).join(', ')}</div>` : '';
+}
+function secretsHTML() {
+  const autos = acc ? acc.auto : S.state.providers.filter((p) => p.id !== 'demo').map((p) => ({ provider: p.id, label: p.label, available: p.available }));
+  const list = acc ? acc.accounts : (S.state.accounts || []);
+  const rows = autos.map((a) => `<div class="acc-row"><div class="acc-main"><div><b>${esc(PROV[a.provider] || a.label)} · Auto</b></div>
+      <div class="acc-state">${statusHTML(a.status, a.available)}</div>${usedHTML(a.agents)}</div>
+      <div class="acc-btns">${a.available && a.status && !a.status.signed_in ? `<button class="btn small" data-act="acc-login" data-provider="${esc(a.provider)}">Sign in</button>` : ''}</div></div>`);
+  for (const a of list)
+    rows.push(`<div class="acc-row"><div class="acc-main"><div class="acc-title"><b>${esc(PROV[a.provider])} ·</b> <input type="text" class="acc-name" data-id="${esc(a.id)}" maxlength="40" value="${esc(a.name)}" title="Rename"></div>
+      <div class="acc-state">${statusHTML(a.status)}</div>${usedHTML(a.agents)}</div>
+      <div class="acc-btns"><button class="btn small" data-act="acc-login" data-id="${esc(a.id)}">${a.status?.signed_in ? 'Sign in again' : 'Sign in'}</button>
+      <button class="btn small danger" data-act="acc-del" data-id="${esc(a.id)}">Remove</button></div></div>`);
+  return rows.join('');
+}
+async function loadAccounts() {
+  clearTimeout(accTimer);
+  const r = await api('GET', '/api/accounts/status').catch(() => null);
+  if (!view || !view.isConnected || !$('#s-acc-list', view)) return;  // left the page
+  if (r) acc = r;
+  const box = $('#s-acc-list', view);
+  if (!box.contains(document.activeElement)) box.innerHTML = secretsHTML();  // do not disturb somebody renaming
+  if (Date.now() < accUntil) accTimer = setTimeout(loadAccounts, 5000);
+}
+async function openLogin(body) {
+  await api('POST', '/api/accounts/login', body);
+  toast('A sign-in window opened. Sign in there, then come back here.');
+  accUntil = Date.now() + 180000;
+  clearTimeout(accTimer);
+  accTimer = setTimeout(loadAccounts, 5000);
 }
 
 function tunnelHTML() {
@@ -59,7 +101,9 @@ export async function render(v) {
   if (!isOwner()) { view.innerHTML = '<div class="empty">Only the owner can change settings.</div>'; return; }
   net = await api('GET', '/api/network').catch(() => null);
   tun = await api('GET', '/api/tunnel').catch(() => null);
+  acc = null;
   draw();
+  loadAccounts();
   if (tun && (tun.state === 'installing' || tun.state === 'starting')) tunTimer = setTimeout(pollTunnel, 1000);
   view.onclick = guard(async (e) => {
     const el = e.target.closest('[data-act]');
@@ -75,8 +119,37 @@ export async function render(v) {
     else if (act === 'tun-start') { await api('POST', '/api/tunnel', { action: 'start' }); await pollTunnel(); }
     else if (act === 'tun-stop') { await api('POST', '/api/tunnel', { action: 'stop' }); await pollTunnel(); }
     else if (act === 'tun-copy') copyText(tun.url);
+    else if (act === 'acc-add') {
+      const name = $('#s-acc-name', view).value.trim();
+      if (!name) return toast('Please enter a name.');
+      const a = await api('POST', '/api/accounts', { provider: $('#s-acc-prov', view).value, name });
+      $('#s-acc-name', view).value = '';
+      await refreshState();
+      $('#s-acc-list', view).innerHTML = secretsHTML();
+      await openLogin({ id: a.id });
+    } else if (act === 'acc-login') await openLogin(el.dataset.id ? { id: el.dataset.id } : { provider: el.dataset.provider });
+    else if (act === 'acc-del') {
+      const a = acc?.accounts.find((x) => x.id === el.dataset.id);
+      const list = a?.agents?.length ? `<b>These ghosts go back to Auto:</b><br>${a.agents.map(esc).join('<br>')}` : '';
+      await twoStep(el, 'Really remove?', async () => {
+        const r = await api('DELETE', '/api/accounts/' + el.dataset.id);
+        toast(r.moved.length ? 'Account removed. Its ghosts use Auto now.' : 'Account removed');
+        await refreshState();
+        acc = null;
+        $('#s-acc-list', view).innerHTML = secretsHTML();
+        loadAccounts();
+      }, list);
+    }
   });
   view.onchange = guard(async (e) => {
+    if (e.target.classList.contains('acc-name')) {
+      const name = e.target.value.trim();
+      if (!name) return;
+      await api('PUT', '/api/accounts/' + e.target.dataset.id, { name });
+      await refreshState();
+      toast('Saved');
+      return;
+    }
     if (e.target.id !== 's-share') return;
     net = await api('PUT', '/api/network', { share: e.target.checked });
     toast(e.target.checked ? 'Sharing is on' : 'Sharing is off');

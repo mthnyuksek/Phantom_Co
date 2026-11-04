@@ -344,7 +344,24 @@ main#view:has(> .chats-layout) { padding: 0; overflow: hidden; }
   .chats-layout { grid-template-columns: 280px minmax(0, 1fr); }
 }
 
+/* Settings > Secrets: one row per sign-in */
+.acc-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.acc-row:last-child { border-bottom: 0; }
+.acc-main { min-width: 0; flex: 1; }
+.acc-title { display: flex; align-items: center; gap: 6px; }
+.acc-title .acc-name { width: auto; flex: 1; max-width: 240px; padding: 3px 8px; margin: 0; }
+.acc-state { margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.acc-state .chip, .acc-state .badge { margin: 0; }
+.acc-email { font-size: 12px; overflow-wrap: anywhere; }
+.acc-btns { display: flex; gap: 6px; flex-shrink: 0; }
+.acc-add { margin-top: 12px; }
+.acc-add select { width: auto; }
+.acc-add .btn { white-space: nowrap; }
+
 @media (max-width: 720px) {
+  .acc-row { flex-direction: column; align-items: stretch; }
+  .acc-add { flex-wrap: wrap; }
+  .acc-add input { flex: 1 1 100%; }
   /* shell: top bar + drawer instead of the fixed sidebar */
   #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .topbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; padding-top: calc(8px + env(safe-area-inset-top)); padding-left: calc(12px + env(safe-area-inset-left)); padding-right: calc(12px + env(safe-area-inset-right)); background: var(--bg2); border-bottom: 1px solid var(--line); position: relative; z-index: 20; min-width: 0; }

@@ -24,7 +24,7 @@ function card({ a, depth }) {
   const mood = act?.state === 'working' ? 'working' : act?.state === 'queued' ? 'queued' : 'idle';
   const boss = agentById(a.reports_to);
   const status = !a.enabled ? '⏸ Switched off' : act ? (act.state === 'working' ? '⚡ Working…' : '💤 Waiting in line') : 'Idle — ready for work';
-  const prov = S.state.providers.find((p) => p.id === a.provider);
+  const prov = S.state.providers.find((p) => p.id === a.provider.split('#')[0]);
   return `<div class="gcard ${mood === 'working' ? 'working' : ''} ${a.enabled ? '' : 'off'}" style="--gc:${esc(a.color)}" data-card="${esc(a.id)}">
     <div class="stage"><div class="shadow"></div>${agentGhost(a, { mood, size: 112 })}</div>
     <div class="gname">${esc(a.name)}</div><div class="grole">${esc(a.role)}</div>

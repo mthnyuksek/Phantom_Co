@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { S, agentById, agentGhost, userById, canEdit, me } from '../state.js';
+import { S, agentById, agentGhost, userById, canEdit, me, providerLabel } from '../state.js';
 import { $, esc, guard, ago, sleep, pill, modal, duration, renderEvent, toast } from '../ui.js';
 
 let view, runs = [];
@@ -9,7 +9,7 @@ export async function openRunModal(id) {
   const a = agentById(r.agent_id), u = userById(r.user_id);
   let alive = true;
   modal(`<h2>Run · ${esc(a?.name || r.agent_id)} ${pill(r.status)}</h2>
-    <p class="sub">${esc(r.kind)} · ${esc(r.provider)}${r.model ? ' · ' + esc(r.model) : ''}${u ? ' · for ' + esc(u.name) : ''} · ${esc(ago(r.created))}</p>
+    <p class="sub">${esc(r.kind)} · ${esc(providerLabel(r.provider))}${r.model ? ' · ' + esc(r.model) : ''}${u ? ' · for ' + esc(u.name) : ''} · ${esc(ago(r.created))}</p>
     <div class="runfoot" id="rm-foot"></div>
     <div class="transcript" id="rm-log" style="max-height:48vh"></div>
     <div class="modal-foot"><button class="btn" id="rm-close">Close</button></div>`,
@@ -52,7 +52,7 @@ function draw() {
     <div class="table">${runs.length ? runs.map((r) => {
       const a = agentById(r.agent_id), u = userById(r.user_id);
       return `<div class="row run-row" data-act="open" data-id="${esc(r.id)}"><div class="mini">${agentGhost(a, { size: 34 })}</div>
-        <div><div class="title">${esc(a?.name || r.agent_id)} <span class="meta">${esc(r.kind)} · ${esc(r.provider)}${u ? ' · for ' + esc(u.name) : ''}</span></div>
+        <div><div class="title">${esc(a?.name || r.agent_id)} <span class="meta">${esc(r.kind)} · ${esc(providerLabel(r.provider))}${u ? ' · for ' + esc(u.name) : ''}</span></div>
           <div class="meta">${esc(ago(r.created))}${r.started ? ' · ' + esc(duration(r.started, r.ended)) : ''}</div></div>
         <div class="meta hide-s">${r.tokens_in || r.tokens_out ? (r.tokens_in + r.tokens_out).toLocaleString() + ' tokens' : ''}</div><div>${pill(r.status)}</div><div class="hide-s"></div></div>`;
     }).join('') : '<div class="empty">Nothing has run yet.</div>'}</div>`;

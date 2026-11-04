@@ -31,6 +31,7 @@ add_executable(phantom_co WIN32
   Source/prompt.cpp
   Source/process.cpp
   Source/providers.cpp
+  Source/accounts.cpp
   Source/runner.cpp
   Source/worker_hub.cpp
   Source/worker.cpp

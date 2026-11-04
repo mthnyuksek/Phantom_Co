@@ -37,6 +37,8 @@ std::vector<ProviderInfo> detect_providers() {
             {"demo", "Demo (simulated, no subscription used)", true, ""}};
 }
 
+std::string provider_exe(const std::string& id) { return id == "claude" ? claude_path() : id == "codex" ? codex_path() : ""; }
+
 bool provider_known(const std::string& id) { return id == "claude" || id == "codex" || id == "demo"; }
 
 static std::string join(const std::vector<std::string>& v) {
@@ -48,6 +50,7 @@ static std::string join(const std::vector<std::string>& v) {
 bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
     out = {};
     out.cwd = rs.workdir;
+    out.env = rs.env;
 
     if (rs.provider == "claude") {
         out.exe = claude_path();
@@ -93,11 +96,12 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
     return false;
 }
 
-std::vector<std::string> collect_codex_images(const std::string& session_id, fs::file_time_type since, const fs::path& workdir) {
+std::vector<std::string> collect_codex_images(const std::string& session_id, fs::file_time_type since, const fs::path& workdir, const fs::path& codex_home) {
     std::vector<std::string> out;
     if (session_id.empty() || session_id.find_first_not_of("abcdefABCDEF0123456789-") != std::string::npos) return out;
     const std::string home = env(L"CODEX_HOME");
-    const fs::path dir = (home.empty() ? P(env(L"USERPROFILE")) / L".codex" : P(home)) / L"generated_images" / P(session_id);
+    const fs::path base = !codex_home.empty() ? codex_home : home.empty() ? P(env(L"USERPROFILE")) / L".codex" : P(home);
+    const fs::path dir = base / L"generated_images" / P(session_id);
     std::error_code ec;
     if (!fs::is_directory(dir, ec)) return out;
     for (auto it = fs::recursive_directory_iterator(dir, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {

@@ -208,8 +208,27 @@ export const EXACT = {
   'empty = Claude Code default': 'boş = Claude Code varsayılanı', 'e.g. haiku': 'örn. haiku', 'Vault folder': 'Kasa klasörü',
   'Everything lives here as plain files: people, ghosts, skills, rules, projects, chats, runs. Pointing to a new empty folder creates a fresh Vault there (old files are not moved).':
     'Her şey burada düz dosyalar olarak durur: kişiler, hayaletler, yetenekler, kurallar, projeler, sohbetler, çalıştırmalar. Yeni boş bir klasör göstermek orada yeni bir Kasa oluşturur (eski dosyalar taşınmaz).',
-  'Use this folder': 'Bu klasörü kullan', 'Brains on this PC': 'Bu bilgisayardaki beyinler',
-  'Claude and Codex are used through their own command-line tools, signed in on this PC.': 'Claude ve Codex, bu bilgisayarda giriş yapılmış kendi komut satırı araçlarıyla kullanılır.',
+  'Use this folder': 'Bu klasörü kullan',
+  // ---- settings: secrets (extra Claude Code / Codex sign-ins)
+  'Secrets': 'Gizli bilgiler',
+  'The Claude Code and Codex sign-ins your ghosts can use.': 'Hayaletlerinin kullanabileceği Claude Code ve Codex girişleri.',
+  'Auto': 'Otomatik',
+  "is the sign-in the command-line tool already has on this PC. Add more accounts to give ghosts another subscription, then pick one as a ghost's brain. Sign-ins stay in this PC's settings folder, never in the Vault.":
+    'komut satırı aracının bu bilgisayarda zaten kullandığı giriştir. Hayaletlere başka bir abonelik vermek için hesap ekle, sonra bir hayaletin beyni olarak seç. Girişler bu bilgisayarın ayar klasöründe kalır, asla kasaya girmez.',
+  'Claude Code · Auto': 'Claude Code · Otomatik', 'Codex · Auto': 'Codex · Otomatik',
+  "Claude Code · Auto (this PC's sign-in)": 'Claude Code · Otomatik (bu bilgisayardaki giriş)', "Codex · Auto (this PC's sign-in)": 'Codex · Otomatik (bu bilgisayardaki giriş)',
+  'Account name, e.g. Work': 'Hesap adı, ör. İş', 'Add account': 'Hesap ekle', 'Rename': 'Yeniden adlandır',
+  'Not installed': 'Kurulu değil', 'Checking…': 'Kontrol ediliyor…', 'Not signed in': 'Giriş yapılmamış', 'Signed in': 'Giriş yapılmış',
+  'Used by:': 'Kullanan:', 'Sign in again': 'Yeniden giriş yap',
+  'A sign-in window opened. Sign in there, then come back here.': 'Bir giriş penceresi açıldı. Orada giriş yap, sonra buraya dön.',
+  'These ghosts go back to Auto:': 'Bu hayaletler Otomatik girişe döner:',
+  'Account removed': 'Hesap kaldırıldı', 'Account removed. Its ghosts use Auto now.': 'Hesap kaldırıldı. Hayaletleri artık Otomatik girişi kullanıyor.',
+  'Pick Claude Code or Codex.': 'Claude Code ya da Codex seç.', 'Account not found.': 'Hesap bulunamadı.',
+  'A ghost is working with this account. Wait until it has finished.': 'Bu hesapla çalışan bir hayalet var. Bitirmesini bekle.',
+  'Sign-ins can only be done on the PC that runs Phantom Co.': 'Girişler yalnızca Phantom Co.\'yu çalıştıran bilgisayarda yapılabilir.',
+  'That account does not exist on this PC.': 'Bu hesap bu bilgisayarda yok.',
+  'The account this ghost used was removed. Pick another brain for it.': 'Bu hayaletin kullandığı hesap kaldırıldı. Ona başka bir beyin seç.',
+  'Claude Code CLI was not found on this PC.': 'Claude Code CLI bu bilgisayarda bulunamadı.', 'Codex CLI was not found on this PC.': 'Codex CLI bu bilgisayarda bulunamadı.',
   'Ready': 'Hazır', 'Not found': 'Bulunamadı', 'Vault changed': 'Kasa değişti', 'Sharing is on': 'Paylaşım açık', 'Sharing is off': 'Paylaşım kapalı',
   'Only the owner can change settings.': 'Ayarları yalnızca sahip değiştirebilir.', 'Opening the tunnel...': 'Tünel açılıyor...',
   'Downloading cloudflared (about 40 MB)...': 'cloudflared indiriliyor (yaklaşık 40 MB)...', 'cloudflared is installed.': 'cloudflared kuruldu.',
@@ -311,6 +330,8 @@ export const EXACT = {
 };
 
 export const PATTERNS = [
+  ['The sign-in window could not be opened (error {#}).', 'Giriş penceresi açılamadı (hata {0}).'],
+  ['{} (This ghost uses another account: sign in to it in Settings > Secrets.)', '{0} (Bu hayalet başka bir hesap kullanıyor: Ayarlar > Gizli bilgiler bölümünden o hesaba giriş yap.)'],
   // removing a project
   ['Tasks ({#})', 'Görevler ({0})'], ['Notes ({#})', 'Notlar ({0})'], ['Ghost jobs ({#})', 'Hayalet görevleri ({0})'],
   ['Project and {#} task(s) removed (its files stay on disk)', 'Proje ve {0} görev kaldırıldı (dosyaları diskte kalır)'],

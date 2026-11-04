@@ -1,5 +1,7 @@
 #include "server.hpp"
 
+#include <future>
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -465,6 +467,12 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         json st = {{"company", store.company()}, {"me", public_user(c.profile)}, {"users", users}, {"providers", providers},
                    {"agents", agents}, {"skills", skills}, {"rules", store.rules()}, {"projects", store.projects()}, {"jobs", jobs},
                    {"forms", kForms}, {"tools", kTools}};
+        {   // extra sign-ins of this PC: names only (the agent editor offers "claude#<id>"); Settings > Secrets shows more to the owner
+            json acc = json::array();
+            if (runner.accounts())
+                for (auto& a : runner.accounts()->list()) acc.push_back({{"id", a["id"]}, {"provider", a["provider"]}, {"name", a["name"]}});
+            st["accounts"] = acc;
+        }
         {   // friends who lend their Claude/Codex (the agent editor offers "claude@<user>")
             json ws = json::array();
             for (auto& w : runner.hub().status()) {
@@ -578,10 +586,15 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         }
         if (out["name"].get<std::string>().empty()) { err = "Every ghost needs a name."; return false; }
         {
-            std::string pv = out["provider"], at_user;
-            size_t at = pv.find('@');
+            std::string pv = out["provider"], at_user, account;
+            size_t at = pv.find('@'), hash = pv.find('#');
             if (at != std::string::npos) { at_user = pv.substr(at + 1); pv = pv.substr(0, at); }
-            if (!provider_known(pv) || (pv == "demo" && !at_user.empty())) { err = "Unknown provider."; return false; }
+            else if (hash != std::string::npos) { account = pv.substr(hash + 1); pv = pv.substr(0, hash); }
+            if (!provider_known(pv) || (pv == "demo" && (!at_user.empty() || hash != std::string::npos))) { err = "Unknown provider."; return false; }
+            if (hash != std::string::npos) {
+                auto a = runner.accounts() ? runner.accounts()->get(account) : std::nullopt;
+                if (!a || (*a)["provider"] != pv) { err = "That account does not exist on this PC."; return false; }
+            }
             if (at != std::string::npos && (!auth.exists(at_user) || role_rank(auth.role(at_user)) < kEditor)) { err = "That friend is not part of this company."; return false; }
         }
         if (!kForms.count(out["form"])) { err = "Unknown ghost form."; return false; }
@@ -599,6 +612,83 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         }
         return true;
     };
+    // ============================================================== accounts
+    // Settings > Secrets (owner): more Claude Code / Codex sign-ins next to "Auto". The sign-in itself stays with the CLI
+    // in <data>\Accounts\<id>; nothing about it goes into the Vault.
+    auto agents_on = [&](const std::string& brain) {
+        json names = json::array();
+        for (auto& a : store.agents()) if (a.value("provider", "") == brain) names.push_back(a.value("name", ""));
+        return names;
+    };
+    add("GET", "/api/accounts/status", kOwner, [&](auto&, auto& res, Ctx&) {
+        Accounts* acc = runner.accounts();
+        if (!acc) return fail(res, 404, "Not available.");
+        json list = acc->list(), autos = json::array(), out = json::array();
+        std::vector<std::future<json>> autos_f, list_f;  // the CLI checks run side by side (a few seconds each)
+        auto provs = detect_providers();
+        for (auto& p : provs)
+            if (p.id != "demo") autos_f.push_back(std::async(std::launch::async, [acc, id = p.id, ok = p.available] { return ok ? acc->status(id, "") : json{{"signed_in", false}, {"error", "not_installed"}}; }));
+        for (auto& a : list)
+            list_f.push_back(std::async(std::launch::async, [acc, p = a["provider"].get<std::string>(), id = a["id"].get<std::string>()] { return acc->status(p, id); }));
+        size_t i = 0;
+        for (auto& p : provs) {
+            if (p.id == "demo") continue;
+            autos.push_back({{"provider", p.id}, {"label", p.label}, {"available", p.available}, {"status", autos_f[i++].get()}, {"agents", agents_on(p.id)}});
+        }
+        for (size_t k = 0; k < list.size(); ++k) {
+            json a = list[k];
+            a["status"] = list_f[k].get();
+            a["agents"] = agents_on(a["provider"].get<std::string>() + "#" + a["id"].get<std::string>());
+            a["busy"] = runner.brain_busy(a["provider"].get<std::string>() + "#" + a["id"].get<std::string>());
+            out.push_back(a);
+        }
+        send(res, {{"auto", autos}, {"accounts", out}});
+    });
+    add("POST", "/api/accounts", kOwner, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        if (!runner.accounts()) return fail(res, 404, "Not available.");
+        std::string provider = str(b, "provider", 16), name = str(b, "name", 40);
+        if (provider != "claude" && provider != "codex") return fail(res, 400, "Pick Claude Code or Codex.");
+        if (name.empty()) return fail(res, 400, "Please enter a name.");
+        send(res, runner.accounts()->add(provider, name), 201);
+    });
+    add("PUT", "/api/accounts/" + ID, kOwner, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        std::string name = str(b, "name", 40);
+        if (name.empty()) return fail(res, 400, "Please enter a name.");
+        if (!runner.accounts() || !runner.accounts()->rename(req.matches[1], name)) return fail(res, 404, "Account not found.");
+        send(res, *runner.accounts()->get(req.matches[1]));
+    });
+    add("DELETE", "/api/accounts/" + ID, kOwner, [&](auto& req, auto& res, Ctx&) {
+        std::string id = req.matches[1];
+        auto a = runner.accounts() ? runner.accounts()->get(id) : std::nullopt;
+        if (!a) return fail(res, 404, "Account not found.");
+        const std::string base = (*a)["provider"], brain = base + "#" + id;
+        if (runner.brain_busy(brain)) return fail(res, 409, "A ghost is working with this account. Wait until it has finished.");
+        json moved = json::array();  // its ghosts go back to Auto
+        for (auto ag : store.agents())
+            if (ag.value("provider", "") == brain) { ag["provider"] = base; store.save_agent(ag); moved.push_back(ag.value("name", "")); }
+        runner.accounts()->remove(id);
+        send(res, {{"ok", true}, {"moved", moved}});
+    });
+    // Opens the CLI's own sign-in in a console window on this PC (it shows a browser page): only for the person at this PC.
+    add("POST", "/api/accounts/login", kOwner, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        if (!is_this_pc(req)) return fail(res, 403, "Sign-ins can only be done on the PC that runs Phantom Co.");
+        if (!runner.accounts()) return fail(res, 404, "Not available.");
+        std::string id = str(b, "id", 64), provider = str(b, "provider", 16), err;
+        if (!id.empty()) {
+            auto a = runner.accounts()->get(id);
+            if (!a) return fail(res, 404, "Account not found.");
+            provider = (*a)["provider"];
+        } else if (provider != "claude" && provider != "codex") return fail(res, 400, "Pick Claude Code or Codex.");
+        if (!runner.accounts()->open_login(provider, id, err)) return fail(res, 409, err);
+        send(res, {{"ok", true}});
+    });
+
     add("POST", "/api/agents", kEditor, [&](auto& req, auto& res, Ctx&) {
         json b, a;
         if (!parse_body(req, res, b)) return;
