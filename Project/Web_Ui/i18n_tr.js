@@ -217,6 +217,8 @@ export const EXACT = {
   // ---- server messages (errors, shown as notices)
   'Wrong name or password.': 'Ad veya şifre yanlış.', 'Please sign in.': 'Lütfen giriş yap.', 'Your role is not allowed to do this.': 'Rolün bunu yapmana izin vermiyor.',
   'Too many attempts. Wait a minute and try again.': 'Çok fazla deneme. Bir dakika bekleyip yeniden dene.',
+  'This Vault is already open in another Phantom Co. window.': 'Bu kasa zaten başka bir Phantom Co. penceresinde açık.',
+  'The Vault folder cannot be locked (no write access?).': 'Kasa klasörü kilitlenemedi (yazma izni yok mu?).',
   'This company already has an owner.': 'Bu şirketin zaten bir sahibi var.', 'Please enter your name.': 'Lütfen adını gir.', 'Please enter a name.': 'Lütfen bir ad gir.',
   'The password needs at least 8 characters.': 'Şifre en az 8 karakter olmalı.', 'The new password needs at least 8 characters.': 'Yeni şifre en az 8 karakter olmalı.',
   'The current password is not right.': 'Şimdiki şifre doğru değil.', 'Someone already uses this name.': 'Bu adı zaten başka biri kullanıyor.',

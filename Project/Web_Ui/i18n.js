@@ -18,6 +18,8 @@ function initial() {
 }
 
 export const lang = initial();
+// The program window uses the same language for its tray menu and notices.
+try { window.chrome?.webview?.postMessage({ cmd: 'lang', lang }); } catch { /* not in the program window */ }
 export function setLang(id) {
   try { localStorage.setItem(KEY, id); } catch { /* private mode */ }
   location.reload();

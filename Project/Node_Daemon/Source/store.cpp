@@ -68,9 +68,9 @@ fs::path config_dir() {
 }
 fs::path config_file_path() { return config_dir() / L"node.json"; }
 
-Config load_config() {
+Config load_config(const fs::path& file) {
     Config c;
-    c.file = config_file_path();
+    c.file = file.empty() ? config_file_path() : file;
     json j = read_json(c.file);
     c.vault = j.contains("vault_path") && j["vault_path"].is_string() ? P(j["vault_path"].get<std::string>()) : default_vault_path();
     if (j.contains("port") && j["port"].is_number_integer()) c.port = j["port"].get<int>();
@@ -243,9 +243,25 @@ void init_vault(const fs::path& root) {
 }
 
 // -------------------------------------------------------------------- store
+// Two Phantom Co. windows on one Vault would overwrite each other's files: every open Vault holds a hidden lock file
+// open without sharing (deleted when the program closes, also after a crash because Windows closes the handle).
+static void* lock_vault(const fs::path& root) {
+    HANDLE h = CreateFileW((root / L".phantom_lock").c_str(), GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS,
+                           FILE_ATTRIBUTE_HIDDEN | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+        throw std::runtime_error(GetLastError() == ERROR_SHARING_VIOLATION
+                                     ? "This Vault is already open in another Phantom Co. window."
+                                     : "The Vault folder cannot be locked (no write access?).");
+    return h;
+}
+
 Store::Store(const fs::path& root) : root_(root) {
     init_vault(root_);
+    lock_ = lock_vault(root_);
     load_run_index();
+}
+Store::~Store() {
+    if (lock_) CloseHandle(lock_);
 }
 
 fs::path Store::root() const { std::lock_guard<std::recursive_mutex> l(mu_); return root_; }
@@ -255,6 +271,8 @@ fs::path Store::project_dir(const std::string& id) const { return root() / L"Pro
 void Store::switch_root(const fs::path& new_root) {
     init_vault(new_root);
     std::lock_guard<std::recursive_mutex> l(mu_);
+    void* lock = same_path(new_root, root_) ? nullptr : lock_vault(new_root);
+    if (lock) { if (lock_) CloseHandle(lock_); lock_ = lock; }
     root_ = new_root;
     load_run_index();
 }

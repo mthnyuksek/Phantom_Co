@@ -1,14 +1,17 @@
+#include <winsock2.h>  // before windows.h (free port check for a new Vault window)
 #include <windows.h>
 #include <dwmapi.h>
 #include <objbase.h>
 #include <shellapi.h>
 #include <shobjidl.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <future>
 #include <iostream>
+#include <set>
 #include <thread>
 
 #include "auth.hpp"
@@ -21,16 +24,36 @@
 
 using namespace pc2;
 
+// One copy of the program = one "instance" = one data folder (node.json, auth.json, webview_data) = one Vault, one port.
+// The default instance uses %LOCALAPPDATA%\Phantom_Co, more Vault windows use %LOCALAPPDATA%\Phantom_Co\Instances\<n>
+// (started from the tray menu with --data). Closing the window only hides it: the company keeps working in the hidden
+// icons until "Quit" in the tray menu.
 namespace {
 constexpr wchar_t kWindowClass[] = L"PhantomCoWindow";
+constexpr wchar_t kInstanceProp[] = L"PhantomCo.Instance";  // window property = instance key, so a second start finds its own window
 constexpr UINT kServerFailed = WM_APP + 1;
 constexpr UINT kPickFolder = WM_APP + 2;  // the page asked for a folder picker (shown from the window loop, not inside a WebView2 callback)
+constexpr UINT kTrayMsg = WM_APP + 3;
+constexpr UINT kShowMsg = WM_APP + 4;     // another start of the same instance asks this window to come back
+constexpr UINT_PTR kTitleTimer = 1;
+enum : UINT { kMenuShow = 1, kMenuNew = 2, kMenuQuit = 3, kMenuInstance = 100 };
 
 WebViewHost* g_host = nullptr;
 HWND g_hwnd = nullptr;
 WorkerClient g_worker;
 Config* g_cfg = nullptr;
+Store* g_store = nullptr;
+Runner* g_runner = nullptr;
 std::wstring g_home_url;
+fs::path g_data_dir;
+std::wstring g_extra_args;  // --devtools / --ui-dir, passed on to Vault windows started from the tray
+bool g_quitting = false, g_told_hidden = false;
+bool g_tr = false;          // Turkish tray texts (the page tells us its language)
+std::wstring g_title;
+UINT g_taskbar_created = 0;
+std::vector<fs::path> g_menu_instances;
+
+const wchar_t* T(const wchar_t* en, const wchar_t* tr) { return g_tr ? tr : en; }
 
 BOOL WINAPI on_ctrl(DWORD) {
     stop_server();
@@ -47,12 +70,206 @@ void usage() {
                  "  --vault <folder>   Vault folder for this run (default: saved setting, then Documents\\Phantom_Vault)\n"
                  "  --port <number>    Port of the local server (default 7777)\n"
                  "  --share            Let people on the network connect (the owner can also switch it in Settings)\n"
-                 "  --data <folder>    Folder for accounts and settings (default %LOCALAPPDATA%\\Phantom_Co)\n"
+                 "  --data <folder>    Folder for accounts and settings (default %LOCALAPPDATA%\\Phantom_Co).\n"
+                 "                     Every data folder is its own copy of the program: its own Vault, port and window\n"
                  "  --no-window        Run only the server, without a window (tests, a PC without a screen)\n"
                  "  --worker-url <address> --worker-token <token>\n"
                  "                     Lend this PC's Claude/Codex to the company at that address (normally switched on in the window)\n"
                  "  --devtools         Keep browser shortcuts and F12 in the window (development)\n"
                  "  --ui-dir <folder>  Read the web pages from disk instead of the built-in copy (development)\n";
+}
+
+// ------------------------------------------------------------------ instances
+std::wstring norm(const fs::path& p) {
+    std::wstring s = p.lexically_normal().make_preferred().wstring();
+    while (s.size() > 3 && s.back() == L'\\') s.pop_back();
+    for (auto& ch : s) ch = towlower(ch);
+    return s;
+}
+uintptr_t instance_key(const fs::path& data_dir) {
+    uint32_t h = 2166136261u;  // FNV-1a: stable across runs (std::hash is not promised to be)
+    for (wchar_t ch : norm(data_dir)) { h ^= static_cast<uint32_t>(ch); h *= 16777619u; }
+    return h | 1u;  // never 0 (GetProp answers 0 for "no property")
+}
+std::wstring mutex_name(const fs::path& data_dir) { return L"Local\\PhantomCo_Instance_" + std::to_wstring(instance_key(data_dir)); }
+bool instance_running(const fs::path& data_dir) {
+    HANDLE m = OpenMutexW(SYNCHRONIZE, FALSE, mutex_name(data_dir).c_str());
+    if (!m) return false;
+    CloseHandle(m);
+    return true;
+}
+HWND find_instance_window(const fs::path& data_dir) {
+    struct Find { uintptr_t key; HWND found; } f{instance_key(data_dir), nullptr};
+    EnumWindows([](HWND w, LPARAM lp) -> BOOL {
+        auto* f = reinterpret_cast<Find*>(lp);
+        wchar_t cls[64] = {};
+        GetClassNameW(w, cls, 64);
+        if (wcscmp(cls, kWindowClass) == 0 && reinterpret_cast<uintptr_t>(GetPropW(w, kInstanceProp)) == f->key) { f->found = w; return FALSE; }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&f));
+    return f.found;
+}
+void wake_window(HWND w) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(w, &pid);
+    AllowSetForegroundWindow(pid);
+    PostMessageW(w, kShowMsg, 0, 0);
+}
+
+fs::path instances_dir() { return config_dir() / L"Instances"; }
+// The default data folder first, then Instances\2, \3, ... (only folders that hold a node.json).
+std::vector<fs::path> known_instances() {
+    std::vector<fs::path> out{config_dir()};
+    std::vector<std::pair<int, fs::path>> more;
+    std::error_code ec;
+    for (auto& e : fs::directory_iterator(instances_dir(), ec)) {
+        int n = _wtoi(e.path().filename().c_str());
+        if (n > 0 && fs::exists(e.path() / L"node.json", ec)) more.push_back({n, e.path()});
+    }
+    std::sort(more.begin(), more.end());
+    for (auto& m : more) out.push_back(m.second);
+    return out;
+}
+std::wstring instance_label(const fs::path& data_dir) {
+    Config c = load_config(data_dir / L"node.json");
+    std::error_code ec;
+    json co = read_json(c.vault / L"Company" / L"company.json");
+    std::wstring folder = c.vault.filename().wstring();
+    if (!fs::exists(c.vault / L"vault.json", ec)) return folder + T(L"  (not set up yet)", L"  (henüz kurulmadı)");
+    std::wstring name = Widen(co.value("name", ""));
+    return name.empty() || name == folder ? folder : name + L"  —  " + folder;
+}
+bool port_free(int port) {
+    WSADATA wd;
+    if (WSAStartup(MAKEWORD(2, 2), &wd) != 0) return true;
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_port = htons(static_cast<u_short>(port));
+    a.sin_addr.s_addr = htonl(INADDR_ANY);
+    bool ok = s != INVALID_SOCKET && bind(s, reinterpret_cast<sockaddr*>(&a), sizeof(a)) == 0;
+    if (s != INVALID_SOCKET) closesocket(s);
+    WSACleanup();
+    return ok;
+}
+void launch_instance(const fs::path& data_dir) {
+    wchar_t exe[MAX_PATH * 2];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH * 2);
+    std::wstring cmd = L"\"" + std::wstring(exe) + L"\" --data \"" + data_dir.wstring() + L"\"" + g_extra_args;
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    if (CreateProcessW(exe, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+        AllowSetForegroundWindow(pi.dwProcessId);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+}
+// A new Vault window: Instances\<n> with its own node.json (a free port, a new Vault folder next to the default one,
+// changed on its setup screen like on a first start).
+void new_instance() {
+    std::set<int> ports;
+    for (auto& d : known_instances()) ports.insert(load_config(d / L"node.json").port);
+    int n = 2;
+    std::error_code ec;
+    while (fs::exists(instances_dir() / std::to_wstring(n), ec)) ++n;
+    fs::path dir = instances_dir() / std::to_wstring(n);
+    fs::create_directories(dir, ec);
+    Config c;
+    c.file = dir / L"node.json";
+    c.port = 7778;
+    while (c.port < 65000 && (ports.count(c.port) || !port_free(c.port))) ++c.port;
+    fs::path base = default_vault_path().parent_path();
+    int v = n;
+    while (fs::exists(base / (L"Phantom_Vault_" + std::to_wstring(v)), ec)) ++v;
+    c.vault = base / (L"Phantom_Vault_" + std::to_wstring(v));
+    save_config(c);
+    launch_instance(dir);
+}
+
+// ------------------------------------------------------------------ tray icon
+void tray(DWORD action) {
+    if (!g_hwnd) return;
+    NOTIFYICONDATAW nid{};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = g_hwnd;
+    nid.uID = 1;
+    if (action == NIM_DELETE) { Shell_NotifyIconW(NIM_DELETE, &nid); return; }
+    nid.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_SHOWTIP;
+    nid.uCallbackMessage = kTrayMsg;
+    nid.hIcon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+    wcsncpy_s(nid.szTip, g_title.c_str(), _TRUNCATE);
+    Shell_NotifyIconW(action, &nid);
+    if (action == NIM_ADD) {
+        nid.uVersion = NOTIFYICON_VERSION_4;
+        Shell_NotifyIconW(NIM_SETVERSION, &nid);
+    }
+}
+void tray_balloon(const wchar_t* title, const wchar_t* text) {
+    NOTIFYICONDATAW nid{};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = g_hwnd;
+    nid.uID = 1;
+    nid.uFlags = NIF_INFO;
+    nid.dwInfoFlags = NIIF_USER | NIIF_LARGE_ICON;
+    wcsncpy_s(nid.szInfoTitle, title, _TRUNCATE);
+    wcsncpy_s(nid.szInfo, text, _TRUNCATE);
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+// Title bar and tray tooltip name the company and the Vault folder, so several Vault windows can be told apart.
+void refresh_title() {
+    if (!g_hwnd || !g_store) return;
+    std::wstring folder = g_store->root().filename().wstring(), name = Widen(g_store->company().value("name", ""));
+    std::wstring t = L"Phantom Co. · " + (name.empty() || name == L"Phantom Co." ? folder : name + L"  —  " + folder);
+    if (t == g_title) return;
+    g_title = t;
+    SetWindowTextW(g_hwnd, t.c_str());
+    tray(NIM_MODIFY);
+}
+void show_window() {
+    if (!g_hwnd) return;
+    ShowWindow(g_hwnd, IsIconic(g_hwnd) ? SW_RESTORE : SW_SHOW);
+    SetForegroundWindow(g_hwnd);
+    if (g_host) g_host->Focus();
+}
+void quit() {
+    if (g_runner && g_runner->any_active()) {
+        show_window();
+        if (MessageBoxW(g_hwnd, T(L"Ghosts are still working. Quit anyway? Their work stops.", L"Hayaletler hâlâ çalışıyor. Yine de çıkılsın mı? Çalışmaları durur."),
+                        L"Phantom Co.", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return;
+    }
+    g_quitting = true;
+    DestroyWindow(g_hwnd);
+}
+void tray_menu(int x, int y) {
+    HMENU menu = CreatePopupMenu(), vaults = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING, kMenuShow, T(L"Open Phantom Co.", L"Phantom Co.'yu aç"));
+    SetMenuDefaultItem(menu, kMenuShow, FALSE);
+    g_menu_instances = known_instances();
+    for (size_t i = 0; i < g_menu_instances.size() && i < 50; ++i) {
+        const fs::path& d = g_menu_instances[i];
+        bool self = norm(d) == norm(g_data_dir), running = self || instance_running(d);
+        std::wstring label = instance_label(d) + (running && !self ? T(L"  (open)", L"  (açık)") : L"");
+        AppendMenuW(vaults, MF_STRING | (self ? MF_CHECKED : 0), kMenuInstance + i, label.c_str());
+    }
+    AppendMenuW(vaults, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(vaults, MF_STRING, kMenuNew, T(L"New Vault window…", L"Yeni kasa penceresi…"));
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(vaults), T(L"Vaults", L"Kasalar"));
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, kMenuQuit, T(L"Quit Phantom Co.", L"Phantom Co.'dan çık"));
+    SetForegroundWindow(g_hwnd);  // otherwise the menu does not close when clicking elsewhere
+    UINT cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, x, y, 0, g_hwnd, nullptr);
+    PostMessageW(g_hwnd, WM_NULL, 0, 0);
+    DestroyMenu(menu);  // also destroys the submenu
+    if (cmd == kMenuShow) show_window();
+    else if (cmd == kMenuNew) new_instance();
+    else if (cmd == kMenuQuit) quit();
+    else if (cmd >= kMenuInstance && cmd - kMenuInstance < g_menu_instances.size()) {
+        const fs::path& d = g_menu_instances[cmd - kMenuInstance];
+        if (norm(d) == norm(g_data_dir)) show_window();
+        else if (HWND w = find_instance_window(d)) wake_window(w);
+        else if (!instance_running(d)) launch_instance(d);
+    }
 }
 
 void report_worker() {
@@ -67,7 +284,9 @@ void on_page_message(const std::string& text) {
     json m = json::parse(text, nullptr, false);
     if (!m.is_object() || !g_host) return;
     std::string cmd = m.value("cmd", "");
-    if (cmd == "worker_status") {
+    if (cmd == "lang") {
+        g_tr = m.value("lang", "") == "tr";
+    } else if (cmd == "worker_status") {
         report_worker();
     } else if (cmd == "worker_start") {
         std::string url = m.value("url", ""), token = m.value("token", ""), err;
@@ -96,6 +315,10 @@ void on_page_message(const std::string& text) {
 }
 
 LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == g_taskbar_created && g_taskbar_created) {  // Explorer restarted: the tray icon is gone, add it again
+        tray(NIM_ADD);
+        return 0;
+    }
     switch (msg) {
         case WM_SIZE:
             if (g_host) g_host->Resize(LOWORD(lp), HIWORD(lp));
@@ -108,6 +331,24 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             mm->ptMinTrackSize = {900, 600};
             return 0;
         }
+        case WM_TIMER:
+            if (wp == kTitleTimer) refresh_title();
+            return 0;
+        case kShowMsg:
+            show_window();
+            return 0;
+        case kTrayMsg:
+            switch (LOWORD(lp)) {
+                case NIN_SELECT:
+                case NIN_KEYSELECT:
+                case WM_LBUTTONDBLCLK:
+                    show_window();
+                    break;
+                case WM_CONTEXTMENU:
+                    tray_menu(static_cast<short>(LOWORD(wp)), static_cast<short>(HIWORD(wp)));
+                    break;
+            }
+            return 0;
         case kPickFolder: {
             json r = {{"type", "folder_picked"}, {"path", ""}};
             IFileOpenDialog* dlg = nullptr;
@@ -130,6 +371,7 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         case kServerFailed:
             MessageBoxW(hwnd, L"Phantom Co. could not start its local server. Another copy of Phantom Co. may already be running, or the port is in use.\n\nTry the option --port <number>.", L"Phantom Co.", MB_OK | MB_ICONERROR);
+            g_quitting = true;
             DestroyWindow(hwnd);
             return 0;
         case WM_QUERYENDSESSION:
@@ -138,9 +380,20 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             // A critical shutdown (power failure, forced update) cannot be stopped.
             return (lp & ENDSESSION_CRITICAL) ? TRUE : FALSE;
         case WM_CLOSE:
-            DestroyWindow(hwnd);
+            // The X button only hides the window: the company keeps serving ghosts and friends from the hidden icons.
+            if (g_quitting) { DestroyWindow(hwnd); return 0; }
+            ShowWindow(hwnd, SW_HIDE);
+            if (!g_told_hidden) {
+                g_told_hidden = true;
+                tray_balloon(T(L"Phantom Co. is still running", L"Phantom Co. çalışmaya devam ediyor"),
+                             T(L"Your ghosts keep working. Click the ghost in the hidden icons to open it again, right-click it to quit or to open another Vault.",
+                               L"Hayaletleriniz çalışmaya devam ediyor. Tekrar açmak için gizli simgelerdeki hayalete tıklayın; çıkmak ya da başka bir kasa açmak için sağ tıklayın."));
+            }
             return 0;
         case WM_DESTROY:
+            KillTimer(hwnd, kTitleTimer);
+            tray(NIM_DELETE);
+            RemovePropW(hwnd, kInstanceProp);
             PostQuitMessage(0);
             return 0;
     }
@@ -158,7 +411,13 @@ HWND make_window(HINSTANCE inst) {
     RegisterClassW(&wc);
     int w = 1360, h = 860;
     int x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2, y = (GetSystemMetrics(SM_CYSCREEN) - h) / 2;
+    if (g_data_dir.parent_path() == instances_dir()) {  // later Vault windows open a little lower, not exactly on top of the first
+        int n = _wtoi(g_data_dir.filename().c_str());
+        x += 32 * ((n - 1) % 6);
+        y += 32 * ((n - 1) % 6);
+    }
     HWND hwnd = CreateWindowExW(0, kWindowClass, L"Phantom Co. · Ghost Company", WS_OVERLAPPEDWINDOW, std::max(0, x), std::max(0, y), w, h, nullptr, nullptr, inst, nullptr);
+    SetPropW(hwnd, kInstanceProp, reinterpret_cast<HANDLE>(instance_key(g_data_dir)));
     // the right icon size for the title bar and for the taskbar / Alt+Tab
     SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
     SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
@@ -177,18 +436,19 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     }
     SetConsoleOutputCP(CP_UTF8);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    g_tr = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_TURKISH;  // until the page says which language it shows
 
     int argc = 0;
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    Config cfg = load_config();
     fs::path vault_override, ui_dir, data_dir;
     bool window_mode = true, share = false, dev = false;
+    int port_override = 0;
     std::string cli_worker_url, cli_worker_token;
     for (int i = 1; i < argc; ++i) {
         std::wstring a = argv[i];
         auto next = [&]() -> std::wstring { return i + 1 < argc ? argv[++i] : L""; };
         if (a == L"--vault") vault_override = next();
-        else if (a == L"--port") cfg.port = _wtoi(next().c_str());
+        else if (a == L"--port") port_override = _wtoi(next().c_str());
         else if (a == L"--ui-dir") ui_dir = next();
         else if (a == L"--data") data_dir = next();
         else if (a == L"--no-window") window_mode = false;
@@ -198,20 +458,24 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         else if (a == L"--worker-token") cli_worker_token = Narrow(next());
         else { usage(); return a == L"--help" ? 0 : 1; }
     }
-    if (!data_dir.empty()) cfg.file = fs::absolute(data_dir) / L"node.json";  // an isolated account store (tests, a second company)
+    // the data folder decides which copy this is (its own node.json, accounts, Vault and port)
+    g_data_dir = data_dir.empty() ? config_dir() : fs::absolute(data_dir);
+    Config cfg = load_config(g_data_dir / L"node.json");
+    if (port_override > 0) cfg.port = port_override;
     if (!vault_override.empty()) cfg.vault = fs::absolute(vault_override);
     if (share) cfg.share = true;
+    if (dev) g_extra_args += L" --devtools";
+    if (!ui_dir.empty()) g_extra_args += L" --ui-dir \"" + fs::absolute(ui_dir).wstring() + L"\"";
 
-    // One copy per port: a second start just brings the first window to the front.
+    // One copy per data folder: a second start just brings that window back (also from the hidden icons).
     SetLastError(0);  // earlier calls may have left ERROR_ALREADY_EXISTS behind
-    HANDLE single = CreateMutexW(nullptr, TRUE, (L"Local\\PhantomCo_Node_" + std::to_wstring(cfg.port)).c_str());
+    HANDLE single = CreateMutexW(nullptr, TRUE, mutex_name(g_data_dir).c_str());
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        if (HWND other = FindWindowW(kWindowClass, nullptr)) {
-            ShowWindow(other, SW_RESTORE);
-            SetForegroundWindow(other);
+        if (HWND other = find_instance_window(g_data_dir)) {
+            wake_window(other);
             return 0;
         }
-        fatal(L"Phantom Co. is already running on this port.", window_mode);
+        fatal(L"Phantom Co. is already running with this data folder.", window_mode);
         return 3;
     }
 
@@ -222,6 +486,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         Auth auth(cfg.file.parent_path() / L"auth.json");
         Runner runner(store);
         g_cfg = &cfg;
+        g_store = &store;
+        g_runner = &runner;
         {   // lending this PC's AI was switched on before (in the window), or is asked for on the command line
             std::string url = cli_worker_url.empty() ? cfg.worker_url : cli_worker_url, token = cli_worker_token.empty() ? cfg.worker_token : cli_worker_token, err;
             if (!url.empty() && !g_worker.start(url, token, err)) std::cerr << "Lending the AI: " << err << "\n";
@@ -248,7 +514,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         bool ok = listening.get_future().get();
         if (!ok) {
             server.join();
-            fatal(L"Phantom Co. could not start its local server. Another copy of Phantom Co. may already be running, or the port is in use.\nTry the option --port <number>.", window_mode);
+            fatal(L"Phantom Co. could not start its local server on port " + std::to_wstring(cfg.port) +
+                      L". Another program may be using that port.\nTry the option --port <number>, or change \"port\" in " + cfg.file.wstring() + L".",
+                  window_mode);
             return 2;
         }
 
@@ -265,23 +533,27 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
                 fatal(error, true);
                 code = 1;
             } else {
+                g_taskbar_created = RegisterWindowMessageW(L"TaskbarCreated");
+                refresh_title();
+                tray(NIM_ADD);
+                SetTimer(hwnd, kTitleTimer, 5000, nullptr);  // the company name may change in Settings
                 ShowWindow(hwnd, SW_SHOW);
                 UpdateWindow(hwnd);
-                // While the window is open the PC stays awake (ghosts work, friends connect). The screen may still
-                // turn off. This only stops sleep when the PC is idle: Start > Sleep, the power button or closing
+                // While the program runs (also hidden) the PC stays awake (ghosts work, friends connect). The screen may
+                // still turn off. This only stops sleep when the PC is idle: Start > Sleep, the power button or closing
                 // a laptop lid still put it to sleep (Windows power settings decide those).
                 SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
-                ShutdownBlockReasonCreate(hwnd, L"Phantom Co. is open: your ghosts and friends use this PC. Close Phantom Co. first, or shut down anyway.");
+                ShutdownBlockReasonCreate(hwnd, L"Phantom Co. is open: your ghosts and friends use this PC. Quit Phantom Co. first, or shut down anyway.");
                 MSG msg;
                 while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
                     TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 }
             }
-            SetThreadExecutionState(ES_CONTINUOUS);  // the window is gone: the PC may sleep again
+            SetThreadExecutionState(ES_CONTINUOUS);  // the program quits: the PC may sleep again
             g_host = nullptr;
             g_worker.stop();
-            stop_server();  // the window was closed: stop serving
+            stop_server();  // "Quit" was chosen: stop serving
         } else {
             std::cout << "Phantom Co. server is running.\n  Vault: " << U8(store.root()) << "\n  Open:  http://127.0.0.1:" << cfg.port << "/\n  Press Ctrl+C to stop.\n";
         }
@@ -289,6 +561,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         tunnel.Stop();
         g_worker.stop();
         runner.shutdown();
+        g_store = nullptr;
+        g_runner = nullptr;
         if (single) ReleaseMutex(single);
         return code;
     } catch (const std::exception& e) {

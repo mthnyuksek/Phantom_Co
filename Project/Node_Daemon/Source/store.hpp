@@ -21,7 +21,7 @@ struct Config {
 fs::path default_vault_path();  // <Documents>\Phantom_Vault  (visible on purpose)
 fs::path config_dir();          // %LOCALAPPDATA%\Phantom_Co
 fs::path config_file_path();
-Config load_config();
+Config load_config(const fs::path& file = {});  // empty = config_file_path()
 void save_config(const Config& c);
 // The Vault folder for a folder the person picked: the folder itself when it is empty, missing or already a
 // Vault, otherwise a "Phantom_Vault" folder inside it (a Vault must not be spread over somebody's Documents).
@@ -38,6 +38,9 @@ void init_vault(const fs::path& root);
 class Store {
 public:
     explicit Store(const fs::path& root);
+    ~Store();
+    Store(const Store&) = delete;
+    Store& operator=(const Store&) = delete;
 
     fs::path root() const;
     fs::path files_root() const;                    // Shared_Files
@@ -110,6 +113,7 @@ public:
 private:
     std::string unique_id(const fs::path& dir, const std::string& name, bool folder);
     void load_run_index();
+    void* lock_ = nullptr;  // open handle of <Vault>\.phantom_lock: one Phantom Co. window per Vault
 
     mutable std::recursive_mutex mu_;
     fs::path root_;
