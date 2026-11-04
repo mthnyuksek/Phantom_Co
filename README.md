@@ -4,6 +4,8 @@
 
 Windows only. One program file, no installer, no cloud service of its own.
 
+![A planner ghost hands work to a writer and a reviewer, then reports the result](Media/phantom_co_demo.gif)
+
 ## What it does
 
 - **Ghost agents**: role, boss, persona, skills, brain (Claude, Codex or the free built-in Demo), model and time limit. 11 ghost forms and colours.
