@@ -20,6 +20,7 @@
 #include "server.hpp"
 #include "store.hpp"
 #include "tunnel.hpp"
+#include "version.hpp"
 #include "web_view_host.hpp"
 #include "worker.hpp"
 
@@ -67,7 +68,7 @@ void fatal(const std::wstring& msg, bool window_mode) {
 }
 
 void usage() {
-    std::cout << "Phantom Co. - ghost company\n"
+    std::cout << "Phantom Co. " PC2_VERSION_STR " - ghost company\n"
                  "  --vault <folder>   Vault folder for this run (default: saved setting, then Documents\\Phantom_Vault)\n"
                  "  --port <number>    Port of the local server (default 7777)\n"
                  "  --share            Let people on the network connect (the owner can also switch it in Settings)\n"
@@ -77,7 +78,8 @@ void usage() {
                  "  --worker-url <address> --worker-token <token>\n"
                  "                     Lend this PC's Claude/Codex to the company at that address (normally switched on in the window)\n"
                  "  --devtools         Keep browser shortcuts and F12 in the window (development)\n"
-                 "  --ui-dir <folder>  Read the web pages from disk instead of the built-in copy (development)\n";
+                 "  --ui-dir <folder>  Read the web pages from disk instead of the built-in copy (development)\n"
+                 "  --version          Print the version and quit\n";
 }
 
 // ------------------------------------------------------------------ instances
@@ -457,6 +459,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         else if (a == L"--devtools") dev = true;
         else if (a == L"--worker-url") cli_worker_url = Narrow(next());
         else if (a == L"--worker-token") cli_worker_token = Narrow(next());
+        else if (a == L"--version") { std::cout << "Phantom Co. " PC2_VERSION_STR "\n"; return 0; }
         else { usage(); return a == L"--help" ? 0 : 1; }
     }
     // the data folder decides which copy this is (its own node.json, accounts, Vault and port)

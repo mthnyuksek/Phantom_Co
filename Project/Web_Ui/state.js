@@ -73,7 +73,7 @@ export function brainOptions(current) {
   for (const w of S.state?.workers || [])
     for (const id of ['claude', 'codex']) {
       const on = w.online && w.providers.includes(id);
-      const label = (id === 'claude' ? 'Claude Code' : 'Codex') + ` on ${w.name}'s PC`;
+      const label = (id === 'claude' ? 'Claude Code' : 'Codex') + ` on ${w.name}'s PC (experimental)`;
       out.push({ id: `${id}@${w.user_id}`, label, available: on, note: on ? '' : ' — offline right now' });
     }
   if (current && !out.some((o) => o.id === current)) out.push({ id: current, label: providerLabel(current), available: true, note: '' });

@@ -22,6 +22,8 @@
 #include "embedded.hpp"
 #include "httplib.h"
 #include "prompt.hpp"
+#include "update_check.hpp"
+#include "version.hpp"
 
 namespace pc2 {
 
@@ -256,7 +258,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
 
     // ================================================================= auth
     add("GET", "/api/auth/status", kPublic, [&](auto& req, auto& res, Ctx& c) {
-        json st = {{"setup_needed", !auth.has_users()}, {"me", c.ok ? public_user(c.profile) : json(nullptr)}};
+        json st = {{"setup_needed", !auth.has_users()}, {"me", c.ok ? public_user(c.profile) : json(nullptr)}, {"version", PC2_VERSION_STR}};
         if (st["setup_needed"] && is_this_pc(req)) st["vault_path"] = U8(store.root());  // the first start offers to put the Vault elsewhere
         send(res, st);
     });
@@ -534,6 +536,26 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
     add("POST", "/api/vault/open", kOwner, [&](auto&, auto& res, Ctx&) {
         ShellExecuteW(nullptr, L"open", store.root().wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         send(res, {{"ok", true}});
+    });
+
+    // Version and "is there a newer one?" The update part only for the owner at this PC (only they can replace the exe),
+    // and only when the check is switched on. `?check=1` looks again now instead of waiting for the 12 h interval.
+    add("GET", "/api/about", kViewer, [&](auto& req, auto& res, Ctx& c) {
+        json out = {{"version", PC2_VERSION_STR}, {"worker_protocol", PC2_WORKER_PROTOCOL}};
+        if (c.role == "owner" && is_this_pc(req)) {
+            out["check_updates"] = cfg.check_updates;
+            if (cfg.check_updates) out["update"] = update_info(req.get_param_value("check") == "1");
+        }
+        send(res, out);
+    });
+    add("PUT", "/api/about", kOwner, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        if (!is_this_pc(req)) return fail(res, 403, "This can only be changed on the PC that runs Phantom Co.");
+        if (b.contains("check_updates") && b["check_updates"].is_boolean()) { cfg.check_updates = b["check_updates"]; save_config(cfg); }
+        json out = {{"version", PC2_VERSION_STR}, {"worker_protocol", PC2_WORKER_PROTOCOL}, {"check_updates", cfg.check_updates}};
+        if (cfg.check_updates) out["update"] = update_info();
+        send(res, out);
     });
 
     add("GET", "/api/network", kOwner, [&](auto&, auto& res, Ctx&) {
@@ -900,11 +922,27 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         j.name_chat = name_chat;
         return runner.enqueue(j, err);
     };
+    // "Try again": the index of this person's last message when the work it started never brought an answer
+    // (the run failed, timed out or the program was closed meanwhile), else -1.
+    auto retry_index = [&](const json& cv, const Ctx& c) -> int {
+        const json& msgs = cv["messages"];
+        int u = -1;
+        for (int i = (int)msgs.size() - 1; i >= 0; --i) {
+            std::string from = msgs[i].value("from", "");
+            if (from.rfind("agent:", 0) == 0) return -1;  // an answer came after it
+            if (from.rfind("user:", 0) == 0) { u = i; break; }
+        }
+        if (u < 0 || msgs[u].value("from", "") != "user:" + c.id) return -1;
+        if (u == (int)msgs.size() - 1) return u;  // nothing after it: the run was interrupted
+        return msgs.back().value("text", "").rfind("\xE2\x9A\xA0", 0) == 0 ? u : -1;  // ends with a "⚠ ... could not finish" line
+    };
     auto chat_view = [&](const std::string& id, const Ctx& c) -> json {
         auto cv = store.conv_load(id);
         if (!cv || !visible((*cv)["meta"], c)) return json();
-        json out = {{"meta", (*cv)["meta"]}, {"messages", (*cv)["messages"]}, {"busy", runner.conversation_busy(id)},
-                    {"live", runner.conversation_live(id)}, {"can_write", writable((*cv)["meta"], c)}};
+        bool busy = runner.conversation_busy(id), can_write = writable((*cv)["meta"], c);
+        json out = {{"meta", (*cv)["meta"]}, {"messages", (*cv)["messages"]}, {"busy", busy},
+                    {"live", runner.conversation_live(id)}, {"can_write", can_write},
+                    {"can_retry", can_write && !busy && c.role != "viewer" && retry_index(*cv, c) >= 0}};
         return out;
     };
 
@@ -971,6 +1009,30 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         if (meta.value("kind", "") == "task" && !meta.value("task_id", "").empty() && (*cv)["messages"].size() <= 1) {
             if (auto t = store.task(meta.value("task_id", ""))) prompt = "# Task: " + t->value("title", "") + "\n\n" + text;
         }
+        std::string rid = start_job(meta, id, c, prompt, first && meta.value("auto_title", false), err);
+        if (rid.empty()) { store.conv_append(id, {{"t", "msg"}, {"from", "system"}, {"text", "⚠ " + err}}); return fail(res, 400, err); }
+        send(res, chat_view(id, c));
+    });
+    // Sends the person's last message again after a failed or interrupted run (no new message is written).
+    add("POST", "/api/chats/" + ID + "/retry", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        std::string id = req.matches[1];
+        auto cv = store.conv_load(id);
+        if (!cv || !visible((*cv)["meta"], c)) return fail(res, 404, "Chat not found");
+        const json& meta = (*cv)["meta"];
+        if (!writable(meta, c)) return fail(res, 403, "You cannot write in this conversation.");
+        if (runner.conversation_busy(id)) return fail(res, 409, "The agent is still working here.");
+        int u = retry_index(*cv, c);
+        if (u < 0) return fail(res, 409, "There is nothing to try again here.");
+        auto a = store.agent(meta.value("agent_id", ""));
+        if (!a || !a->value("enabled", true)) return fail(res, 400, "The agent of this chat is not available.");
+        bool first = true;
+        for (auto& m : (*cv)["messages"]) if (m.value("from", "").rfind("agent:", 0) == 0) first = false;
+        std::string text = (*cv)["messages"][u].value("text", ""), prompt = text;
+        if (meta.value("kind", "") == "task" && !meta.value("task_id", "").empty() && u <= 1) {  // same as the first send of a task
+            if (auto t = store.task(meta.value("task_id", ""))) prompt = "# Task: " + t->value("title", "") + "\n\n" + text;
+        }
+        std::string err;
+        store.conv_append(id, {{"t", "msg"}, {"from", "system"}, {"text", "↻ Trying again"}});
         std::string rid = start_job(meta, id, c, prompt, first && meta.value("auto_title", false), err);
         if (rid.empty()) { store.conv_append(id, {{"t", "msg"}, {"from", "system"}, {"text", "⚠ " + err}}); return fail(res, 400, err); }
         send(res, chat_view(id, c));
@@ -1272,14 +1334,19 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         if (w.empty()) return fail(res, 401, "Unknown worker token.");
         json b;
         if (!parse_body(req, res, b)) return;
+        // A friend's program with other worker messages would fail in odd ways: refuse it with both version numbers
+        // (programs older than 1.0 send no number and speak protocol 1).
+        int protocol = b.contains("protocol") && b["protocol"].is_number_integer() ? b["protocol"].get<int>() : 1;
+        if (protocol != PC2_WORKER_PROTOCOL)
+            return send(res, {{"error", "Different versions: this company runs Phantom Co. " PC2_VERSION_STR "."}, {"version", PC2_VERSION_STR}, {"protocol", PC2_WORKER_PROTOCOL}}, 426);
         std::set<std::string> provs;
         if (b.contains("providers") && b["providers"].is_array())
             for (auto& p : b["providers"]) if (p.is_string() && (p == "claude" || p == "codex")) provs.insert(p.get<std::string>());
         auto job = runner.hub().poll(w, provs, 20);
-        if (!job) return send(res, {{"job", nullptr}});
+        if (!job) return send(res, {{"job", nullptr}, {"version", PC2_VERSION_STR}, {"protocol", PC2_WORKER_PROTOCOL}});
         json j = job->payload;
         j["run_id"] = job->run_id;
-        send(res, {{"job", j}});
+        send(res, {{"job", j}, {"version", PC2_VERSION_STR}, {"protocol", PC2_WORKER_PROTOCOL}});
     });
     add("POST", "/api/worker/event", kPublic, [&](auto& req, auto& res, Ctx&) {
         std::string w = worker_of(req);

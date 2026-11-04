@@ -16,6 +16,7 @@ struct Config {
     int port = 7777;
     bool share = false;  // listen on the network (all addresses) instead of this PC only
     std::string worker_url, worker_token;  // lend this PC's Claude/Codex to that company (empty = off)
+    bool check_updates = true;  // ask GitHub for a newer release (Settings > About)
 };
 
 fs::path default_vault_path();  // <Documents>\Phantom_Vault  (visible on purpose)

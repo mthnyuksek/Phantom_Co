@@ -77,11 +77,12 @@ Config load_config(const fs::path& file) {
     if (j.contains("share") && j["share"].is_boolean()) c.share = j["share"].get<bool>();
     if (j.contains("worker_url") && j["worker_url"].is_string()) c.worker_url = j["worker_url"].get<std::string>();
     if (j.contains("worker_token") && j["worker_token"].is_string()) c.worker_token = j["worker_token"].get<std::string>();
+    if (j.contains("check_updates") && j["check_updates"].is_boolean()) c.check_updates = j["check_updates"].get<bool>();
     if (!fs::exists(c.file)) save_config(c);
     return c;
 }
 void save_config(const Config& c) {
-    json j = {{"vault_path", U8(c.vault)}, {"port", c.port}, {"share", c.share}};
+    json j = {{"vault_path", U8(c.vault)}, {"port", c.port}, {"share", c.share}, {"check_updates", c.check_updates}};
     if (!c.worker_url.empty() && !c.worker_token.empty()) { j["worker_url"] = c.worker_url; j["worker_token"] = c.worker_token; }
     write_json(c.file, j);
 }

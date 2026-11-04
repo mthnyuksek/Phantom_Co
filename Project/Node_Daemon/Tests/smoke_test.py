@@ -5,6 +5,7 @@ The default run only uses the built-in "demo" provider (costs nothing).
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -122,6 +123,13 @@ def main():
         check("auth file outside vault", os.path.exists(os.path.join(data, "auth.json")))
         st, state = owner.get("/api/state")
         check("owner state has settings", st == 200 and "settings" in state and state["me"]["role"] == "owner")
+        st, s = anon.get("/api/auth/status")
+        check("status tells the version", st == 200 and re.fullmatch(r"\d+\.\d+\.\d+", s.get("version", "")), s)
+        st, ab = owner.put("/api/about", {"check_updates": False})  # no GitHub call from the test
+        check("update check can be switched off", st == 200 and ab["check_updates"] is False and "update" not in ab, ab)
+        st, ab = owner.get("/api/about")
+        check("about shows version, no update check when off", st == 200 and ab["version"] == s["version"] and "update" not in ab, ab)
+        check("update setting saved in node.json", json.load(open(os.path.join(data, "node.json"), encoding="utf-8")).get("check_updates") is False)
 
         check("wrong password", Client().post("/api/auth/login", {"name": "meto y", "password": "nope nope 1"})[0] == 401)
         c2 = Client()
@@ -305,6 +313,26 @@ def main():
         ece.post(f"/api/chats/{c3}/send", {"text": "demo:fail"})
         v = ece.wait_idle(c3, 20)
         check("failure explained", any("could not finish" in m["text"] for m in v["messages"]))
+        check("failed run can be tried again", v["can_retry"] is True, v.get("can_retry"))
+        users_before = sum(1 for m in v["messages"] if m["from"].startswith("user:"))
+        st, r = ece.post(f"/api/chats/{c3}/retry")
+        check("retry started", st == 200, r)
+        v = ece.wait_idle(c3, 20)
+        check("retry sends the last message again", v is not None and any(m["text"] == "↻ Trying again" for m in v["messages"])
+              and sum(1 for m in v["messages"] if m["from"].startswith("user:")) == users_before
+              and sum(1 for m in v["messages"] if "could not finish" in m["text"]) == 2, v and v["messages"][-4:])
+        ece.post(f"/api/chats/{c3}/send", {"text": "hello again"})
+        v = ece.wait_idle(c3, 20)
+        check("no retry after an answer", v is not None and v["can_retry"] is False and ece.post(f"/api/chats/{c3}/retry")[0] == 409)
+        st, ab = ece.get("/api/about")
+        check("editor sees the version but not the update setting", st == 200 and "version" in ab and "check_updates" not in ab, ab)
+
+        # ------------------------------------------- a friend's program with other worker messages is refused
+        st, wt = ece.post("/api/worker/token")
+        st, r = Client().post("/api/worker/poll", {"providers": ["claude"], "protocol": 999, "version": "9.9.9"},
+                              headers={"Authorization": "Bearer " + wt["token"]})
+        check("worker with another protocol refused", st == 426 and r.get("version") == ab["version"] and r.get("protocol") == 1, (st, r))
+        ece.delete("/api/worker/token")
 
         # ------------------------------------------- agents act with the asker's rights
         st, adm_only = owner.post("/api/agents", {"name": "Admin Only", "provider": "demo", "skills": ["agent_management"]})

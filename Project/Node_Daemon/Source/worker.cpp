@@ -16,6 +16,7 @@
 #include "process.hpp"
 #include "providers.hpp"
 #include "store.hpp"
+#include "version.hpp"
 
 namespace pc2 {
 
@@ -83,11 +84,19 @@ void WorkerClient::loop() {
         { std::lock_guard<std::mutex> lk(mu_); providers_ = provs; }
         if (provs.empty()) { set_status("Neither Claude Code nor Codex was found on this PC."); sleep_s(10); continue; }
 
-        auto r = cli.Post("/api/worker/poll", h, dumps({{"providers", provs}}), "application/json");
+        auto r = cli.Post("/api/worker/poll", h, dumps({{"providers", provs}, {"version", PC2_VERSION_STR}, {"protocol", PC2_WORKER_PROTOCOL}}), "application/json");
         if (!r) { set_status("Cannot reach the company. Retrying..."); sleep_s(5); continue; }
         if (r->status == 401) { set_status("The company does not accept this sign-in any more. Switch it on again."); break; }
-        if (r->status != 200) { set_status("The company answered with an error (" + std::to_string(r->status) + ")."); sleep_s(5); continue; }
         json j = json::parse(r->body, nullptr, false);
+        // Both sides check the worker protocol: a host older than 1.0 sends no number and is taken as protocol 1.
+        bool other_protocol = r->status == 426 ||
+                              (r->status == 200 && j.is_object() && j.contains("protocol") && j["protocol"].is_number_integer() && j["protocol"] != PC2_WORKER_PROTOCOL);
+        if (other_protocol) {
+            std::string host_v = j.is_object() && j.contains("version") && j["version"].is_string() ? j["version"].get<std::string>() : "another version";
+            set_status("Different versions: the company runs Phantom Co. " + host_v + ", this PC runs " PC2_VERSION_STR ". Use the same version on both PCs.");
+            break;
+        }
+        if (r->status != 200) { set_status("The company answered with an error (" + std::to_string(r->status) + ")."); sleep_s(5); continue; }
         if (!j.is_object() || !j.contains("job") || !j["job"].is_object()) { set_status("Online, waiting for work"); continue; }
         set_status("Working for the company");
         try {

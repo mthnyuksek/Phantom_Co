@@ -31,7 +31,8 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
   function paint() {
     const d = data;
     const near = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 90;
-    msgsEl.innerHTML = (d.messages.map(renderMsg).join('') || '<div class="empty">No messages yet.</div>') + (d.busy ? renderLive(d) : '');
+    const retry = d.can_retry ? `<div class="sys retry-row"><button class="btn small" data-retry="1">↻ Try again</button></div>` : '';
+    msgsEl.innerHTML = (d.messages.map(renderMsg).join('') || '<div class="empty">No messages yet.</div>') + (d.busy ? renderLive(d) : retry);
     if (near || sending) msgsEl.scrollTop = msgsEl.scrollHeight;
     const can = d.can_write && !d.busy;
     input.disabled = !can;
@@ -42,7 +43,7 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
 
   function apply(d) {
     data = d;
-    const s = JSON.stringify([d.messages.length, d.busy, d.live, d.meta.title, d.can_write, d.meta.shared, (S.state?.users || []).map((u) => u.online)]);
+    const s = JSON.stringify([d.messages.length, d.busy, d.live, d.meta.title, d.can_write, d.can_retry, d.meta.shared, (S.state?.users || []).map((u) => u.online)]);
     onData?.(d);
     if (s === sig) return;
     sig = s;
@@ -70,6 +71,7 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   msgsEl.onclick = guard(async (e) => {
     if (e.target.closest('[data-stop]')) { await api('POST', `/api/chats/${id}/stop`, {}); load(); }
+    else if (e.target.closest('[data-retry]')) { e.target.closest('[data-retry]').disabled = true; sending = true; try { apply(await api('POST', `/api/chats/${id}/retry`, {})); } finally { sending = false; } }
   });
 
   return { destroy: () => { alive = false; }, reload: load, get data() { return data; } };

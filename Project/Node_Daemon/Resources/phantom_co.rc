@@ -1,5 +1,6 @@
 #include <winuser.h>
 #include <winver.h>
+#include "version.hpp"  // generated into the build folder by CMake
 
 // Program icon (the ghost). Resource id 1 is what Explorer and the taskbar show; make_icon.py draws the file.
 1 ICON "phantom_co.ico"
@@ -8,8 +9,8 @@
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "phantom_co.manifest"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1,0,0,0
-PRODUCTVERSION 1,0,0,0
+FILEVERSION PC2_VERSION_MAJOR,PC2_VERSION_MINOR,PC2_VERSION_PATCH,0
+PRODUCTVERSION PC2_VERSION_MAJOR,PC2_VERSION_MINOR,PC2_VERSION_PATCH,0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -19,8 +20,8 @@ BEGIN
         BEGIN
             VALUE "FileDescription", "Phantom Co. - Ghost Company"
             VALUE "ProductName", "Phantom Co."
-            VALUE "FileVersion", "1.0.0.0"
-            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "FileVersion", PC2_VERSION_RC_STR
+            VALUE "ProductVersion", PC2_VERSION_RC_STR
             VALUE "OriginalFilename", "phantom_co.exe"
         END
     END

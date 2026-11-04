@@ -43,6 +43,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #nav a:hover { background: #1c1730; color: var(--text); }
 #nav a.on { background: linear-gradient(90deg, #2a2050, #1c1730); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
 .side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; font-size: 12px; color: var(--muted); }
+.update-note { display: flex; align-items: center; gap: 6px; border: 1px solid #7a6020; background: #2a2210; border-radius: 10px; padding: 6px 8px 6px 10px; }
+.update-note[hidden] { display: none; }
+.update-note a { color: var(--warn); text-decoration: none; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.update-note a:hover { text-decoration: underline; }
+.update-close { background: none; border: 0; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 2px 4px; }
+.update-close:hover { color: var(--text); }
+.badge.experimental { color: var(--warn); border-color: #7a6020; margin-top: 0; vertical-align: middle; }
+.retry-row { margin-top: 4px; }
 .vault-line { word-break: break-all; opacity: .8; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; background: #1d1830; border: 1px solid var(--line); font-size: 11px; margin: 0 6px 6px 0; }
 .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); }

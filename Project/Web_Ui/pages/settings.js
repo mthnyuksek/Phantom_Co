@@ -4,6 +4,7 @@ import { $, esc, guard, toast, copyText, twoStep } from '../ui.js';
 
 let view, net = null, tun = null, tunTimer = null;
 let acc = null, accTimer = null, accUntil = 0;  // sign-in states (Secrets), polled for a while after a sign-in window opened
+let about = null;  // version and update check (/api/about)
 
 function draw() {
   const s = S.state, c = s.company, set = s.settings;
@@ -37,7 +38,29 @@ function draw() {
         <select id="s-acc-kind"><option value="subscription">Subscription</option><option value="api_key">API key</option></select>
         <input type="text" id="s-acc-name" maxlength="40" placeholder="Account name, e.g. Work">
         <input type="password" id="s-acc-key" maxlength="400" placeholder="Paste the API key" autocomplete="off" hidden>
-        <button class="btn" data-act="acc-add">Add account</button></div></div>`;
+        <button class="btn" data-act="acc-add">Add account</button></div></div>
+    <div class="card" id="s-about"><h3>About</h3>${aboutHTML()}</div>`;
+}
+
+function aboutHTML() {
+  if (!about) return '<p class="hint" style="margin-top:0">Loading…</p>';
+  const u = about.update;
+  let state = '';
+  if (u?.newer) state = `<p class="hint"><a href="${esc(u.url)}" target="_blank" rel="noopener">✨ Version ${esc(u.latest)} is available</a></p>
+    <p class="hint">Download the new phantom_co.exe, quit this one from the tray icon and put the new file in its place. Your Vault and settings stay as they are.</p>`;
+  else if (u?.checking && !u.checked) state = '<p class="hint">Looking for a newer version…</p>';
+  else if (u?.error && !u.latest) state = `<p class="hint">Could not look for a newer version: ${esc(u.error)}</p>`;
+  else if (u?.checked) state = '<p class="hint">This is the newest version.</p>';
+  const local = 'check_updates' in about;  // the update part only reaches the owner at this PC
+  return `<p class="hint" style="margin-top:0">Phantom Co. <b data-no-i18n>${esc(about.version)}</b></p>
+    ${local ? `<label class="check"><input type="checkbox" id="s-updates" ${about.check_updates ? 'checked' : ''}> Look for new versions (asks GitHub twice a day, nothing is installed by itself)</label>
+    ${about.check_updates ? `${state}<button class="btn small" data-act="update-check">Check now</button>` : ''}` : ''}`;
+}
+async function loadAbout(check = false) {
+  about = await api('GET', '/api/about' + (check ? '?check=1' : '')).catch(() => about);
+  if (!view || !view.isConnected || !$('#s-about', view)) return;  // left the page
+  $('#s-about', view).innerHTML = $('#s-about h3', view).outerHTML + aboutHTML();
+  if (about?.update?.checking) setTimeout(() => loadAbout(), 2000);
 }
 
 const PROV = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' };
@@ -120,6 +143,7 @@ export async function render(v) {
   acc = null;
   draw();
   loadAccounts();
+  loadAbout();
   if (tun && (tun.state === 'installing' || tun.state === 'starting')) tunTimer = setTimeout(pollTunnel, 1000);
   view.onclick = guard(async (e) => {
     const el = e.target.closest('[data-act]');
@@ -135,6 +159,7 @@ export async function render(v) {
     else if (act === 'tun-start') { await api('POST', '/api/tunnel', { action: 'start' }); await pollTunnel(); }
     else if (act === 'tun-stop') { await api('POST', '/api/tunnel', { action: 'stop' }); await pollTunnel(); }
     else if (act === 'tun-copy') copyText(tun.url);
+    else if (act === 'update-check') { el.disabled = true; await loadAbout(true); }
     else if (act === 'acc-add') {
       const name = $('#s-acc-name', view).value.trim(), kind = $('#s-acc-kind', view).value, key = $('#s-acc-key', view).value.trim();
       if (!name) return toast('Please enter a name.');
@@ -188,6 +213,12 @@ export async function render(v) {
       await api('PUT', '/api/accounts/' + e.target.dataset.id, { name });
       await refreshState();
       toast('Saved');
+      return;
+    }
+    if (e.target.id === 's-updates') {
+      about = await api('PUT', '/api/about', { check_updates: e.target.checked });
+      $('#s-about', view).innerHTML = $('#s-about h3', view).outerHTML + aboutHTML();
+      if (about.update?.checking) setTimeout(() => loadAbout(), 2000);
       return;
     }
     if (e.target.id !== 's-share') return;

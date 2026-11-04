@@ -220,6 +220,7 @@ async function startApp() {
   running = true;
   paintShell();
   await route();
+  checkUpdate();
   let hiddenTicks = 0;
   timer = setInterval(guard(async () => {
     if (!running) return;
@@ -243,6 +244,26 @@ function stopApp() {
   token++;
 }
 
+// ------------------------------------------------- "a newer version is out" (owner at this PC only)
+// The server asks GitHub in the background; the first answer may still be on its way, so look again a few times.
+async function checkUpdate(tries = 4) {
+  if (isRemote || !isOwner()) return;
+  const r = await api('GET', '/api/about').catch(() => null);
+  const u = r?.update, box = $('#update-note');
+  if (!u || !box || !running) return;
+  if (u.checking && !u.checked && tries > 0) { setTimeout(() => checkUpdate(tries - 1), 5000); return; }
+  let dismissed = '';
+  try { dismissed = localStorage.getItem('pc2.update.dismissed') || ''; } catch { /* private mode */ }
+  box.hidden = !(u.newer && dismissed !== u.latest);
+  if (box.hidden) return;
+  box.innerHTML = `<a href="${esc(u.url)}" target="_blank" rel="noopener">✨ Version ${esc(u.latest)} is available</a>
+    <button class="update-close" id="update-close" aria-label="Hide" title="Hide">×</button>`;
+  $('#update-close').onclick = () => {
+    try { localStorage.setItem('pc2.update.dismissed', u.latest); } catch { /* private mode */ }
+    box.hidden = true;
+  };
+}
+
 // ------------------------------------------------- lend my Claude/Codex to this company
 // Only inside the program window while it shows a friend's company: the window program does the lending.
 let lend = { running: false, url: '', status: '' };
@@ -260,10 +281,11 @@ function paintLend() {
 }
 function lendHTML() {
   if (!bridge || !isRemote || !canEdit()) return '';
-  return `<h3 class="subhead">Lend my AI</h3>
+  return `<h3 class="subhead">Lend my AI <span class="badge experimental">Experimental</span></h3>
     <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="p-lend" style="width:auto"> Let this company use the Claude Code / Codex on <b>my PC</b></label>
     <p class="sub" id="p-lend-status"></p>
-    <p class="sub">The company can then give work to my AI. Only file and web tools run (no commands). The files of the project the AI works on are copied to this PC and the changes copied back. It uses my own subscriptions, so only switch it on for people I trust. It stays on when I reopen the program, until I switch it off.</p>`;
+    <p class="sub">The company can then give work to my AI. Only file and web tools run (no commands). The files of the project the AI works on are copied to this PC and the changes copied back. It uses my own subscriptions, so only switch it on for people I trust. It stays on when I reopen the program, until I switch it off.</p>
+    <p class="sub">Still experimental: files my AI deletes are not deleted in the company, very large project folders are slow, and work for my AI fails while my PC is off. Both PCs need the same Phantom Co. version.</p>`;
 }
 function bindLend(el) {
   const box = $('#p-lend', el);

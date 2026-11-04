@@ -62,6 +62,24 @@ export const EXACT = {
   'The company can then give work to my AI. Only file and web tools run (no commands). The files of the project the AI works on are copied to this PC and the changes copied back. It uses my own subscriptions, so only switch it on for people I trust. It stays on when I reopen the program, until I switch it off.':
     'Şirket bu durumda yapay zekama iş verebilir. Yalnızca dosya ve web araçları çalışır (komut çalışmaz). Yapay zekanın üzerinde çalıştığı projenin dosyaları bu bilgisayara kopyalanır, değişiklikler geri kopyalanır. Kendi aboneliklerimi kullanır, bu yüzden yalnızca güvendiğim kişiler için aç. Programı yeniden açtığımda da açık kalır, ben kapatana kadar.',
   'Off': 'Kapalı',
+  'Experimental': 'Deneysel',
+  'Still experimental: files my AI deletes are not deleted in the company, very large project folders are slow, and work for my AI fails while my PC is off. Both PCs need the same Phantom Co. version.':
+    'Hâlâ deneysel: yapay zekamın sildiği dosyalar şirkette silinmez, çok büyük proje klasörleri yavaştır ve bilgisayarım kapalıyken yapay zekama verilen iş başarısız olur. İki bilgisayarda da aynı Phantom Co. sürümü olmalı.',
+
+  // ---- version, updates, try again
+  'Hide': 'Gizle',
+  'Look for new versions (asks GitHub twice a day, nothing is installed by itself)': 'Yeni sürümleri ara (GitHub’a günde iki kez sorar, kendiliğinden hiçbir şey kurmaz)',
+  'Check now': 'Şimdi kontrol et',
+  'Looking for a newer version…': 'Daha yeni bir sürüm aranıyor…',
+  'This is the newest version.': 'Bu en yeni sürüm.',
+  'Download the new phantom_co.exe, quit this one from the tray icon and put the new file in its place. Your Vault and settings stay as they are.':
+    'Yeni phantom_co.exe dosyasını indir, bu programdan sistem tepsisi simgesiyle çık ve yeni dosyayı onun yerine koy. Kasan ve ayarların olduğu gibi kalır.',
+  'GitHub could not be reached.': 'GitHub’a ulaşılamadı.',
+  "GitHub's answer could not be read.": 'GitHub’ın cevabı okunamadı.',
+  '↻ Try again': '↻ Tekrar dene',
+  '↻ Trying again': '↻ Tekrar deneniyor',
+  'There is nothing to try again here.': 'Burada tekrar denenecek bir şey yok.',
+  'This can only be changed on the PC that runs Phantom Co.': 'Bu yalnızca Phantom Co.’yu çalıştıran bilgisayarda değiştirilebilir.',
 
   // ---- ghost (agent) editor
   'Hire a ghost': 'Hayalet işe al', 'Really fire?': 'Gerçekten kovulsun mu?', 'Fire this ghost': 'Bu hayaleti kov',
@@ -372,6 +390,13 @@ export const PATTERNS = [
   // agents
   ['Edit {}', '{0} düzenle'], ['{} — not installed on this PC', '{0} — bu bilgisayarda kurulu değil'], ['{} — offline right now', '{0} — şu anda çevrimdışı'],
   ['Claude Code on {}\'s PC', '{0} kişisinin bilgisayarındaki Claude Code'], ['Codex on {}\'s PC', '{0} kişisinin bilgisayarındaki Codex'],
+  ['Claude Code on {}\'s PC (experimental)', '{0} kişisinin bilgisayarındaki Claude Code (deneysel)'], ['Codex on {}\'s PC (experimental)', '{0} kişisinin bilgisayarındaki Codex (deneysel)'],
+  ['{} (experimental) — offline right now', '{0} (deneysel) — şu anda çevrimdışı'],
+  ['✨ Version {} is available', '✨ {0} sürümü çıktı'],
+  ['Could not look for a newer version: {}', 'Yeni sürüm aranamadı: {0}'],
+  ['GitHub answered with an error ({#}).', 'GitHub bir hatayla cevap verdi ({0}).'],
+  ['Different versions: the company runs Phantom Co. {}, this PC runs {}. Use the same version on both PCs.', 'Sürümler farklı: şirket Phantom Co. {0} kullanıyor, bu bilgisayar {1}. İki bilgisayarda da aynı sürümü kullan.'],
+  ['Different versions: this company runs Phantom Co. {}.', 'Sürümler farklı: bu şirket Phantom Co. {0} kullanıyor.'],
   ['{} — {}', '{0} — {1}'],
   ['↳ reports to {}', '↳ {0} kişisine bağlı'], ['{#} skill', '{0} yetenek'], ['{#} skills', '{0} yetenek'],
   ['👻 Your haunt is empty. {}', '👻 Hayalet evin boş. {0}'],
