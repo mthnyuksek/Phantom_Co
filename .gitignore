@@ -1,0 +1,8 @@
+# local editor / tool files
+.vscode/
+.idea/
+.claude/settings.local.json
+__pycache__/
+*.pyc
+Thumbs.db
+desktop.ini

@@ -1,3 +1,5 @@
+README.md, LICENSE, THIRD_PARTY_NOTICES.md (Public GitHub front page, MIT license, licenses of the code in Third_Party. Upper-case names on purpose: GitHub conventions.)
+.gitignore (Local editor/tool files.)
 Development (We keep files that are not part of the project but are about the project.)
     file_structure.md (Keeps the file structures.)
     workspace_rules.md (Our rules are written here.)
