@@ -9,7 +9,7 @@
  ├─ worker threads   4 per provider lane (claude, codex, demo); at most max_concurrent run
  └─ per run          watchdog thread (time limit) + child process in a Job Object (claude / codex CLI)
 ```
-Shared objects: `Store` (Vault files, recursive mutex), `Auth` (`%LOCALAPPDATA%\PC2\auth.json`), `Runner` (jobs, live state).
+Shared objects: `Store` (Vault files, recursive mutex), `Auth` (`%LOCALAPPDATA%\Phantom_Co\auth.json`), `Runner` (jobs, live state).
 
 ## Data flow of a chat message
 1. Page -> `POST /api/chats/<id>/send` (cookie session, role check, visibility check, conversation not busy).
@@ -19,7 +19,7 @@ Shared objects: `Store` (Vault files, recursive mutex), `Auth` (`%LOCALAPPDATA%\
 5. The page polls `GET /api/chats/<id>` (0.8 s while busy, 3 s otherwise) and `GET /api/state` (2 s); no WebSockets.
 
 ## Window and pages
-`main.cpp` creates the window, `web_view_host` the WebView2 control (loader DLL unpacked from the executable into `%LOCALAPPDATA%\PC2\runtime`, profile in `webview_data`). Navigation is limited to allowed origins (local address, plus origins the program opened itself); everything else opens in the normal browser. Messages from the page: `connect` (open another company) and `home`.
+`main.cpp` creates the window, `web_view_host` the WebView2 control (loader DLL unpacked from the executable into `%LOCALAPPDATA%\Phantom_Co\runtime`, profile in `webview_data`). Navigation is limited to allowed origins (local address, plus origins the program opened itself); everything else opens in the normal browser. Messages from the page: `connect` (open another company) and `home`.
 
 ## Security gate (server)
 Host header must be local unless sharing is on; non-GET needs `X-PC2: 1` and a same-origin Origin; every API route except sign-in/join/status/static files needs a session and a minimum role (`add(method, pattern, min_role, handler)` in `server.cpp`). See `security.md`, `multi_user.md`.

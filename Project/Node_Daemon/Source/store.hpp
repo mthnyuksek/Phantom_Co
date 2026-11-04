@@ -18,11 +18,16 @@ struct Config {
     std::string worker_url, worker_token;  // lend this PC's Claude/Codex to that company (empty = off)
 };
 
-fs::path default_vault_path();  // <Documents>\PC2_Vault  (visible on purpose)
-fs::path config_dir();          // %LOCALAPPDATA%\PC2
+fs::path default_vault_path();  // <Documents>\Phantom_Vault  (visible on purpose)
+fs::path config_dir();          // %LOCALAPPDATA%\Phantom_Co
 fs::path config_file_path();
 Config load_config();
 void save_config(const Config& c);
+// The Vault folder for a folder the person picked: the folder itself when it is empty, missing or already a
+// Vault, otherwise a "Phantom_Vault" folder inside it (a Vault must not be spread over somebody's Documents).
+fs::path vault_target(const fs::path& picked);
+bool same_path(const fs::path& a, const fs::path& b);  // case-insensitive, ignores a trailing slash
+bool path_inside(const fs::path& child, const fs::path& parent);  // child lies somewhere below parent (case-insensitive)
 
 // Creates the Vault (and its starting layout from the embedded template) when it does
 // not exist, upgrades a version 1 Vault, validates it otherwise. Never overwrites user

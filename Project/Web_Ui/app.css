@@ -216,6 +216,9 @@ label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px
 .auth-card .sub { margin: 0 0 8px; color: var(--muted); }
 .auth-card label { text-align: left; }
 .auth-ghost { display: flex; justify-content: center; margin-top: -8px; }
+.vault-pick { display: flex; gap: 8px; align-items: center; }
+.vault-pick input { flex: 1; min-width: 0; }
+.vault-hint { text-align: left; font-size: 12px; color: var(--muted); margin-top: 4px; }
 .auth-err { color: var(--bad); min-height: 20px; margin: 8px 0 4px; font-size: 13px; }
 .wide-btn { width: 100%; margin-top: 8px; }
 .auth-alt { margin-top: 18px; font-size: 13px; color: var(--muted); text-align: left; }

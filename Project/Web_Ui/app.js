@@ -60,14 +60,29 @@ function bindJoinFriend() {
 }
 const field = (id, label, type = 'text', extra = '') => `<label>${label}</label><input id="${id}" type="${type}" ${extra}>`;
 
-function showSetup() {
+function showSetup(vaultPath) {
+  // vaultPath comes only for the person at this PC: they choose where the Vault (all company files) lives.
+  const vaultBox = vaultPath ? `<label>Vault folder (all company files)</label>
+     <div class="vault-pick"><input id="a-vault" type="text" value="${esc(vaultPath)}" spellcheck="false">
+     ${bridge ? '<button class="btn" id="a-browse" type="button">Browse…</button>' : ''}</div>
+     <div class="hint vault-hint">Pick an empty folder, or any folder and a Phantom_Vault folder is made inside it.</div>` : '';
   authCard('Welcome to Phantom Co.', 'Create the owner account. You can invite friends afterwards.',
-    `${field('a-name', 'Your name', 'text', 'maxlength="40" autofocus')}${field('a-pass', 'Password (at least 8 characters)', 'password')}
+    `${field('a-name', 'Your name', 'text', 'maxlength="40" autofocus')}${field('a-pass', 'Password (at least 8 characters)', 'password')}${vaultBox}
      <div class="auth-err" id="a-err"></div><button class="btn primary wide-btn" id="a-go">Create company</button>${joinFriendHTML()}`);
   bindJoinFriend();
+  if ($('#a-browse')) {
+    const onPick = (e) => {
+      if (e.data?.type !== 'folder_picked') return;
+      bridge.removeEventListener('message', onPick);
+      if (e.data.path && $('#a-vault')) $('#a-vault').value = e.data.path;
+    };
+    $('#a-browse').onclick = () => { bridge.addEventListener('message', onPick); bridge.postMessage({ cmd: 'pick_folder' }); };
+  }
   const go = guard(async () => {
     try {
-      await api('POST', '/api/auth/setup', { name: $('#a-name').value.trim(), password: $('#a-pass').value });
+      const body = { name: $('#a-name').value.trim(), password: $('#a-pass').value };
+      if ($('#a-vault')) body.vault_path = $('#a-vault').value.trim();
+      await api('POST', '/api/auth/setup', body);
       await startApp();
     } catch (e) { $('#a-err').textContent = e.message; }
   });
@@ -134,7 +149,7 @@ async function boot() {
   const join = location.hash.match(/^#\/join\/([0-9a-f]{48})$/);
   const status = await api('GET', '/api/auth/status');
   if (join) return showJoin(join[1]);
-  if (status.setup_needed) return showSetup();
+  if (status.setup_needed) return showSetup(status.vault_path);
   if (!status.me) return showLogin();
   await startApp();
 }

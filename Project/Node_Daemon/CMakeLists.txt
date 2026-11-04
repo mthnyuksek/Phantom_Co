@@ -44,7 +44,7 @@ add_executable(phantom_co WIN32
 set_source_files_properties(Resources/phantom_co.rc PROPERTIES OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Resources/phantom_co.ico;${CMAKE_CURRENT_SOURCE_DIR}/Resources/phantom_co.manifest")
 target_include_directories(phantom_co PRIVATE Source Third_Party Third_Party/Web_View2/Include)
 target_compile_definitions(phantom_co PRIVATE _WIN32_WINNT=0x0A00 WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
-target_link_libraries(phantom_co PRIVATE ws2_32 shell32 ole32 bcrypt iphlpapi dwmapi winhttp)
+target_link_libraries(phantom_co PRIVATE ws2_32 shell32 ole32 bcrypt iphlpapi dwmapi winhttp uuid)
 
 if(MINGW)
   target_compile_options(phantom_co PRIVATE -Wall -Wextra -Wno-unused-parameter)

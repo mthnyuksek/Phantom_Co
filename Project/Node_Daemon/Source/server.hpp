@@ -12,6 +12,7 @@ struct ServerOptions {
     fs::path ui_dir;  // when set, the UI is served from disk (live editing) instead of the embedded copy
     Config* config = nullptr;
     Tunnel* tunnel = nullptr;  // "Internet access" (Cloudflare quick tunnel); may be null
+    fs::path fresh_vault;  // the Vault folder this start created (it did not exist); removed when the first owner picks another folder
     std::function<void(bool)> on_listening;  // called once the port is bound (true) or could not be bound (false)
 };
 

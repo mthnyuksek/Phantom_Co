@@ -12,7 +12,7 @@ namespace pc2 {
 // inside a mirror of the run's folder and sends events, files and the result back.
 //
 // Safety: the host decides the prompt, so this side only ever starts `claude` / `codex` with file and web tools
-// (no shell), inside its own mirror folder under %LOCALAPPDATA%\PC2\Worker. Nothing else on this PC is exposed.
+// (no shell), inside its own mirror folder under %LOCALAPPDATA%\Phantom_Co\Worker. Nothing else on this PC is exposed.
 class WorkerClient {
 public:
     WorkerClient() = default;

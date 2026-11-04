@@ -25,14 +25,46 @@ fs::path default_vault_path() {
         DWORD n = GetEnvironmentVariableW(L"USERPROFILE", buf, MAX_PATH);
         base = n ? fs::path(buf) / L"Documents" : fs::path(L"C:\\");
     }
-    return base / L"PC2_Vault";
+    // Older versions used Documents\PC2_Vault (normally saved in node.json anyway): keep using it when it is there.
+    std::error_code ec;
+    if (fs::exists(base / L"PC2_Vault" / L"vault.json", ec) && !fs::exists(base / L"Phantom_Vault", ec)) return base / L"PC2_Vault";
+    return base / L"Phantom_Vault";
+}
+
+fs::path vault_target(const fs::path& picked) {
+    std::error_code ec;
+    if (!fs::exists(picked, ec) || fs::exists(picked / L"vault.json", ec)) return picked;
+    if (fs::is_directory(picked, ec) && fs::directory_iterator(picked, ec) == fs::directory_iterator()) return picked;
+    return picked / L"Phantom_Vault";
+}
+
+static std::wstring norm_path(const fs::path& p) {
+    std::wstring s = p.lexically_normal().make_preferred().wstring();
+    while (s.size() > 3 && s.back() == L'\\') s.pop_back();
+    for (auto& ch : s) ch = towlower(ch);
+    return s;
+}
+bool same_path(const fs::path& a, const fs::path& b) { return norm_path(a) == norm_path(b); }
+bool path_inside(const fs::path& child, const fs::path& parent) {
+    std::wstring c = norm_path(child), p = norm_path(parent);
+    if (p.empty() || p.back() != L'\\') p += L'\\';
+    return c.size() > p.size() && c.compare(0, p.size(), p) == 0;
 }
 
 fs::path config_dir() {
     wchar_t buf[MAX_PATH];
     DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
     fs::path base = n ? fs::path(buf) : fs::temp_directory_path();
-    return base / L"PC2";
+    fs::path dir = base / L"Phantom_Co", old = base / L"PC2";
+    // Older versions kept accounts and settings in %LOCALAPPDATA%\PC2: move that folder once. When it cannot be
+    // moved (a file in it is open), keep using it so nobody loses their accounts.
+    static const fs::path chosen = [&] {
+        std::error_code ec;
+        if (fs::exists(dir, ec) || !fs::exists(old, ec)) return dir;
+        fs::rename(old, dir, ec);
+        return ec ? old : dir;
+    }();
+    return chosen;
 }
 fs::path config_file_path() { return config_dir() / L"node.json"; }
 

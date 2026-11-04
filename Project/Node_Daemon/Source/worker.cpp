@@ -131,7 +131,7 @@ void WorkerClient::run_job(const json& job) {
     spec.max_turns = std::clamp(job.value("max_turns", 40), 1, 100);
     int timeout_min = std::clamp(job.value("timeout_min", 30), 1, 240);
 
-    // ---- mirror folder: %LOCALAPPDATA%\PC2\Worker\<host>\<scope>
+    // ---- mirror folder: %LOCALAPPDATA%\Phantom_Co\Worker\<host>\<scope>
     std::string host_key = url.substr(url.find("//") + 2), scope = job.value("scope", "shared");
     for (char& c : host_key) if (!isalnum((unsigned char)c)) c = '_';
     for (char& c : scope) if (!isalnum((unsigned char)c)) c = '_';

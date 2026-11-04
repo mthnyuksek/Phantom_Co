@@ -80,5 +80,5 @@ Project (We keep the project source files here. When we hand the project to some
 CLAUDE.md
 
 Not part of the source tree (created while the program runs):
-    <Documents>\PC2_Vault (The Vault, see Docs/vault_format.md.)
-    %LOCALAPPDATA%\PC2 (node.json settings, auth.json accounts and sessions, webview_data, runtime\WebView2Loader.dll, Tmp, Worker\<host>\<scope> = mirror folders of lent runs.)
+    <Documents>\Phantom_Vault (The Vault, see Docs/vault_format.md.)
+    %LOCALAPPDATA%\Phantom_Co (node.json settings, auth.json accounts and sessions, webview_data, runtime\WebView2Loader.dll, Tmp, Worker\<host>\<scope> = mirror folders of lent runs.)

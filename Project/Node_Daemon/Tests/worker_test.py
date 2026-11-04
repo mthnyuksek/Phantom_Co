@@ -173,7 +173,7 @@ def main():
         copy = os.path.join(shared, "hostfile_copy.txt")
         check("host file reached the friend's PC and back", os.path.exists(copy) and open(copy, "rb").read() == b"content on the host")
         mirror_args = None
-        for root, _, files in os.walk(os.path.join(fake_home, "PC2", "Worker")):
+        for root, _, files in os.walk(os.path.join(fake_home, "Phantom_Co", "Worker")):
             if "last_args.txt" in files:
                 mirror_args = open(os.path.join(root, "last_args.txt"), encoding="utf-8", errors="replace").read()
         check("fake claude was started on the friend's PC", mirror_args is not None)
@@ -192,7 +192,7 @@ def main():
         # second message resumes the session on the friend's PC
         st, v = owner.post(f"/api/chats/{cid}/send", {"text": "and again"})
         v = wait(idle, 90)
-        for root, _, files in os.walk(os.path.join(fake_home, "PC2", "Worker")):
+        for root, _, files in os.walk(os.path.join(fake_home, "Phantom_Co", "Worker")):
             if "last_args.txt" in files:
                 mirror_args = open(os.path.join(root, "last_args.txt"), encoding="utf-8", errors="replace").read()
         check("session resumed on the friend's PC", mirror_args is not None and "--resume sess123" in mirror_args, mirror_args)

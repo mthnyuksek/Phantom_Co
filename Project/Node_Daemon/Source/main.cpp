@@ -2,6 +2,7 @@
 #include <dwmapi.h>
 #include <objbase.h>
 #include <shellapi.h>
+#include <shobjidl.h>
 
 #include <atomic>
 #include <chrono>
@@ -23,8 +24,10 @@ using namespace pc2;
 namespace {
 constexpr wchar_t kWindowClass[] = L"PhantomCoWindow";
 constexpr UINT kServerFailed = WM_APP + 1;
+constexpr UINT kPickFolder = WM_APP + 2;  // the page asked for a folder picker (shown from the window loop, not inside a WebView2 callback)
 
 WebViewHost* g_host = nullptr;
+HWND g_hwnd = nullptr;
 WorkerClient g_worker;
 Config* g_cfg = nullptr;
 std::wstring g_home_url;
@@ -41,10 +44,10 @@ void fatal(const std::wstring& msg, bool window_mode) {
 
 void usage() {
     std::cout << "Phantom Co. - ghost company\n"
-                 "  --vault <folder>   Vault folder for this run (default: saved setting, then Documents\\PC2_Vault)\n"
+                 "  --vault <folder>   Vault folder for this run (default: saved setting, then Documents\\Phantom_Vault)\n"
                  "  --port <number>    Port of the local server (default 7777)\n"
                  "  --share            Let people on the network connect (the owner can also switch it in Settings)\n"
-                 "  --data <folder>    Folder for accounts and settings (default %LOCALAPPDATA%\\PC2)\n"
+                 "  --data <folder>    Folder for accounts and settings (default %LOCALAPPDATA%\\Phantom_Co)\n"
                  "  --no-window        Run only the server, without a window (tests, a PC without a screen)\n"
                  "  --worker-url <address> --worker-token <token>\n"
                  "                     Lend this PC's Claude/Codex to the company at that address (normally switched on in the window)\n"
@@ -80,6 +83,8 @@ void on_page_message(const std::string& text) {
         g_worker.stop();
         if (g_cfg) { g_cfg->worker_url.clear(); g_cfg->worker_token.clear(); save_config(*g_cfg); }
         report_worker();
+    } else if (cmd == "pick_folder") {
+        if (g_hwnd) PostMessageW(g_hwnd, kPickFolder, 0, 0);
     } else if (cmd == "home") {
         g_host->Navigate(g_home_url);
     } else if (cmd == "connect") {
@@ -101,6 +106,26 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_GETMINMAXINFO: {
             auto* mm = reinterpret_cast<MINMAXINFO*>(lp);
             mm->ptMinTrackSize = {900, 600};
+            return 0;
+        }
+        case kPickFolder: {
+            json r = {{"type", "folder_picked"}, {"path", ""}};
+            IFileOpenDialog* dlg = nullptr;
+            if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog, reinterpret_cast<void**>(&dlg)))) {
+                DWORD o = 0;
+                dlg->GetOptions(&o);
+                dlg->SetOptions(o | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+                dlg->SetTitle(L"Where should Phantom Co. keep its Vault?");
+                IShellItem* item = nullptr;
+                PWSTR picked = nullptr;
+                if (SUCCEEDED(dlg->Show(hwnd)) && SUCCEEDED(dlg->GetResult(&item)) && SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &picked))) {
+                    r["path"] = U8(vault_target(fs::path(picked)));  // a non-empty folder gets a Phantom_Vault folder inside
+                    CoTaskMemFree(picked);
+                }
+                if (item) item->Release();
+                dlg->Release();
+            }
+            if (g_host) g_host->PostToPage(r.dump());
             return 0;
         }
         case kServerFailed:
@@ -191,6 +216,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     }
 
     try {
+        std::error_code vault_ec;
+        bool vault_existed = fs::exists(cfg.vault, vault_ec);
         Store store(cfg.vault);
         Auth auth(cfg.file.parent_path() / L"auth.json");
         Runner runner(store);
@@ -206,6 +233,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         opt.config = &cfg;
         Tunnel tunnel;  // starts off
         opt.tunnel = &tunnel;
+        if (!vault_existed) opt.fresh_vault = cfg.vault;
         std::promise<bool> listening;
         std::atomic<bool> signalled{false};
         std::atomic<HWND> hwnd{nullptr};
@@ -227,6 +255,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         int code = 0;
         if (window_mode) {
             hwnd = make_window(inst);
+            g_hwnd = hwnd;
             g_home_url = L"http://127.0.0.1:" + std::to_wstring(cfg.port) + L"/";
             WebViewHost host;
             g_host = &host;

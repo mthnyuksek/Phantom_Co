@@ -1,13 +1,13 @@
 # Vault format (version 2)
 
-The Vault is a folder of plain files you can open with any editor (Obsidian style). The program creates it on first start (`<Documents>\PC2_Vault`, visible on purpose). Markdown entities are `---` header lines (`key: value`; a repeated key is a list) followed by free text.
+The Vault is a folder of plain files you can open with any editor (Obsidian style). The program creates it on first start (`<Documents>\Phantom_Vault`, visible on purpose). Markdown entities are `---` header lines (`key: value`; a repeated key is a list) followed by free text.
 
 ```
 <vault>/
   vault.json                    {vault_version: 2, vault_id, created, settings: {max_hops, default_model, max_queue_per_user, max_concurrent}}
   README.md                     explains the folder to people who open it
   Company/company.json          {name, goal}
-  Users/<id>.md                 name, form, color, created        (profile only; role and password live in %LOCALAPPDATA%\PC2\auth.json)
+  Users/<id>.md                 name, form, color, created        (profile only; role and password live in %LOCALAPPDATA%\Phantom_Co\auth.json)
   Agents/<id>.md                name, role, reports_to, provider, model, form, color, enabled, timeout_min, skill: <id> (repeat), created; body = persona
   Skills/<id>.md                name, description, tools: Read, Glob, ..., dirs: Projects, min_role: editor|owner, enabled, projects: a, b (empty = everywhere; else only in those projects); body = how to use it
   Rules/<id>.md                 name, enabled; body = the rule (added to every agent's prompt)

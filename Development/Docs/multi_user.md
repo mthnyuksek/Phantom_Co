@@ -13,7 +13,7 @@ The friend's window just shows the host's web page (`window.chrome.webview.postM
 - First start: "Create company" makes the **owner**. Everyone else is invited by the owner (Team page): the owner picks a name and a role, the program makes a one-time link `http://<address>:<port>/#/join/<token>` (valid 3 days, one use). The friend pastes it into "I was invited to a friend's company" or opens it, and chooses their own password.
 - Password: PBKDF2-SHA256, 200,000 iterations, random salt, constant-time compare, minimum 8 characters. Failed logins are throttled per name and address (5 failures -> wait, growing).
 - Session: random 192-bit token, only its SHA-256 is stored, HttpOnly + SameSite=Strict cookie `pc2_session_<port>`, 30 days. Changing a password ends the old sessions.
-- Role and password data live in `%LOCALAPPDATA%\PC2\auth.json`, outside the Vault: an agent that may edit Vault files cannot read hashes or promote anybody.
+- Role and password data live in `%LOCALAPPDATA%\Phantom_Co\auth.json`, outside the Vault: an agent that may edit Vault files cannot read hashes or promote anybody.
 
 ## Roles
 | | viewer | editor | owner |

@@ -13,13 +13,13 @@ Windows only. One program file, no installer, no cloud service of its own.
 - **Skills** are the only source of tools: a ghost can only do what its skills allow, and only with the rights of the person who asked.
 - **Several people**: owner / editor / viewer roles, invitation links, private chats. Friends connect over the local network or through an optional Cloudflare quick tunnel. A friend can also lend their own Claude/Codex to the company.
 - **Runs** with a live view, stop button, tokens and cost. A **Files** browser. English and Turkish interface. Works on a phone browser too.
-- Everything is stored as plain Markdown/JSON files in a folder (the **Vault**, `Documents\PC2_Vault`).
+- Everything is stored as plain Markdown/JSON files in a folder (the **Vault**, `Documents\Phantom_Vault`).
 
 ## Get started
 
 1. Download `Project/Node_Daemon/Build/phantom_co.exe` (or build it, see below).
 2. Optional: install and sign in to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`) and/or [Codex](https://github.com/openai/codex) (`codex`). Without them only the Demo brain works.
-3. Double-click `phantom_co.exe`. On the first start it creates the Vault and asks you to create the owner account.
+3. Double-click `phantom_co.exe`. On the first start it asks you to create the owner account and where to keep the Vault.
 
 Requires the Microsoft Edge WebView2 Runtime, which ships with Windows 11 and current Windows 10.
 

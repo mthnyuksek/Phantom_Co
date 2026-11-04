@@ -253,8 +253,10 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
     const std::string ID = "([A-Za-z0-9_-]+)";
 
     // ================================================================= auth
-    add("GET", "/api/auth/status", kPublic, [&](auto&, auto& res, Ctx& c) {
-        send(res, {{"setup_needed", !auth.has_users()}, {"me", c.ok ? public_user(c.profile) : json(nullptr)}});
+    add("GET", "/api/auth/status", kPublic, [&](auto& req, auto& res, Ctx& c) {
+        json st = {{"setup_needed", !auth.has_users()}, {"me", c.ok ? public_user(c.profile) : json(nullptr)}};
+        if (st["setup_needed"] && is_this_pc(req)) st["vault_path"] = U8(store.root());  // the first start offers to put the Vault elsewhere
+        send(res, st);
     });
 
     auto start_session = [&](httplib::Response& res, const std::string& uid) {
@@ -269,6 +271,19 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         std::string name = str(b, "name", 40), pw = str(b, "password", 200);
         if (name.empty()) return fail(res, 400, "Please enter your name.");
         if (!valid_password(pw)) return fail(res, 400, "The password needs at least 8 characters.");
+        std::string vault = str(b, "vault_path", 500);
+        fs::path target = vault.empty() ? fs::path() : vault_target(P(vault));
+        if (!vault.empty() && !same_path(target, store.root())) {  // the person picked another place for the Vault
+            if (!is_this_pc(req)) return fail(res, 403, "The Vault folder can only be chosen on the PC that runs Phantom Co.");
+            if (!target.is_absolute()) return fail(res, 400, "Give a full folder path, for example D:\\Phantom_Vault.");
+            fs::path old = store.root();
+            try { store.switch_root(target); } catch (const std::exception& e) { return fail(res, 400, e.what()); }
+            cfg.vault = target;
+            save_config(cfg);
+            // The folder this start created on its own (usually Documents\Phantom_Vault) holds only the template: remove it,
+            // unless the new Vault was put inside it.
+            if (!opt.fresh_vault.empty() && same_path(old, opt.fresh_vault) && !path_inside(target, old)) { std::error_code ec; fs::remove_all(old, ec); }
+        }
         std::string form = str(b, "form", 16, "wizard"), color = str(b, "color", 7, "#b69cff");
         json u = store.save_user({{"name", name}, {"form", kForms.count(form) ? form : "classic"}, {"color", is_color(color) ? color : "#b69cff"}});
         auth.add_user(u["id"], "owner");

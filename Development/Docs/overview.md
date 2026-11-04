@@ -20,7 +20,7 @@ A Paperclip-style "ghost company": agents with roles, skills and a ghost look, w
 | Term | Meaning |
 | --- | --- |
 | **Host** | The PC that runs the company (Vault, CLIs). |
-| **Vault** | The folder of plain files (`<Documents>\PC2_Vault`). See `vault_format.md`. |
+| **Vault** | The folder of plain files (`<Documents>\Phantom_Vault`). See `vault_format.md`. |
 | **Agent / ghost** | A worker with role, persona, skills and a brain. |
 | **Skill** | Tools + instructions an agent may use. Agents get tools only through skills. |
 | **Project** | A folder where agents work, plus notes every agent working there reads. |

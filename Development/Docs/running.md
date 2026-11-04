@@ -15,8 +15,8 @@ Result: `Project\Node_Daemon\Build\phantom_co.exe`, one static file (the web pag
 
 ## Run
 Double-click `phantom_co.exe` (or run it from a terminal).
-- First start: the program creates the Vault at `<Documents>\PC2_Vault`, then asks you to create the owner account.
-- Settings are in `%LOCALAPPDATA%\PC2\node.json`; accounts and sessions in `%LOCALAPPDATA%\PC2\auth.json`.
+- First start: the program asks you to create the owner account and where to keep the Vault (default `<Documents>\Phantom_Vault`; "Browse…" picks another folder).
+- Settings are in `%LOCALAPPDATA%\Phantom_Co\node.json`; accounts and sessions in `%LOCALAPPDATA%\Phantom_Co\auth.json`.
 - Closing the window quits the program (running agents are stopped). A second start only brings the first window to the front.
 
 | Option | Meaning |
@@ -24,7 +24,7 @@ Double-click `phantom_co.exe` (or run it from a terminal).
 | `--vault <folder>` | Use another Vault for this run |
 | `--port <n>` | Another port for the local server (default 7777) |
 | `--share` | Let people on the network connect (the owner can also switch it in Settings) |
-| `--data <folder>` | Folder for accounts and settings instead of `%LOCALAPPDATA%\PC2` (a second company, tests) |
+| `--data <folder>` | Folder for accounts and settings instead of `%LOCALAPPDATA%\Phantom_Co` (a second company, tests) |
 | `--no-window` | Server only, no window (tests; output goes to the terminal) |
 | `--devtools` | Keep browser shortcuts and F12 in the window |
 | `--ui-dir <folder>` | Read `Project\Web_Ui` from disk: edit the UI and press F5 (with `--devtools`), no rebuild |
