@@ -357,7 +357,7 @@ std::vector<json> Store::projects() {
 std::optional<json> Store::project(const std::string& id) {
     if (!valid_id(id)) return std::nullopt;
     std::lock_guard<std::recursive_mutex> l(mu_);
-    fs::path meta = root_ / L"Projects" / P(id) / L".Pc2";
+    fs::path meta = root_ / L"Projects" / P(id) / L".Phantom";
     auto p = read_entity(meta / L"project.md", kProjectF, "summary");
     if (!p) return std::nullopt;
     (*p)["id"] = id;  // the folder name, not the stem of project.md
@@ -365,7 +365,7 @@ std::optional<json> Store::project(const std::string& id) {
     std::error_code ec;
     for (auto& n : read_dir(meta / L"Notes", kRuleF, "body")) notes.push_back(std::move(n));
     (*p)["notes"] = notes;
-    json roles = json::object();  // .Pc2/Roles/<agent id>.md: what that agent does in this project
+    json roles = json::object();  // .Phantom/Roles/<agent id>.md: what that agent does in this project
     for (auto& r : read_dir(meta / L"Roles", kRuleF, "body")) roles[r["id"].get<std::string>()] = r.value("body", "");
     (*p)["roles"] = roles;
     return p;
@@ -378,20 +378,20 @@ json Store::save_project(json p) {
         p["created"] = now_iso();
     }
     fs::path dir = root_ / L"Projects" / P(p["id"].get<std::string>());
-    fs::create_directories(dir / L".Pc2" / L"Notes", ec);
-    hide(dir / L".Pc2");
-    write_file_atomic(dir / L".Pc2" / L"project.md", md_serialize(json_to_md(p, kProjectF, "summary")));
+    fs::create_directories(dir / L".Phantom" / L"Notes", ec);
+    hide(dir / L".Phantom");
+    write_file_atomic(dir / L".Phantom" / L"project.md", md_serialize(json_to_md(p, kProjectF, "summary")));
     return p;
 }
 bool Store::remove_project(const std::string& id) {
     if (!valid_id(id)) return false;
     std::lock_guard<std::recursive_mutex> l(mu_);
     std::error_code ec;
-    return fs::remove_all(root_ / L"Projects" / P(id) / L".Pc2", ec) > 0;
+    return fs::remove_all(root_ / L"Projects" / P(id) / L".Phantom", ec) > 0;
 }
 json Store::save_note(const std::string& project_id, json n) {
     std::lock_guard<std::recursive_mutex> l(mu_);
-    fs::path dir = root_ / L"Projects" / P(project_id) / L".Pc2" / L"Notes";
+    fs::path dir = root_ / L"Projects" / P(project_id) / L".Phantom" / L"Notes";
     std::error_code ec;
     fs::create_directories(dir, ec);
     if (!n.contains("id") || n["id"].get<std::string>().empty()) n["id"] = unique_id(dir, n.value("name", "note"), false);
@@ -401,7 +401,7 @@ json Store::save_note(const std::string& project_id, json n) {
 bool Store::set_project_role(const std::string& project_id, const std::string& agent_id, const std::string& text) {
     if (!valid_id(project_id) || !valid_id(agent_id)) return false;
     std::lock_guard<std::recursive_mutex> l(mu_);
-    fs::path dir = root_ / L"Projects" / P(project_id) / L".Pc2" / L"Roles";
+    fs::path dir = root_ / L"Projects" / P(project_id) / L".Phantom" / L"Roles";
     std::error_code ec;
     if (text.find_first_not_of(" \t\r\n") == std::string::npos) { fs::remove(dir / P(agent_id + ".md"), ec); return true; }
     fs::create_directories(dir, ec);
@@ -412,7 +412,7 @@ bool Store::remove_note(const std::string& project_id, const std::string& note_i
     if (!valid_id(project_id) || !valid_id(note_id)) return false;
     std::lock_guard<std::recursive_mutex> l(mu_);
     std::error_code ec;
-    return fs::remove(root_ / L"Projects" / P(project_id) / L".Pc2" / L"Notes" / P(note_id + ".md"), ec);
+    return fs::remove(root_ / L"Projects" / P(project_id) / L".Phantom" / L"Notes" / P(note_id + ".md"), ec);
 }
 
 // ------------------------------------------------------------------- tasks

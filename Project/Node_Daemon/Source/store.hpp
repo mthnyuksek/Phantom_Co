@@ -70,10 +70,10 @@ public:
     std::vector<json> projects();                   // each with its notes
     std::optional<json> project(const std::string& id);
     json save_project(json p);
-    bool remove_project(const std::string& id);     // removes the .Pc2 metadata only, never the files
+    bool remove_project(const std::string& id);     // removes the .Phantom metadata only, never the files
     json save_note(const std::string& project_id, json n);
     bool remove_note(const std::string& project_id, const std::string& note_id);
-    // What one agent does in one project (.Pc2/Roles/<agent id>.md); empty text removes it.
+    // What one agent does in one project (.Phantom/Roles/<agent id>.md); empty text removes it.
     bool set_project_role(const std::string& project_id, const std::string& agent_id, const std::string& text);
 
     std::vector<json> tasks();                      // newest first

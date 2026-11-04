@@ -12,9 +12,9 @@ The Vault is a folder of plain files you can open with any editor (Obsidian styl
   Skills/<id>.md                name, description, tools: Read, Glob, ..., dirs: Projects, min_role: editor|owner, enabled, projects: a, b (empty = everywhere; else only in those projects); body = how to use it
   Rules/<id>.md                 name, enabled; body = the rule (added to every agent's prompt)
   Projects/<id>/                the project's work folder; agents run here
-    .Pc2/project.md             name, created; body = summary        (hidden folder)
-    .Pc2/Notes/<id>.md          name, enabled; body = the note       (shared memory)
-    .Pc2/Roles/<agent id>.md    name; body = that agent's job in this project (added to its prompt only here)
+    .Phantom/project.md             name, created; body = summary        (hidden folder)
+    .Phantom/Notes/<id>.md          name, enabled; body = the note       (shared memory)
+    .Phantom/Roles/<agent id>.md    name; body = that agent's job in this project (added to its prompt only here)
   Tasks/<id>.md                 name, agent, project, created_by, created, updated, conversation, wake, wake_every, wake_at, wake_on, wake_last; body = description
   Task_Templates/<id>.md        name, agent (may be empty), project, created_by, created, wake, wake_every, wake_at; body = task details
   Conversations/<id>.jsonl      one JSON object per line (see below)

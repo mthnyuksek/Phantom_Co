@@ -261,7 +261,7 @@ def main():
         # ----------------------------------------------------------- projects
         st, pr = ece.post("/api/projects", {"name": "Moon Base", "summary": "Build a base on the moon."})
         check("project created", st == 201 and pr["id"] == "moon_base", pr)
-        check("project metadata hidden folder", os.path.exists(os.path.join(vault, "Projects", "moon_base", ".Pc2", "project.md")))
+        check("project metadata hidden folder", os.path.exists(os.path.join(vault, "Projects", "moon_base", ".Phantom", "project.md")))
         st, note = ece.post("/api/projects/moon_base/notes", {"name": "Oxygen", "body": "We need oxygen."})
         check("note created", st == 201 and note["id"] == "oxygen", note)
         st, chat = ece.post("/api/chats", {"agent_id": "casper", "project_id": "moon_base"})
@@ -270,9 +270,9 @@ def main():
         check("project run wrote into the project folder", any(f.startswith("demo_") for f in os.listdir(os.path.join(vault, "Projects", "moon_base"))))
         st, fl = ece.get("/api/files?scope=project:moon_base")
         names = [f["path"] for f in fl["files"]]
-        check("project files listed without .Pc2", any(n.startswith("demo_") for n in names) and not any(".Pc2" in n for n in names), names)
+        check("project files listed without .Phantom", any(n.startswith("demo_") for n in names) and not any(".Phantom" in n for n in names), names)
         check("project file readable", ece.get("/api/files/read?scope=project:moon_base&path=" + names[0])[0] == 200)
-        for evil in ["../vault.json", "..%5Cvault.json", "C:/Windows/win.ini", ".Pc2/project.md"]:
+        for evil in ["../vault.json", "..%5Cvault.json", "C:/Windows/win.ini", ".Phantom/project.md"]:
             check("traversal blocked: " + evil, ece.get("/api/files/read?scope=project:moon_base&path=" + evil)[0] == 404)
         check("viewer cannot add notes", vera.post("/api/projects/moon_base/notes", {"name": "x"})[0] == 403)
         check("editor cannot delete project", ece.delete("/api/projects/moon_base")[0] == 403)
@@ -291,7 +291,7 @@ def main():
         check("scribe hired", st == 201, scribe)
         st, p2 = ece.put("/api/projects/moon_base/roles/scribe", {"text": "Writes the moon diary.\nOne page a day."})
         check("ghost job set", st == 200 and p2["roles"].get("scribe", "").startswith("Writes the moon diary."), p2)
-        check("ghost job is a file", os.path.exists(os.path.join(vault, "Projects", "moon_base", ".Pc2", "Roles", "scribe.md")))
+        check("ghost job is a file", os.path.exists(os.path.join(vault, "Projects", "moon_base", ".Phantom", "Roles", "scribe.md")))
         check("job for unknown ghost refused", ece.put("/api/projects/moon_base/roles/nobody", {"text": "x"})[0] == 404)
         check("viewer cannot set ghost jobs", vera.put("/api/projects/moon_base/roles/scribe", {"text": "x"})[0] == 403)
         before = len(os.listdir(os.path.join(vault, "Projects", "moon_base")))
@@ -306,7 +306,7 @@ def main():
         ans = ask(ece, "casper", "moon_base", "demo:prompt")
         check("colleagues see the first line of a job", "Scribe, Writer; in this project: Writes the moon diary.\n" in ans, ans)
         check("ghost job removed", ece.put("/api/projects/moon_base/roles/scribe", {"text": " "})[1]["roles"] == {}
-              and not os.path.exists(os.path.join(vault, "Projects", "moon_base", ".Pc2", "Roles", "scribe.md")))
+              and not os.path.exists(os.path.join(vault, "Projects", "moon_base", ".Phantom", "Roles", "scribe.md")))
 
         # ---------------------------------------------------------------- tasks
         st, t = ece.post("/api/tasks", {"title": "Write a plan", "description": "Plan the first milestone. demo:write", "agent_id": "casper", "project_id": "moon_base"})

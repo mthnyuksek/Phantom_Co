@@ -17,7 +17,7 @@ PBKDF2-SHA256 (200k iterations, random salt), constant-time compare, login throt
 - Agents get tools only through skills, and only the skills the asking person's role may use. Commands (Bash/PowerShell) and Vault folders other than Projects are owner-only.
 - Claude's Bash/PowerShell tools are **not** path-sandboxed: an owner who grants a command skill gives that agent the owner's rights on the PC. Codex runs in its own sandbox.
 - Users' password hashes, roles and sessions are outside the Vault; conversations and runs are inside it but never added to an agent's accessible folders. (An agent with `Read` and a Vault-wide skill could still read what is in its working folders.)
-- File API: paths are resolved inside the chosen folder (`Shared_Files` or a project); `..`, absolute paths and the hidden `.Pc2` metadata are refused; images are served with `Content-Security-Policy: sandbox`.
+- File API: paths are resolved inside the chosen folder (`Shared_Files` or a project); `..`, absolute paths and the hidden `.Phantom` metadata are refused; images are served with `Content-Security-Policy: sandbox`.
 - User-supplied model names are checked against a character whitelist (they reach a command line).
 
 ## Lending a friend's AI (provider workers)

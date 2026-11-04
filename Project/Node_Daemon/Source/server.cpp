@@ -79,7 +79,7 @@ static fs::path safe_path(const fs::path& root_in, const std::string& rel) {
     fs::path p = fs::weakly_canonical(root / P(rel));
     auto r = p.lexically_relative(root);
     if (r.empty() || *r.begin() == L"..") return {};
-    for (auto& part : r) if (part == L".Pc2") return {};  // project metadata is not a "file"
+    for (auto& part : r) if (part == L".Phantom") return {};  // project metadata is not a "file"
     return p;
 }
 
@@ -1075,7 +1075,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         std::error_code ec;
         for (auto it = fs::recursive_directory_iterator(root, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
             if (ec || list.size() >= 3000) break;
-            if (it->path().filename() == L".Pc2") { it.disable_recursion_pending(); continue; }
+            if (it->path().filename() == L".Phantom") { it.disable_recursion_pending(); continue; }
             bool dir = it->is_directory(ec);
             std::string rel = Narrow(it->path().lexically_relative(root).generic_wstring());
             list.push_back({{"path", rel}, {"dir", dir}, {"size", dir ? 0 : (int64_t)it->file_size(ec)}});
@@ -1181,7 +1181,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         std::error_code ec;
         for (auto it = fs::recursive_directory_iterator(root, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
             if (ec || list.size() >= 5000) break;
-            if (it->path().filename() == L".Pc2") { it.disable_recursion_pending(); continue; }
+            if (it->path().filename() == L".Phantom") { it.disable_recursion_pending(); continue; }
             if (!it->is_regular_file(ec)) continue;
             int64_t size = (int64_t)it->file_size(ec);
             if (size > kMirrorFileMax) continue;

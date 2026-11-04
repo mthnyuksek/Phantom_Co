@@ -117,7 +117,7 @@ def main():
         check("existing file is not overwritten", ece.upload("/api/files/upload?scope=shared&path=notes/a.txt", b"other")[0] == 409)
         check("overwrite when asked", ece.upload("/api/files/upload?scope=shared&path=notes/a.txt&overwrite=1", b"new text")[0] == 201)
         check("path traversal refused", ece.upload("/api/files/upload?scope=shared&path=../evil.txt", b"x")[0] == 400)
-        check("project metadata refused", ece.upload("/api/files/upload?scope=shared&path=.Pc2/x.txt", b"x")[0] == 400)
+        check("project metadata refused", ece.upload("/api/files/upload?scope=shared&path=.Phantom/x.txt", b"x")[0] == 400)
         check("unknown folder refused", ece.upload("/api/files/upload?scope=project:nope&path=x.txt", b"x")[0] == 404)
         check("mkdir", ece.post("/api/files/mkdir", {"scope": "shared", "path": "new_dir/sub"})[0] == 201)
         check("editor cannot delete", ece.delete("/api/files?scope=shared&path=notes/a.txt")[0] == 403)

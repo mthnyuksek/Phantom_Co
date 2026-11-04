@@ -9,7 +9,7 @@ This folder was created by the Phantom Co. program. It is the work folder of you
 | `Agents/` | One `<id>.md` per ghost: name, role, boss, brain, look, skills; the text below the header is the persona. |
 | `Skills/` | One `<id>.md` per skill: tools and how to use them. Agents get tools only through skills. A `projects:` line limits a skill to those projects. |
 | `Rules/` | Company rules added to every agent's prompt. |
-| `Projects/<id>/` | A project's work folder. The hidden `.Pc2` folder holds its summary, notes and each ghost's job in the project (`Roles/`). |
+| `Projects/<id>/` | A project's work folder. The hidden `.Phantom` folder holds its summary, notes and each ghost's job in the project (`Roles/`). |
 | `Tasks/` | One `<id>.md` per task. |
 | `Task_Templates/` | One `<id>.md` per ready-made task (title, details, ghost, project, wake-up). |
 | `Conversations/` | One `<id>.jsonl` per chat, task or agent-to-agent conversation. |
