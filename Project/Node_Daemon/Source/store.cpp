@@ -237,6 +237,9 @@ void init_vault(const fs::path& root) {
         write_file_atomic(target, std::string(reinterpret_cast<const char*>(f.data), f.size));
     }
     if (fresh) for (const json& s : embedded_skills()) if (s.value("default", false)) install_skill(root, s);
+    // The guide's knowledge follows the program: once installed, "app_guide" is rewritten from the built-in copy on every start.
+    for (const json& s : embedded_skills())
+        if (s["id"] == "app_guide" && fs::exists(root / L"Skills" / L"app_guide.md", ec)) write_entity(root / L"Skills" / L"app_guide.md", s, kSkillF, "body");
 }
 
 // -------------------------------------------------------------------- store

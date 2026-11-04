@@ -4,6 +4,7 @@ import { ghostSVG } from './ghosts.js';
 import { $, $$, esc, guard, modal, closeModal, toast, ROLE_TEXT } from './ui.js';
 import { S, refreshState, forgetState, me, isOwner, canEdit, userGhost, providerLabel } from './state.js';
 import { ghostPickerHTML, bindGhostPicker } from './pickers.js';
+import { offerGuide } from './guide.js';
 
 const view = $('#view');
 const NAV = [
@@ -84,6 +85,7 @@ function showSetup(vaultPath) {
       if ($('#a-vault')) body.vault_path = $('#a-vault').value.trim();
       await api('POST', '/api/auth/setup', body);
       await startApp();
+      offerGuide();
     } catch (e) { $('#a-err').textContent = e.message; }
   });
   $('#a-go').onclick = go;

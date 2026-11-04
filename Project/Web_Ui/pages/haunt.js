@@ -3,6 +3,7 @@ import { S, FORMS, agentById, agentGhost, canEdit, providerLabel } from '../stat
 import { $, esc, guard, ago, sleep, pill, moodOfStatus } from '../ui.js';
 import { openAgentModal } from '../agent_editor.js';
 import { openTaskModal } from './tasks.js';
+import { canHireGuide, offerGuide } from '../guide.js';
 
 let view, tasks = [];
 
@@ -44,7 +45,7 @@ function draw() {
   view.innerHTML = `
     <div class="page-head"><div><h1>The Haunt</h1><p>Your ghost company. Chat with ghosts, give them tasks and watch them work together.</p></div>
       <div class="spacer"></div>
-      ${canEdit() ? `<button class="btn" data-act="new-task">+ New task</button><button class="btn primary" data-act="hire">+ Hire a ghost</button>` : ''}</div>
+      ${canHireGuide() ? '<button class="btn" data-act="guide">🧭 <span>Hire the guide</span></button>' : ''}${canEdit() ? `<button class="btn" data-act="new-task">+ New task</button><button class="btn primary" data-act="hire">+ Hire a ghost</button>` : ''}</div>
     <div class="company-box"><b>${esc(c.name)}</b><div class="goal">${esc(c.goal) || 'No company goal yet.'}</div></div>
     ${list.length ? '' : `<div class="empty">👻 Your haunt is empty. ${canEdit() ? 'Hire your first ghost to get started.' : 'Ask an editor or the owner to hire ghosts.'}</div>`}
     <div class="grid">${list.map(card).join('')}${canEdit() ? `<button class="add-card" data-act="hire"><span class="plus">＋</span>Hire a ghost</button>` : ''}</div>
@@ -66,6 +67,7 @@ export async function render(v) {
     if (!el) return;
     const act = el.dataset.act, id = el.dataset.id;
     if (act === 'hire') openAgentModal(null);
+    else if (act === 'guide') offerGuide();
     else if (act === 'new-task') openTaskModal();
     else if (act === 'give') openTaskModal(id);
     else if (act === 'edit') openAgentModal(agentById(id));

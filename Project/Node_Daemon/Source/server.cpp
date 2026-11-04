@@ -818,6 +818,25 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
                                             {"agent_id", agent_id}, {"user_id", c.id}, {"project_id", project_id}, {"shared", false}});
         send(res, chat_view(id, c), 201);
     });
+    // First start: hire the guide ghost (skill "Detailed app guide", no tools) and open a chat that starts with its greeting.
+    add("POST", "/api/onboarding/guide", kOwner, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        std::string provider;
+        for (auto& p : detect_providers()) if (provider.empty() && p.available && (p.id == "claude" || p.id == "codex")) provider = p.id;
+        if (provider.empty()) return fail(res, 409, "The guide needs Claude Code or Codex on this PC.");
+        if (!store.install_skill_template("app_guide")) return fail(res, 500, "The guide skill is missing from the program.");
+        json in = {{"name", "Guide"}, {"role", "Phantom Co. guide"}, {"provider", provider}, {"form", "detective"}, {"color", "#9ff0d4"},
+                   {"skills", json::array({"app_guide"})}, {"persona", "You are the friendly guide of this company. Be warm, short and concrete."}}, a;
+        std::string err;
+        if (!clean_agent(in, json::object(), a, err)) return fail(res, 400, err);
+        a = store.save_agent(a);
+        std::string id = store.conv_create({{"kind", "user"}, {"title", "Getting started"}, {"auto_title", false}, {"agent_id", a["id"]},
+                                            {"user_id", c.id}, {"project_id", ""}, {"shared", false}});
+        std::string greeting = str(b, "greeting", 1000);
+        if (!greeting.empty()) store.conv_append(id, {{"t", "msg"}, {"from", "agent:" + a["id"].get<std::string>()}, {"text", greeting}});
+        send(res, chat_view(id, c), 201);
+    });
     add("GET", "/api/chats/" + ID, kViewer, [&](auto& req, auto& res, Ctx& c) {
         json v = chat_view(req.matches[1], c);
         if (v.is_null()) return fail(res, 404, "Chat not found");

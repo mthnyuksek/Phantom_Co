@@ -216,6 +216,10 @@ label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px
 .auth-card .sub { margin: 0 0 8px; color: var(--muted); }
 .auth-card label { text-align: left; }
 .auth-ghost { display: flex; justify-content: center; margin-top: -8px; }
+.guide-offer { text-align: center; }
+.modal:has(.guide-offer) { width: min(460px, 100%); }
+.guide-offer .sub { color: var(--muted); margin: 6px 0 14px; }
+.guide-offer .modal-foot { justify-content: center; }
 .vault-pick { display: flex; gap: 8px; align-items: center; }
 .vault-pick input { flex: 1; min-width: 0; }
 .vault-hint { text-align: left; font-size: 12px; color: var(--muted); margin-top: 4px; }

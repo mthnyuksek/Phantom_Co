@@ -22,6 +22,9 @@ Windows only. One program file, no installer, no cloud service of its own.
 1. Download `Project/Node_Daemon/Build/phantom_co.exe` (or build it, see below).
 2. Optional: install and sign in to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`) and/or [Codex](https://github.com/openai/codex) (`codex`). Without them only the Demo brain works.
 3. Double-click `phantom_co.exe`. On the first start it asks you to create the owner account and where to keep the Vault.
+4. Hire the **guide ghost** when it is offered (or skip it). It knows the whole program, answers your questions and helps you plan your first team.
+
+![First start: create the company, hire the guide and ask it which ghosts to hire](Media/phantom_co_first_start.gif)
 
 Requires the Microsoft Edge WebView2 Runtime, which ships with Windows 11 and current Windows 10.
 
