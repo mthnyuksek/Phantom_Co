@@ -163,7 +163,7 @@ function paintShell() {
   const s = S.state;
   $('#brand-name').textContent = s.company.name;
   $('#brand-ghost').innerHTML = ghostSVG({ form: 'classic', color: '#b69cff', size: 34 });
-  $('#provider-chips').innerHTML = s.providers.filter((p) => p.id !== 'demo')
+  $('#provider-chips').innerHTML = s.providers.filter((p) => p.id !== 'demo' && (p.id !== 'gemini' || p.available))  // Gemini only when installed: most people do not have it
     .map((p) => `<span class="chip ${p.available ? 'ok' : ''}" title="${p.available ? 'Found on this PC' : 'Not found on this PC'}">${esc(p.label)}</span>`).join('');
   $('#home-btn').hidden = !(bridge && isRemote);
   const m = s.me;

@@ -11,7 +11,7 @@ static constexpr int kWorkersPerLane = 4;  // upper bound of the max_concurrent 
 
 Runner::Runner(Store& store) : store_(store) {
     store_.recover_interrupted();
-    for (const char* p : {"claude", "codex", "demo"}) {
+    for (const char* p : {"claude", "codex", "gemini", "demo"}) {
         auto lane = std::make_unique<Lane>();
         Lane* raw = lane.get();
         for (int i = 0; i < kWorkersPerLane; ++i) lane->workers.emplace_back([this, raw] { worker_loop(*raw); });
@@ -443,6 +443,8 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
         spec.prompt = replace_all(replace_all(spec.prompt, host_dir, "@@WORKDIR@@"), replace_all(host_dir, "\\", "/"), "@@WORKDIR@@");
     }
     if (spec.model.empty() && spec.provider == "claude") spec.model = store_.settings().value("default_model", "");  // a Claude model name
+    // Gemini's "auto" picks a Pro model, which has no quota on a free API key (the only way left to use Gemini CLI for free).
+    if (spec.model.empty() && spec.provider == "gemini") spec.model = kGeminiDefaultModel;
 
     if (spec.provider == "demo") {
         o = run_demo(js, ctx, U8(workdir), spec.system_prompt);
@@ -458,7 +460,7 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     fs::path tmp = config_dir() / L"Tmp";
     fs::create_directories(tmp, ec);
     fs::path sysfile = tmp / P(job.id + ".system.md");
-    if (spec.provider == "claude") {
+    if (spec.provider == "claude" || spec.provider == "gemini") {  // Gemini reads it through GEMINI_SYSTEM_MD
         write_file_atomic(sysfile, spec.system_prompt);
         spec.system_file = U8(sysfile);
     }
@@ -484,7 +486,11 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     });
 
     LineParser parser(spec.provider);
-    proc.read_lines([&](const std::string& line) { for (auto& ev : parser.feed(line)) emit(*js, std::move(ev)); });
+    proc.read_lines([&](const std::string& line) {
+        const bool stopped = parser.stop_now;
+        for (auto& ev : parser.feed(line)) emit(*js, std::move(ev));
+        if (parser.stop_now && !stopped) proc.kill();  // a run that cannot succeed (Gemini quota / refused sign-in)
+    });
     o.exit_code = proc.wait();
     { std::lock_guard<std::mutex> lk(wm); wdone = true; }
     wcv.notify_all();
@@ -509,9 +515,9 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
         const std::string& t = o.error;
         auto acc = account.empty() || !accounts_ ? std::nullopt : accounts_->get(account);
         if (acc && (*acc)["kind"] == "api_key") {
-            if (t.find("API key") != std::string::npos || t.find("api key") != std::string::npos || t.find("401") != std::string::npos)
+            if (t.find("429") == std::string::npos && (t.find("API key") != std::string::npos || t.find("api key") != std::string::npos || t.find("401") != std::string::npos))
                 o.error += " (This ghost uses an API key: check or replace it in Settings > Secrets.)";
-        } else if (acc && (t.find("/login") != std::string::npos || t.find("ot logged in") != std::string::npos || t.find("codex login") != std::string::npos))
+        } else if (acc && (t.find("/login") != std::string::npos || t.find("ot logged in") != std::string::npos || t.find("codex login") != std::string::npos || t.find("not signed in") != std::string::npos))
             o.error += " (This ghost uses another account: sign in to it in Settings > Secrets.)";
     }
     finish(o);

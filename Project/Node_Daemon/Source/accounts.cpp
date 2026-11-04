@@ -19,7 +19,7 @@ Accounts::Accounts(const fs::path& data_dir) : dir_(data_dir) {
     json j = read_json(dir_ / L"accounts.json");
     if (j.contains("accounts") && j["accounts"].is_array())
         for (auto& a : j["accounts"])
-            if (a.is_object() && valid_id(a.value("id", "")) && (a.value("provider", "") == "claude" || a.value("provider", "") == "codex"))
+            if (a.is_object() && valid_id(a.value("id", "")) && (a.value("provider", "") == "claude" || a.value("provider", "") == "codex" || a.value("provider", "") == "gemini"))
                 items_.push_back({{"id", a["id"]}, {"provider", a["provider"]}, {"kind", a.value("kind", "") == "api_key" ? "api_key" : "subscription"},
                                   {"name", a.value("name", "")}, {"created", a.value("created", "")}, {"key_hint", a.value("key_hint", "")}});
 }
@@ -149,11 +149,14 @@ std::vector<std::pair<std::string, std::string>> Accounts::env(const std::string
         std::string key = key_of(id);
         if (provider == "claude") return {{"CLAUDE_CONFIG_DIR", h}, {"ANTHROPIC_API_KEY", key}, {"ANTHROPIC_AUTH_TOKEN", ""}};
         if (provider == "codex") return {{"CODEX_HOME", h}, {"CODEX_API_KEY", key}, {"OPENAI_API_KEY", key}};
+        if (provider == "gemini") return {{"GEMINI_CLI_HOME", h}, {"GEMINI_API_KEY", key}, {"GOOGLE_API_KEY", ""}, {"GOOGLE_GENAI_USE_VERTEXAI", ""}, {"GOOGLE_GENAI_USE_GCA", ""}};
         return {};
     }
     // A key in the PC's environment would win over the account's subscription sign-in: leave it out for account runs.
     if (provider == "claude") return {{"CLAUDE_CONFIG_DIR", h}, {"ANTHROPIC_API_KEY", ""}, {"ANTHROPIC_AUTH_TOKEN", ""}};
     if (provider == "codex") return {{"CODEX_HOME", h}, {"OPENAI_API_KEY", ""}, {"CODEX_API_KEY", ""}};
+    // Gemini keeps everything in <GEMINI_CLI_HOME>\.gemini (settings.json with the chosen sign-in, oauth_creds.json)
+    if (provider == "gemini") return {{"GEMINI_CLI_HOME", h}, {"GEMINI_API_KEY", ""}, {"GOOGLE_API_KEY", ""}, {"GOOGLE_GENAI_USE_VERTEXAI", ""}, {"GOOGLE_GENAI_USE_GCA", ""}};
     return {};
 }
 
@@ -206,14 +209,39 @@ json Accounts::status(const std::string& provider, const std::string& id) {
         st["plan"] = "api key";
         std::string key = key_of(id);
         if (key.empty()) { st["error"] = "key_unreadable"; return st; }
-        const bool claude = provider == "claude";
-        HttpClient http(claude ? "https://api.anthropic.com" : "https://api.openai.com", 8000, 12000);
-        Headers h = claude ? Headers{{"x-api-key", key}, {"anthropic-version", "2023-06-01"}} : Headers{{"Authorization", "Bearer " + key}};
-        auto r = http.Get("/v1/models", h);
+        const bool claude = provider == "claude", gemini = provider == "gemini";
+        HttpClient http(claude ? "https://api.anthropic.com" : gemini ? "https://generativelanguage.googleapis.com" : "https://api.openai.com", 8000, 12000);
+        Headers h = claude ? Headers{{"x-api-key", key}, {"anthropic-version", "2023-06-01"}}
+                  : gemini ? Headers{{"x-goog-api-key", key}}  // a header, so the key never sits in a URL
+                           : Headers{{"Authorization", "Bearer " + key}};
+        auto r = http.Get(gemini ? "/v1beta/models" : "/v1/models", h);
         if (!r) st["error"] = "unreachable";
         else if (r->status == 200) st["signed_in"] = true;
-        else if (r->status == 401 || r->status == 403) st["error"] = "key_rejected";
+        else if (r->status == 401 || r->status == 403 || (gemini && r->status == 400)) st["error"] = "key_rejected";  // Google: 400 API_KEY_INVALID
         else st["error"] = "unreachable";
+        return st;
+    }
+    if (provider == "gemini") {
+        // Gemini CLI has no status command: read what its own sign-in left in <home>\.gemini (never sent anywhere).
+        if (provider_exe("gemini").empty()) { st["error"] = "not_installed"; return st; }
+        std::string h = id.empty() ? env_var(L"GEMINI_CLI_HOME") : U8(home(id));
+        fs::path g = (h.empty() ? P(env_var(L"USERPROFILE")) : P(h)) / L".gemini";
+        json settings = read_json(g / L"settings.json");
+        std::string type;
+        if (settings.contains("security") && settings["security"].is_object() && settings["security"].contains("auth") &&
+            settings["security"]["auth"].is_object())
+            type = settings["security"]["auth"].value("selectedType", "");
+        std::error_code ec;
+        if (id.empty() && !env_var(L"GEMINI_API_KEY").empty()) { st["signed_in"] = true; st["plan"] = "api key"; }  // Auto with a key in the PC's environment
+        else if (type == "oauth-personal" || type == "login-with-google") {
+            // Since late 2026 Google refuses the free Google sign-in for Gemini CLI (IneligibleTierError, "migrate to Antigravity").
+            st["error"] = "google_unsupported";
+            json acc = read_json(g / L"google_accounts.json");
+            if (acc.contains("active") && acc["active"].is_string()) st["email"] = acc["active"];
+        } else if (!type.empty() && type != "oauth-personal") {
+            st["signed_in"] = true;  // Vertex AI, Code Assist and other company sign-ins: trust the CLI's own setting
+            st["plan"] = type;
+        }
         return st;
     }
     ProcessSpec ps;
@@ -264,8 +292,9 @@ json Accounts::status(const std::string& provider, const std::string& id) {
 
 bool Accounts::open_login(const std::string& provider, const std::string& id, std::string& error) {
     if (auto a = id.empty() ? std::nullopt : get(id); a && (*a)["kind"] == "api_key") { error = "This account uses an API key: there is nothing to sign in."; return false; }
+    if (provider == "gemini") { error = kGeminiNoGoogle; return false; }
     std::string exe = provider_exe(provider);
-    if (exe.empty()) { error = provider == "claude" ? "Claude Code CLI was not found on this PC." : "Codex CLI was not found on this PC."; return false; }
+    if (exe.empty()) { error = provider == "claude" ? "Claude Code CLI was not found on this PC." : provider == "codex" ? "Codex CLI was not found on this PC." : "Gemini CLI was not found on this PC."; return false; }
     fs::path cwd = id.empty() ? dir_ : home(id);
     std::error_code ec;
     fs::create_directories(cwd, ec);

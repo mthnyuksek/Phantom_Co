@@ -59,8 +59,11 @@ export function openAgentModal(agent, tpl) {
       q('#f-name').value = draft.name; q('#f-role').value = draft.role; q('#f-model').value = draft.model; q('#f-timeout').value = draft.timeout_min;
       q('#f-provider').value = draft.provider; q('#f-boss').value = draft.reports_to || ''; q('#f-persona').value = draft.persona; q('#f-enabled').checked = draft.enabled;
       m.querySelectorAll('#f-skills input').forEach((c) => { c.checked = draft.skills.includes(c.value); });
+      modelHint();
       drawPreview();
     };
+    // Gemini ghosts without a model use gemini-flash-lite-latest (the server's default: Pro has no free API quota).
+    const modelHint = () => { q('#f-model').placeholder = draft.provider.split(/[#@]/)[0] === 'gemini' ? 'gemini-flash-lite-latest' : 'provider default'; };
     const picker = bindGhostPicker(q('#f-pick'), draft, drawPreview);
     fill();
     m.addEventListener('input', (e) => {
@@ -69,7 +72,7 @@ export function openAgentModal(agent, tpl) {
       if (e.target.id === 'f-timeout') draft.timeout_min = +e.target.value;
     });
     m.addEventListener('change', (e) => {
-      if (e.target.id === 'f-provider') draft.provider = e.target.value;
+      if (e.target.id === 'f-provider') { draft.provider = e.target.value; modelHint(); }
       if (e.target.id === 'f-boss') draft.reports_to = e.target.value;
       if (e.target.id === 'f-enabled') draft.enabled = e.target.checked;
       if (e.target.closest('#f-skills')) draft.skills = [...m.querySelectorAll('#f-skills input:checked')].map((c) => c.value);

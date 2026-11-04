@@ -31,16 +31,16 @@ function draw() {
       <p class="hint" style="margin-top:0">Everything lives here as plain files: people, ghosts, skills, rules, projects, chats, runs. Pointing to a new empty folder creates a fresh Vault there (old files are not moved).</p>
       <div class="inline"><input type="text" id="s-vault" value="${esc(s.vault_path)}"><button class="btn" data-act="save-vault">Use this folder</button><button class="btn" data-act="open-vault">Open</button></div></div>
     <div class="card" id="s-secrets"><h3>Secrets</h3>
-      <p class="hint" style="margin-top:0">The Claude Code and Codex sign-ins your ghosts can use. <b>Auto</b> is the sign-in the command-line tool already has on this PC. Add more accounts (another subscription or an API key), then pick one as a ghost's brain. Sign-ins stay in this PC's settings folder, never in the Vault; API keys are stored encrypted for this Windows user and are typed only on this PC.</p>
+      <p class="hint" style="margin-top:0">The Claude Code, Codex and Gemini CLI sign-ins your ghosts can use. <b>Auto</b> is the sign-in the command-line tool already has on this PC. Add more accounts (another subscription or an API key), then pick one as a ghost's brain. Sign-ins stay in this PC's settings folder, never in the Vault; API keys are stored encrypted for this Windows user and are typed only on this PC.</p>
       <div id="s-acc-list">${secretsHTML()}</div>
-      <div class="inline acc-add"><select id="s-acc-prov"><option value="claude">Claude Code</option><option value="codex">Codex</option></select>
+      <div class="inline acc-add"><select id="s-acc-prov"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="gemini">Gemini CLI</option></select>
         <select id="s-acc-kind"><option value="subscription">Subscription</option><option value="api_key">API key</option></select>
         <input type="text" id="s-acc-name" maxlength="40" placeholder="Account name, e.g. Work">
         <input type="password" id="s-acc-key" maxlength="400" placeholder="Paste the API key" autocomplete="off" hidden>
         <button class="btn" data-act="acc-add">Add account</button></div></div>`;
 }
 
-const PROV = { claude: 'Claude Code', codex: 'Codex' };
+const PROV = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' };
 function keyStatusHTML(a) {
   const st = a.status, hint = a.key_hint ? ` <code class="acc-key">${esc(a.key_hint)}</code>` : '';
   if (!st) return '<span class="chip">Checking…</span>' + hint;
@@ -51,6 +51,7 @@ function keyStatusHTML(a) {
 function statusHTML(st, available) {
   if (available === false || st?.error === 'not_installed') return '<span class="chip">Not installed</span>';
   if (!st) return '<span class="chip">Checking…</span>';
+  if (st.error === 'google_unsupported') return '<span class="chip">Google sign-in no longer works: add an API key</span>' + (st.email ? ` <span class="acc-email">${esc(st.email)}</span>` : '');
   if (!st.signed_in) return '<span class="chip">Not signed in</span>';
   return `<span class="chip ok">Signed in</span>${st.email ? ` <span class="acc-email">${esc(st.email)}</span>` : ''}${st.plan ? ` <span class="badge">${esc(st.plan)}</span>` : ''}`;
 }
@@ -62,14 +63,14 @@ function secretsHTML() {
   const list = acc ? acc.accounts : (S.state.accounts || []);
   const rows = autos.map((a) => `<div class="acc-row"><div class="acc-main"><div><b>${esc(PROV[a.provider] || a.label)} · Auto</b></div>
       <div class="acc-state">${statusHTML(a.status, a.available)}</div>${usedHTML(a.agents)}</div>
-      <div class="acc-btns">${a.available && a.status && !a.status.signed_in ? `<button class="btn small" data-act="acc-login" data-provider="${esc(a.provider)}">Sign in</button>` : ''}</div></div>`);
+      <div class="acc-btns">${a.available && a.status && !a.status.signed_in && a.provider !== 'gemini' ? `<button class="btn small" data-act="acc-login" data-provider="${esc(a.provider)}">Sign in</button>` : ''}</div></div>`);
   for (const a of list) {
     const api = a.kind === 'api_key';
     rows.push(`<div class="acc-row"><div class="acc-main"><div class="acc-title"><b>${esc(PROV[a.provider])} ·</b> <input type="text" class="acc-name" data-id="${esc(a.id)}" maxlength="40" value="${esc(a.name)}" title="Rename">${api ? ' <span class="badge">API key</span>' : ''}</div>
       <div class="acc-state">${api ? keyStatusHTML(a) : statusHTML(a.status)}</div>${usedHTML(a.agents)}
       <div class="inline acc-keyedit" data-for="${esc(a.id)}" hidden><input type="password" class="acc-newkey" maxlength="400" placeholder="Paste the new API key" autocomplete="off"><button class="btn small" data-act="acc-key-save" data-id="${esc(a.id)}">Save key</button></div></div>
       <div class="acc-btns">${api ? `<button class="btn small" data-act="acc-key" data-id="${esc(a.id)}">Replace key</button>`
-        : `<button class="btn small" data-act="acc-login" data-id="${esc(a.id)}">${a.status?.signed_in ? 'Sign in again' : 'Sign in'}</button>`}
+        : a.provider === 'gemini' ? '' : `<button class="btn small" data-act="acc-login" data-id="${esc(a.id)}">${a.status?.signed_in ? 'Sign in again' : 'Sign in'}</button>`}
       <button class="btn small danger" data-act="acc-del" data-id="${esc(a.id)}">Remove</button></div></div>`);
   }
   return rows.join('');
@@ -174,6 +175,13 @@ export async function render(v) {
   });
   view.onchange = guard(async (e) => {
     if (e.target.id === 's-acc-kind') { $('#s-acc-key', view).hidden = e.target.value !== 'api_key'; return; }
+    if (e.target.id === 's-acc-prov') {  // Gemini CLI works only with an API key (Google refuses the free Google sign-in)
+      const kind = $('#s-acc-kind', view), gem = e.target.value === 'gemini';
+      kind.querySelector('option[value="subscription"]').disabled = gem;
+      if (gem) kind.value = 'api_key';
+      $('#s-acc-key', view).hidden = kind.value !== 'api_key';
+      return;
+    }
     if (e.target.classList.contains('acc-name')) {
       const name = e.target.value.trim();
       if (!name) return;

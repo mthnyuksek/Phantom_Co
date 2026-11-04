@@ -42,6 +42,9 @@ std::string images_note(const std::vector<std::string>& images);  // "" or a lin
 
 // Turns the raw JSON lines of a CLI into the common event format:
 //   {kind: status|message|thinking|tool_use|tool_result|log|error, text, ...}
+// Used for Gemini ghosts without a model: works with a free API key (Pro models have no free quota).
+inline constexpr const char* kGeminiDefaultModel = "gemini-flash-lite-latest";
+
 class LineParser {
 public:
     explicit LineParser(std::string provider) : provider_(std::move(provider)) {}
@@ -51,12 +54,18 @@ public:
     std::string session_id;   // to resume the conversation later
     bool is_error = false;
     bool max_turns = false;   // stopped because of the turn limit
+    bool stop_now = false;    // the run cannot succeed (Gemini: quota used up, Google sign-in refused): kill the CLI
     double cost_usd = -1;     // -1 = unknown
     long long tokens_in = 0, tokens_out = 0;
     json usage;
 
 private:
+    std::vector<json> feed_gemini(const json& j, const std::string& type);
+    std::string gemini_error(const std::string& raw) const;  // readable error; a used-up quota becomes one clear text
     std::string provider_;
+    std::string pending_;  // Gemini: assistant text since the last tool call
+    std::string model_;    // Gemini: the model named by the init event
+    int quota_hits_ = 0;   // Gemini: "Attempt n failed with status 429" lines seen
 };
 
 }  // namespace pc2

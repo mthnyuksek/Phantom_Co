@@ -15,6 +15,10 @@ namespace pc2 {
 // Vault on purpose (agents with file tools must not reach sign-ins). An agent uses one with provider "claude#<id>".
 // kind "subscription": the CLI's own sign-in in that folder. kind "api_key": an API key, kept encrypted for this Windows
 // user (DPAPI) in <data>\secrets.json and handed to the CLI as an environment variable; accounts.json keeps only "...abcd".
+// Google refuses the free Google sign-in for Gemini CLI since late 2026: Gemini works only with an API key.
+inline constexpr const char* kGeminiNoGoogle =
+    "Google no longer lets Gemini CLI use a free Google sign-in. Add a Gemini API key instead (Settings > Secrets, kind \"API key\").";
+
 class Accounts {
 public:
     explicit Accounts(const fs::path& data_dir);

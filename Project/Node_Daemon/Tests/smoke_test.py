@@ -179,7 +179,7 @@ def main():
         check("editor cannot read sign-in states", ece.get("/api/accounts/status")[0] == 403)
         st, ss = owner.get("/api/accounts/status")
         mine = [a for a in ss.get("accounts", []) if a["id"] == acct["id"]]
-        check("sign-in states listed", st == 200 and len(ss["auto"]) == 2 and mine and mine[0]["agents"] == ["Acct Bot"], ss)
+        check("sign-in states listed", st == 200 and [a["provider"] for a in ss["auto"]] == ["claude", "codex", "gemini"] and mine and mine[0]["agents"] == ["Acct Bot"], ss)
         if mine and mine[0]["status"].get("error") != "not_installed":
             check("new account is not signed in (own folder)", mine[0]["status"]["signed_in"] is False, mine[0]["status"])
         check("sign-in only at this PC", owner.post("/api/accounts/login", {"id": acct["id"]}, headers={"X-Forwarded-For": "1.2.3.4"})[0] == 403)
@@ -207,6 +207,21 @@ def main():
         ks = [a for a in ss["accounts"] if a["id"] == ka["id"]][0]["status"]
         check("fake key not accepted", ks["signed_in"] is False and ks["error"] in ("key_rejected", "unreachable"), ks)
         owner.delete("/api/accounts/" + ka["id"])
+        # Gemini CLI: a third brain, with accounts like the others; not lent by friends
+        check("gemini is a known brain", "gemini" in [p["id"] for p in owner.get("/api/state")[1]["providers"]])
+        st, gb = owner.post("/api/agents", {"name": "Gem Bot", "provider": "gemini"})
+        check("gemini agent", st == 201 and gb["provider"] == "gemini", gb)
+        check("gemini from a friend refused", owner.post("/api/agents", {"name": "Z", "provider": "gemini@ece"})[0] == 400)
+        st, gsub = owner.post("/api/accounts", {"provider": "gemini", "name": "Google", "kind": "subscription"})
+        check("gemini google sign-in account refused", st == 400 and "API key" in gsub.get("error", ""), gsub)
+        check("gemini sign-in window refused", owner.post("/api/accounts/login", {"provider": "gemini"})[0] == 409)
+        st, ga = owner.post("/api/accounts", {"provider": "gemini", "name": "Google", "kind": "api_key", "key": "AIzaPhantomTest" + "x" * 24})
+        check("gemini key account", st == 201 and ga["provider"] == "gemini" and ga["key_hint"] == "…xxxx", ga)
+        check("gemini agent with an account", owner.put("/api/agents/" + gb["id"], {"provider": "gemini#" + ga["id"]})[0] == 200)
+        gs = [a for a in owner.get("/api/accounts/status")[1]["accounts"] if a["id"] == ga["id"]][0]["status"]
+        check("fake gemini key not accepted", gs["signed_in"] is False and gs["error"] in ("key_rejected", "unreachable"), gs)
+        owner.delete("/api/accounts/" + ga["id"])
+        owner.delete("/api/agents/" + gb["id"])
         check("key removed with the account", ka["id"] not in open(os.path.join(data, "secrets.json"), encoding="utf-8").read())
 
         # --------------------------------------------------------------- agents
