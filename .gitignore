@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 Thumbs.db
 desktop.ini
+
+# design notes and internal docs (kept local)
+Development/

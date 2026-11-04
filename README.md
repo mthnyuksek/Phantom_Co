@@ -33,19 +33,13 @@ cmake --build Project\Node_Daemon\Build
 python -X utf8 -I Project\Node_Daemon\Tests\smoke_test.py <full path of phantom_co.exe>
 ```
 
-The path of the project must not contain spaces. Command-line options and more details: [`Development/Docs/running.md`](Development/Docs/running.md).
+The path of the project must not contain spaces. Command-line options: `phantom_co.exe --help`.
 
 ## Before you share your company
 
 - **Sharing and the tunnel use plain HTTP** inside the program (the tunnel adds HTTPS on the internet side). Turn network sharing on only in a private network you trust. Every connection still needs a sign-in.
 - **Agents act on your PC** with the tools their skills give them (file writing, and for the owner shell commands). Give powerful skills only to ghosts you trust and check what they do in the Runs tab.
 - **Subscription terms**: Phantom Co. never shares a login, and work always runs on the PC where the CLI is signed in. Still, letting other people use your Claude or Codex subscription may be limited by Anthropic's or OpenAI's terms. Check them yourself before you rely on it.
-
-More: [`Development/Docs/security.md`](Development/Docs/security.md).
-
-## Documentation
-
-Design notes live in [`Development/`](Development/): [`project_summary.md`](Development/project_summary.md) (architecture in one page), [`Docs/`](Development/Docs/) (Vault format, multi-user rules, agent runtime, roadmap) and [`Decisions/`](Development/Decisions/).
 
 ## License
 
