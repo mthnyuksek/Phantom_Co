@@ -213,8 +213,15 @@ export const EXACT = {
   'Secrets': 'Gizli bilgiler',
   'The Claude Code and Codex sign-ins your ghosts can use.': 'Hayaletlerinin kullanabileceği Claude Code ve Codex girişleri.',
   'Auto': 'Otomatik',
-  "is the sign-in the command-line tool already has on this PC. Add more accounts to give ghosts another subscription, then pick one as a ghost's brain. Sign-ins stay in this PC's settings folder, never in the Vault.":
-    'komut satırı aracının bu bilgisayarda zaten kullandığı giriştir. Hayaletlere başka bir abonelik vermek için hesap ekle, sonra bir hayaletin beyni olarak seç. Girişler bu bilgisayarın ayar klasöründe kalır, asla kasaya girmez.',
+  "is the sign-in the command-line tool already has on this PC. Add more accounts (another subscription or an API key), then pick one as a ghost's brain. Sign-ins stay in this PC's settings folder, never in the Vault; API keys are stored encrypted for this Windows user and are typed only on this PC.":
+    'komut satırı aracının bu bilgisayarda zaten kullandığı giriştir. Başka hesaplar ekle (başka bir abonelik ya da bir API anahtarı), sonra birini bir hayaletin beyni olarak seç. Girişler bu bilgisayarın ayar klasöründe kalır, asla kasaya girmez; API anahtarları bu Windows kullanıcısı için şifreli saklanır ve yalnızca bu bilgisayarda girilir.',
+  'Subscription': 'Abonelik', 'API key': 'API anahtarı', 'Paste the API key': 'API anahtarını yapıştır', 'Paste the API key.': 'API anahtarını yapıştır.',
+  'Paste the new API key': 'Yeni API anahtarını yapıştır', 'Save key': 'Anahtarı kaydet', 'Replace key': 'Anahtarı değiştir',
+  'Key works': 'Anahtar çalışıyor', 'Key rejected': 'Anahtar reddedildi', 'Could not check the key': 'Anahtar kontrol edilemedi',
+  'Key cannot be read by this Windows user': 'Anahtar bu Windows kullanıcısı tarafından okunamıyor', 'Key saved. Checking it…': 'Anahtar kaydedildi. Kontrol ediliyor…',
+  'Unknown account kind.': 'Bilinmeyen hesap türü.', 'API keys can only be entered on the PC that runs Phantom Co.': 'API anahtarları yalnızca Phantom Co.\'yu çalıştıran bilgisayarda girilebilir.',
+  'That does not look like an API key.': 'Bu bir API anahtarına benzemiyor.', 'This account has no API key.': 'Bu hesabın API anahtarı yok.',
+  'This account uses an API key: there is nothing to sign in.': 'Bu hesap bir API anahtarı kullanıyor: giriş yapılacak bir şey yok.',
   'Claude Code · Auto': 'Claude Code · Otomatik', 'Codex · Auto': 'Codex · Otomatik',
   "Claude Code · Auto (this PC's sign-in)": 'Claude Code · Otomatik (bu bilgisayardaki giriş)', "Codex · Auto (this PC's sign-in)": 'Codex · Otomatik (bu bilgisayardaki giriş)',
   'Account name, e.g. Work': 'Hesap adı, ör. İş', 'Add account': 'Hesap ekle', 'Rename': 'Yeniden adlandır',
@@ -331,6 +338,7 @@ export const EXACT = {
 
 export const PATTERNS = [
   ['The sign-in window could not be opened (error {#}).', 'Giriş penceresi açılamadı (hata {0}).'],
+  ['{} (This ghost uses an API key: check or replace it in Settings > Secrets.)', '{0} (Bu hayalet bir API anahtarı kullanıyor: Ayarlar > Gizli bilgiler bölümünden kontrol et ya da değiştir.)'],
   ['{} (This ghost uses another account: sign in to it in Settings > Secrets.)', '{0} (Bu hayalet başka bir hesap kullanıyor: Ayarlar > Gizli bilgiler bölümünden o hesaba giriş yap.)'],
   // removing a project
   ['Tasks ({#})', 'Görevler ({0})'], ['Notes ({#})', 'Notlar ({0})'], ['Ghost jobs ({#})', 'Hayalet görevleri ({0})'],

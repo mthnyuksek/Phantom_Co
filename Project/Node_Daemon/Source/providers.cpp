@@ -223,8 +223,16 @@ std::vector<json> LineParser::feed(const std::string& line) {
             tokens_out += usage.value("output_tokens", 0LL);
         }
     } else if (type == "turn.failed" || type == "error") {
-        is_error = true;
         std::string m = j.contains("error") && j["error"].is_object() ? j["error"].value("message", "") : j.value("message", "");
+        if (type == "error" && m.rfind("Reconnecting", 0) == 0) {
+            // "Reconnecting... 2/5 (...)": Codex retries by itself; only turn.failed or a final error ends the run
+            ev.push_back({{"kind", "status"}, {"text", truncate_utf8(m, 200)}});
+            return ev;
+        }
+        is_error = true;
+        // The failure becomes the run's error text (e.g. "unexpected status 401 Unauthorized: Incorrect API key provided...").
+        size_t cut = m.find(", url: ");
+        if (result_text.empty() && !m.empty()) result_text = cut == std::string::npos ? m : m.substr(0, cut);
         ev.push_back({{"kind", "error"}, {"text", m.empty() ? "The run failed." : m}});
     }
     return ev;

@@ -348,11 +348,17 @@ main#view:has(> .chats-layout) { padding: 0; overflow: hidden; }
 .acc-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--line); }
 .acc-row:last-child { border-bottom: 0; }
 .acc-main { min-width: 0; flex: 1; }
-.acc-title { display: flex; align-items: center; gap: 6px; }
-.acc-title .acc-name { width: auto; flex: 1; max-width: 240px; padding: 3px 8px; margin: 0; }
+.acc-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.acc-title b { white-space: nowrap; }
+.acc-title .badge { margin-top: 0; }
+.acc-keyedit .btn { white-space: nowrap; }
+.acc-title .acc-name { width: auto; flex: 1; min-width: 120px; max-width: 240px; padding: 3px 8px; margin: 0; }
 .acc-state { margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .acc-state .chip, .acc-state .badge { margin: 0; }
 .acc-email { font-size: 12px; overflow-wrap: anywhere; }
+.acc-key { font-size: 11.5px; color: var(--muted); }
+.acc-keyedit { margin-top: 8px; max-width: 460px; }
+.acc-keyedit input { margin: 0; }
 .acc-btns { display: flex; gap: 6px; flex-shrink: 0; }
 .acc-add { margin-top: 12px; }
 .acc-add select { width: auto; }

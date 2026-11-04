@@ -1,6 +1,7 @@
 #include "accounts.hpp"
 
 #include <windows.h>
+#include <wincrypt.h>
 
 #include <algorithm>
 #include <atomic>
@@ -8,6 +9,7 @@
 #include <condition_variable>
 #include <thread>
 
+#include "http_client.hpp"
 #include "process.hpp"
 #include "providers.hpp"
 
@@ -18,7 +20,70 @@ Accounts::Accounts(const fs::path& data_dir) : dir_(data_dir) {
     if (j.contains("accounts") && j["accounts"].is_array())
         for (auto& a : j["accounts"])
             if (a.is_object() && valid_id(a.value("id", "")) && (a.value("provider", "") == "claude" || a.value("provider", "") == "codex"))
-                items_.push_back({{"id", a["id"]}, {"provider", a["provider"]}, {"name", a.value("name", "")}, {"created", a.value("created", "")}});
+                items_.push_back({{"id", a["id"]}, {"provider", a["provider"]}, {"kind", a.value("kind", "") == "api_key" ? "api_key" : "subscription"},
+                                  {"name", a.value("name", "")}, {"created", a.value("created", "")}, {"key_hint", a.value("key_hint", "")}});
+}
+
+// ---- API keys: encrypted with DPAPI for this Windows user (another user or PC cannot read them), base64 in secrets.json
+static const char kEntropy[] = "Phantom Co. account key";
+
+static std::string b64(const std::string& raw) {
+    DWORD n = 0;
+    CryptBinaryToStringA(reinterpret_cast<const BYTE*>(raw.data()), (DWORD)raw.size(), CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, nullptr, &n);
+    std::string out(n, '\0');
+    if (!CryptBinaryToStringA(reinterpret_cast<const BYTE*>(raw.data()), (DWORD)raw.size(), CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, out.data(), &n)) return "";
+    out.resize(n);
+    return out;
+}
+static std::string unb64(const std::string& text) {
+    DWORD n = 0;
+    if (!CryptStringToBinaryA(text.c_str(), (DWORD)text.size(), CRYPT_STRING_BASE64, nullptr, &n, nullptr, nullptr)) return "";
+    std::string out(n, '\0');
+    if (!CryptStringToBinaryA(text.c_str(), (DWORD)text.size(), CRYPT_STRING_BASE64, reinterpret_cast<BYTE*>(out.data()), &n, nullptr, nullptr)) return "";
+    out.resize(n);
+    return out;
+}
+
+bool Accounts::valid_key(const std::string& key) {
+    if (key.size() < 20 || key.size() > 400) return false;
+    for (unsigned char c : key)
+        if (c < 0x21 || c > 0x7e || c == '"' || c == '\'' || c == '`' || c == '\\') return false;
+    return true;
+}
+
+void Accounts::store_key(const std::string& id, const std::string& key) {  // caller holds mu_
+    DATA_BLOB in{(DWORD)key.size(), reinterpret_cast<BYTE*>(const_cast<char*>(key.data()))}, ent{sizeof(kEntropy), reinterpret_cast<BYTE*>(const_cast<char*>(kEntropy))}, out{};
+    if (!CryptProtectData(&in, L"Phantom Co. account key", &ent, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out)) return;
+    std::string enc = b64(std::string(reinterpret_cast<char*>(out.pbData), out.cbData));
+    LocalFree(out.pbData);
+    json s = read_json(dir_ / L"secrets.json");
+    if (!s.contains("keys") || !s["keys"].is_object()) s["keys"] = json::object();
+    s["keys"][id] = enc;
+    write_json(dir_ / L"secrets.json", s);
+}
+
+std::string Accounts::key_of(const std::string& id) {
+    json s = read_json(dir_ / L"secrets.json");
+    if (!s.contains("keys") || !s["keys"].is_object() || !s["keys"].contains(id) || !s["keys"][id].is_string()) return "";
+    std::string raw = unb64(s["keys"][id].get<std::string>());
+    DATA_BLOB in{(DWORD)raw.size(), reinterpret_cast<BYTE*>(raw.data())}, ent{sizeof(kEntropy), reinterpret_cast<BYTE*>(const_cast<char*>(kEntropy))}, out{};
+    if (raw.empty() || !CryptUnprotectData(&in, nullptr, &ent, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out)) return "";
+    std::string key(reinterpret_cast<char*>(out.pbData), out.cbData);
+    SecureZeroMemory(out.pbData, out.cbData);
+    LocalFree(out.pbData);
+    return key;
+}
+
+bool Accounts::set_key(const std::string& id, const std::string& key) {
+    std::lock_guard<std::mutex> l(mu_);
+    for (auto& a : items_)
+        if (a["id"] == id && a["kind"] == "api_key") {
+            store_key(id, key);
+            a["key_hint"] = "…" + key.substr(key.size() - 4);
+            save();
+            return true;
+        }
+    return false;
 }
 
 void Accounts::save() { write_json(dir_ / L"accounts.json", json{{"accounts", items_}}); }
@@ -34,7 +99,7 @@ std::optional<json> Accounts::get(const std::string& id) {
     return std::nullopt;
 }
 
-json Accounts::add(const std::string& provider, const std::string& name) {
+json Accounts::add(const std::string& provider, const std::string& name, const std::string& kind, const std::string& key) {
     std::lock_guard<std::mutex> l(mu_);
     std::string id;
     for (int i = 0; i < 100 && (id.empty() || std::any_of(items_.begin(), items_.end(), [&](const json& a) { return a["id"] == id; })); ++i) {
@@ -42,9 +107,12 @@ json Accounts::add(const std::string& provider, const std::string& name) {
         for (auto& c : r) c = (char)tolower((unsigned char)c);
         id = "acct_" + r;
     }
-    json a = {{"id", id}, {"provider", provider}, {"name", name}, {"created", now_iso()}};
+    const bool api = kind == "api_key";
+    json a = {{"id", id}, {"provider", provider}, {"kind", api ? "api_key" : "subscription"}, {"name", name}, {"created", now_iso()},
+              {"key_hint", api && key.size() >= 4 ? "…" + key.substr(key.size() - 4) : ""}};
     std::error_code ec;
     fs::create_directories(home(id), ec);
+    if (api) store_key(id, key);
     items_.push_back(a);
     save();
     return a;
@@ -63,6 +131,8 @@ bool Accounts::remove(const std::string& id) {
     if (it == items_.end()) return false;
     items_.erase(it);
     save();
+    json s = read_json(dir_ / L"secrets.json");
+    if (s.contains("keys") && s["keys"].is_object() && s["keys"].contains(id)) { s["keys"].erase(id); write_json(dir_ / L"secrets.json", s); }
     std::error_code ec;
     fs::remove_all(home(id), ec);  // the sign-in goes with it (a file still in use stays until the next try; harmless)
     return true;
@@ -70,9 +140,17 @@ bool Accounts::remove(const std::string& id) {
 
 fs::path Accounts::home(const std::string& id) const { return dir_ / L"Accounts" / P(id); }
 
-std::vector<std::pair<std::string, std::string>> Accounts::env(const std::string& provider, const std::string& id) const {
+std::vector<std::pair<std::string, std::string>> Accounts::env(const std::string& provider, const std::string& id) {
     if (id.empty()) return {};
     const std::string h = U8(home(id));
+    auto a = get(id);
+    if (a && (*a)["kind"] == "api_key") {
+        // The key goes only into this run's environment (never on a command line or into a file of the run).
+        std::string key = key_of(id);
+        if (provider == "claude") return {{"CLAUDE_CONFIG_DIR", h}, {"ANTHROPIC_API_KEY", key}, {"ANTHROPIC_AUTH_TOKEN", ""}};
+        if (provider == "codex") return {{"CODEX_HOME", h}, {"CODEX_API_KEY", key}, {"OPENAI_API_KEY", key}};
+        return {};
+    }
     // A key in the PC's environment would win over the account's subscription sign-in: leave it out for account runs.
     if (provider == "claude") return {{"CLAUDE_CONFIG_DIR", h}, {"ANTHROPIC_API_KEY", ""}, {"ANTHROPIC_AUTH_TOKEN", ""}};
     if (provider == "codex") return {{"CODEX_HOME", h}, {"OPENAI_API_KEY", ""}, {"CODEX_API_KEY", ""}};
@@ -122,6 +200,22 @@ static std::string env_var(const wchar_t* name) {
 
 json Accounts::status(const std::string& provider, const std::string& id) {
     json st = {{"signed_in", false}, {"email", ""}, {"plan", ""}, {"error", ""}};
+    auto acc = id.empty() ? std::nullopt : get(id);
+    if (acc && (*acc)["kind"] == "api_key") {
+        // The provider's model list costs nothing and answers 401 for a wrong key.
+        st["plan"] = "api key";
+        std::string key = key_of(id);
+        if (key.empty()) { st["error"] = "key_unreadable"; return st; }
+        const bool claude = provider == "claude";
+        HttpClient http(claude ? "https://api.anthropic.com" : "https://api.openai.com", 8000, 12000);
+        Headers h = claude ? Headers{{"x-api-key", key}, {"anthropic-version", "2023-06-01"}} : Headers{{"Authorization", "Bearer " + key}};
+        auto r = http.Get("/v1/models", h);
+        if (!r) st["error"] = "unreachable";
+        else if (r->status == 200) st["signed_in"] = true;
+        else if (r->status == 401 || r->status == 403) st["error"] = "key_rejected";
+        else st["error"] = "unreachable";
+        return st;
+    }
     ProcessSpec ps;
     ps.exe = provider_exe(provider);
     if (ps.exe.empty()) { st["error"] = "not_installed"; return st; }
@@ -169,6 +263,7 @@ json Accounts::status(const std::string& provider, const std::string& id) {
 }
 
 bool Accounts::open_login(const std::string& provider, const std::string& id, std::string& error) {
+    if (auto a = id.empty() ? std::nullopt : get(id); a && (*a)["kind"] == "api_key") { error = "This account uses an API key: there is nothing to sign in."; return false; }
     std::string exe = provider_exe(provider);
     if (exe.empty()) { error = provider == "claude" ? "Claude Code CLI was not found on this PC." : "Codex CLI was not found on this PC."; return false; }
     fs::path cwd = id.empty() ? dir_ : home(id);

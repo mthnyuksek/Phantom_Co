@@ -507,7 +507,11 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
         o.status = "failed";
         o.error = parser.is_error && !parser.result_text.empty() ? parser.result_text : "The CLI exited with code " + std::to_string(o.exit_code) + ".";
         const std::string& t = o.error;
-        if (!account.empty() && (t.find("/login") != std::string::npos || t.find("ot logged in") != std::string::npos || t.find("codex login") != std::string::npos))
+        auto acc = account.empty() || !accounts_ ? std::nullopt : accounts_->get(account);
+        if (acc && (*acc)["kind"] == "api_key") {
+            if (t.find("API key") != std::string::npos || t.find("api key") != std::string::npos || t.find("401") != std::string::npos)
+                o.error += " (This ghost uses an API key: check or replace it in Settings > Secrets.)";
+        } else if (acc && (t.find("/login") != std::string::npos || t.find("ot logged in") != std::string::npos || t.find("codex login") != std::string::npos))
             o.error += " (This ghost uses another account: sign in to it in Settings > Secrets.)";
     }
     finish(o);

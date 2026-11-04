@@ -68,7 +68,7 @@ export function brainOptions(current) {
     const mine = accounts.filter((a) => a.provider === p.id);
     const note = p.available ? '' : ' — not installed on this PC';
     out.push({ id: p.id, label: mine.length ? `${p.label} · Auto (this PC's sign-in)` : p.label, available: p.available, note });
-    for (const a of mine) out.push({ id: `${p.id}#${a.id}`, label: `${p.label} · ${a.name}`, available: p.available, note });
+    for (const a of mine) out.push({ id: `${p.id}#${a.id}`, label: `${p.label} · ${a.name}${a.kind === 'api_key' ? ' (API)' : ''}`, available: p.available, note });
   }
   for (const w of S.state?.workers || [])
     for (const id of ['claude', 'codex']) {

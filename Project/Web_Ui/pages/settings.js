@@ -31,12 +31,23 @@ function draw() {
       <p class="hint" style="margin-top:0">Everything lives here as plain files: people, ghosts, skills, rules, projects, chats, runs. Pointing to a new empty folder creates a fresh Vault there (old files are not moved).</p>
       <div class="inline"><input type="text" id="s-vault" value="${esc(s.vault_path)}"><button class="btn" data-act="save-vault">Use this folder</button><button class="btn" data-act="open-vault">Open</button></div></div>
     <div class="card" id="s-secrets"><h3>Secrets</h3>
-      <p class="hint" style="margin-top:0">The Claude Code and Codex sign-ins your ghosts can use. <b>Auto</b> is the sign-in the command-line tool already has on this PC. Add more accounts to give ghosts another subscription, then pick one as a ghost's brain. Sign-ins stay in this PC's settings folder, never in the Vault.</p>
+      <p class="hint" style="margin-top:0">The Claude Code and Codex sign-ins your ghosts can use. <b>Auto</b> is the sign-in the command-line tool already has on this PC. Add more accounts (another subscription or an API key), then pick one as a ghost's brain. Sign-ins stay in this PC's settings folder, never in the Vault; API keys are stored encrypted for this Windows user and are typed only on this PC.</p>
       <div id="s-acc-list">${secretsHTML()}</div>
-      <div class="inline acc-add"><select id="s-acc-prov"><option value="claude">Claude Code</option><option value="codex">Codex</option></select><input type="text" id="s-acc-name" maxlength="40" placeholder="Account name, e.g. Work"><button class="btn" data-act="acc-add">Add account</button></div></div>`;
+      <div class="inline acc-add"><select id="s-acc-prov"><option value="claude">Claude Code</option><option value="codex">Codex</option></select>
+        <select id="s-acc-kind"><option value="subscription">Subscription</option><option value="api_key">API key</option></select>
+        <input type="text" id="s-acc-name" maxlength="40" placeholder="Account name, e.g. Work">
+        <input type="password" id="s-acc-key" maxlength="400" placeholder="Paste the API key" autocomplete="off" hidden>
+        <button class="btn" data-act="acc-add">Add account</button></div></div>`;
 }
 
 const PROV = { claude: 'Claude Code', codex: 'Codex' };
+function keyStatusHTML(a) {
+  const st = a.status, hint = a.key_hint ? ` <code class="acc-key">${esc(a.key_hint)}</code>` : '';
+  if (!st) return '<span class="chip">Checking…</span>' + hint;
+  if (st.signed_in) return '<span class="chip ok">Key works</span>' + hint;
+  const why = { key_rejected: 'Key rejected', key_unreadable: 'Key cannot be read by this Windows user', unreachable: 'Could not check the key' }[st.error] || 'Could not check the key';
+  return `<span class="chip">${why}</span>${hint}`;
+}
 function statusHTML(st, available) {
   if (available === false || st?.error === 'not_installed') return '<span class="chip">Not installed</span>';
   if (!st) return '<span class="chip">Checking…</span>';
@@ -52,11 +63,15 @@ function secretsHTML() {
   const rows = autos.map((a) => `<div class="acc-row"><div class="acc-main"><div><b>${esc(PROV[a.provider] || a.label)} · Auto</b></div>
       <div class="acc-state">${statusHTML(a.status, a.available)}</div>${usedHTML(a.agents)}</div>
       <div class="acc-btns">${a.available && a.status && !a.status.signed_in ? `<button class="btn small" data-act="acc-login" data-provider="${esc(a.provider)}">Sign in</button>` : ''}</div></div>`);
-  for (const a of list)
-    rows.push(`<div class="acc-row"><div class="acc-main"><div class="acc-title"><b>${esc(PROV[a.provider])} ·</b> <input type="text" class="acc-name" data-id="${esc(a.id)}" maxlength="40" value="${esc(a.name)}" title="Rename"></div>
-      <div class="acc-state">${statusHTML(a.status)}</div>${usedHTML(a.agents)}</div>
-      <div class="acc-btns"><button class="btn small" data-act="acc-login" data-id="${esc(a.id)}">${a.status?.signed_in ? 'Sign in again' : 'Sign in'}</button>
+  for (const a of list) {
+    const api = a.kind === 'api_key';
+    rows.push(`<div class="acc-row"><div class="acc-main"><div class="acc-title"><b>${esc(PROV[a.provider])} ·</b> <input type="text" class="acc-name" data-id="${esc(a.id)}" maxlength="40" value="${esc(a.name)}" title="Rename">${api ? ' <span class="badge">API key</span>' : ''}</div>
+      <div class="acc-state">${api ? keyStatusHTML(a) : statusHTML(a.status)}</div>${usedHTML(a.agents)}
+      <div class="inline acc-keyedit" data-for="${esc(a.id)}" hidden><input type="password" class="acc-newkey" maxlength="400" placeholder="Paste the new API key" autocomplete="off"><button class="btn small" data-act="acc-key-save" data-id="${esc(a.id)}">Save key</button></div></div>
+      <div class="acc-btns">${api ? `<button class="btn small" data-act="acc-key" data-id="${esc(a.id)}">Replace key</button>`
+        : `<button class="btn small" data-act="acc-login" data-id="${esc(a.id)}">${a.status?.signed_in ? 'Sign in again' : 'Sign in'}</button>`}
       <button class="btn small danger" data-act="acc-del" data-id="${esc(a.id)}">Remove</button></div></div>`);
+  }
   return rows.join('');
 }
 async function loadAccounts() {
@@ -120,13 +135,29 @@ export async function render(v) {
     else if (act === 'tun-stop') { await api('POST', '/api/tunnel', { action: 'stop' }); await pollTunnel(); }
     else if (act === 'tun-copy') copyText(tun.url);
     else if (act === 'acc-add') {
-      const name = $('#s-acc-name', view).value.trim();
+      const name = $('#s-acc-name', view).value.trim(), kind = $('#s-acc-kind', view).value, key = $('#s-acc-key', view).value.trim();
       if (!name) return toast('Please enter a name.');
-      const a = await api('POST', '/api/accounts', { provider: $('#s-acc-prov', view).value, name });
+      if (kind === 'api_key' && !key) return toast('Paste the API key.');
+      const a = await api('POST', '/api/accounts', { provider: $('#s-acc-prov', view).value, name, kind, key: kind === 'api_key' ? key : undefined });
       $('#s-acc-name', view).value = '';
+      $('#s-acc-key', view).value = '';
       await refreshState();
       $('#s-acc-list', view).innerHTML = secretsHTML();
-      await openLogin({ id: a.id });
+      if (kind === 'api_key') { toast('Key saved. Checking it…'); loadAccounts(); } else await openLogin({ id: a.id });
+    } else if (act === 'acc-key') {
+      const box = view.querySelector(`.acc-keyedit[data-for="${CSS.escape(el.dataset.id)}"]`);
+      box.hidden = !box.hidden;
+      if (!box.hidden) box.querySelector('input').focus();
+    } else if (act === 'acc-key-save') {
+      const input = el.parentElement.querySelector('input'), key = input.value.trim();
+      if (!key) return toast('Paste the API key.');
+      await api('PUT', '/api/accounts/' + el.dataset.id, { key });
+      input.value = '';
+      el.parentElement.hidden = true;
+      toast('Key saved. Checking it…');
+      acc = null;
+      $('#s-acc-list', view).innerHTML = secretsHTML();
+      loadAccounts();
     } else if (act === 'acc-login') await openLogin(el.dataset.id ? { id: el.dataset.id } : { provider: el.dataset.provider });
     else if (act === 'acc-del') {
       const a = acc?.accounts.find((x) => x.id === el.dataset.id);
@@ -142,6 +173,7 @@ export async function render(v) {
     }
   });
   view.onchange = guard(async (e) => {
+    if (e.target.id === 's-acc-kind') { $('#s-acc-key', view).hidden = e.target.value !== 'api_key'; return; }
     if (e.target.classList.contains('acc-name')) {
       const name = e.target.value.trim();
       if (!name) return;

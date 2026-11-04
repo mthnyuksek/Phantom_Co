@@ -470,7 +470,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         {   // extra sign-ins of this PC: names only (the agent editor offers "claude#<id>"); Settings > Secrets shows more to the owner
             json acc = json::array();
             if (runner.accounts())
-                for (auto& a : runner.accounts()->list()) acc.push_back({{"id", a["id"]}, {"provider", a["provider"]}, {"name", a["name"]}});
+                for (auto& a : runner.accounts()->list()) acc.push_back({{"id", a["id"]}, {"provider", a["provider"]}, {"name", a["name"]}, {"kind", a.value("kind", "subscription")}});
             st["accounts"] = acc;
         }
         {   // friends who lend their Claude/Codex (the agent editor offers "claude@<user>")
@@ -648,18 +648,37 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         json b;
         if (!parse_body(req, res, b)) return;
         if (!runner.accounts()) return fail(res, 404, "Not available.");
-        std::string provider = str(b, "provider", 16), name = str(b, "name", 40);
+        std::string provider = str(b, "provider", 16), name = str(b, "name", 40), kind = str(b, "kind", 16, "subscription");
+        std::string key = str(b, "key", 1000);
         if (provider != "claude" && provider != "codex") return fail(res, 400, "Pick Claude Code or Codex.");
         if (name.empty()) return fail(res, 400, "Please enter a name.");
-        send(res, runner.accounts()->add(provider, name), 201);
+        if (kind != "subscription" && kind != "api_key") return fail(res, 400, "Unknown account kind.");
+        if (kind == "api_key") {
+            // A key typed on another PC would cross the network (plain http on a home network): only at this PC.
+            if (!is_this_pc(req)) return fail(res, 403, "API keys can only be entered on the PC that runs Phantom Co.");
+            if (!Accounts::valid_key(key)) return fail(res, 400, "That does not look like an API key.");
+        }
+        send(res, runner.accounts()->add(provider, name, kind, kind == "api_key" ? key : ""), 201);
     });
     add("PUT", "/api/accounts/" + ID, kOwner, [&](auto& req, auto& res, Ctx&) {
         json b;
         if (!parse_body(req, res, b)) return;
-        std::string name = str(b, "name", 40);
-        if (name.empty()) return fail(res, 400, "Please enter a name.");
-        if (!runner.accounts() || !runner.accounts()->rename(req.matches[1], name)) return fail(res, 404, "Account not found.");
-        send(res, *runner.accounts()->get(req.matches[1]));
+        std::string id = req.matches[1];
+        auto a = runner.accounts() ? runner.accounts()->get(id) : std::nullopt;
+        if (!a) return fail(res, 404, "Account not found.");
+        if (b.contains("key")) {  // replace the API key
+            std::string key = str(b, "key", 1000);
+            if ((*a)["kind"] != "api_key") return fail(res, 400, "This account has no API key.");
+            if (!is_this_pc(req)) return fail(res, 403, "API keys can only be entered on the PC that runs Phantom Co.");
+            if (!Accounts::valid_key(key)) return fail(res, 400, "That does not look like an API key.");
+            runner.accounts()->set_key(id, key);
+        }
+        if (b.contains("name")) {
+            std::string name = str(b, "name", 40);
+            if (name.empty()) return fail(res, 400, "Please enter a name.");
+            runner.accounts()->rename(id, name);
+        }
+        send(res, *runner.accounts()->get(id));
     });
     add("DELETE", "/api/accounts/" + ID, kOwner, [&](auto& req, auto& res, Ctx&) {
         std::string id = req.matches[1];

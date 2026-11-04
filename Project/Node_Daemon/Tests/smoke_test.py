@@ -189,6 +189,25 @@ def main():
         check("ghost uses Auto", ab_after and ab_after[0]["provider"] == "claude", ab_after)
         check("account folder deleted", not os.path.exists(os.path.join(data, "Accounts", acct["id"])))
         owner.delete("/api/agents/" + ab["id"])
+        # API keys: encrypted in secrets.json (DPAPI), only "…last4" in the account list, typed only at this PC
+        fake = "sk-ant-api03-phantomtest-" + "x" * 20 + "WXYZ"
+        check("key refused from the network", owner.post("/api/accounts", {"provider": "claude", "name": "Key", "kind": "api_key", "key": fake}, headers={"X-Forwarded-For": "1.2.3.4"})[0] == 403)
+        check("bad key refused", owner.post("/api/accounts", {"provider": "claude", "name": "Key", "kind": "api_key", "key": "short"})[0] == 400)
+        check("unknown kind refused", owner.post("/api/accounts", {"provider": "claude", "name": "Key", "kind": "magic"})[0] == 400)
+        st, ka = owner.post("/api/accounts", {"provider": "claude", "name": "Key", "kind": "api_key", "key": fake})
+        check("api key account added", st == 201 and ka["kind"] == "api_key" and ka["key_hint"] == "…WXYZ" and "key" not in ka, ka)
+        on_disk = "".join(open(os.path.join(data, f), encoding="utf-8").read() for f in ("accounts.json", "secrets.json"))
+        check("key never stored in plain text", fake not in on_disk and "phantomtest" not in on_disk and ka["id"] in on_disk)
+        check("state shows the kind, not the key", [(a["kind"], "key_hint" in a) for a in ece.get("/api/state")[1]["accounts"]] == [("api_key", False)])
+        check("nothing to sign in with a key", owner.post("/api/accounts/login", {"id": ka["id"]})[0] == 409)
+        check("key replace refused from the network", owner.put("/api/accounts/" + ka["id"], {"key": fake + "2"}, headers={"X-Forwarded-For": "1.2.3.4"})[0] == 403)
+        st, ka2 = owner.put("/api/accounts/" + ka["id"], {"key": fake[:-4] + "ABCD"})
+        check("key replaced", st == 200 and ka2["key_hint"] == "…ABCD", ka2)
+        st, ss = owner.get("/api/accounts/status")
+        ks = [a for a in ss["accounts"] if a["id"] == ka["id"]][0]["status"]
+        check("fake key not accepted", ks["signed_in"] is False and ks["error"] in ("key_rejected", "unreachable"), ks)
+        owner.delete("/api/accounts/" + ka["id"])
+        check("key removed with the account", ka["id"] not in open(os.path.join(data, "secrets.json"), encoding="utf-8").read())
 
         # --------------------------------------------------------------- agents
         st, casper =owner.post("/api/agents", {"name": "Casper", "role": "Planner", "provider": "demo", "form": "royal",
