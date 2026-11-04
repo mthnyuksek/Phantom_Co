@@ -79,6 +79,18 @@ function noteModal(p, note) {
   })));
 }
 
+// HTML list of what removing project p deletes (shown while hovering "Really remove?")
+async function removalList(p) {
+  const tasks = ((await api('GET', '/api/tasks')).tasks || []).filter((t) => t.project_id === p.id);
+  const roles = Object.keys(p.roles || {});
+  const sec = (title, items) => items.length ? `<b>${title}</b><ul>${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
+  return sec('Project', [p.name])
+    + sec(`Tasks (${tasks.length})`, tasks.map((t) => t.title || 'Untitled task'))
+    + sec(`Notes (${p.notes.length})`, p.notes.map((n) => n.name || n.id))
+    + sec(`Ghost jobs (${roles.length})`, roles.map((id) => agentById(id)?.name || id))
+    + '<p class="keep">The task chats go too. The files in the project folder stay on disk.</p>';
+}
+
 function newProjectModal() {
   modal(`<h2>New project</h2><p class="sub">A project is a folder for the work plus shared notes the ghosts remember.</p>
     <label>Name</label><input type="text" id="np-name" maxlength="60" autofocus><label>Summary</label><textarea id="np-sum" maxlength="4000" placeholder="What is this project about?"></textarea>
@@ -102,7 +114,14 @@ export async function render(v, arg) {
     const p = projectById(selected), act = el.dataset.act;
     if (act === 'new') newProjectModal();
     else if (act === 'save') { await api('PUT', '/api/projects/' + p.id, { name: $('#pj-name', view).value, summary: $('#pj-summary', view).value }); toast('Saved'); window.dispatchEvent(new Event('pc2:changed')); }
-    else if (act === 'del') twoStep(el, 'Really remove?', async () => { await api('DELETE', '/api/projects/' + p.id); toast('Project removed (its files stay on disk)'); location.hash = '#/projects'; });
+    else if (act === 'del') {
+      const list = el.dataset.sure ? '' : await removalList(p);
+      twoStep(el, 'Really remove?', async () => {
+        const r = await api('DELETE', '/api/projects/' + p.id);
+        toast(r.tasks_removed ? `Project and ${r.tasks_removed} task(s) removed (its files stay on disk)` : 'Project removed (its files stay on disk)');
+        location.hash = '#/projects'; window.dispatchEvent(new Event('pc2:changed'));
+      }, list);
+    }
     else if (act === 'chat') openNewChatModal(p.id);
     else if (act === 'task') openTaskModal(undefined, p.id);
     else if (act === 'note-new') noteModal(p, null);

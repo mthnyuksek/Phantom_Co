@@ -347,6 +347,17 @@ def main():
         check("template deleted", ece.delete("/api/task_templates/moon_report")[0] == 200 and owner.delete("/api/task_templates/" + otp["id"])[0] == 200
               and ece.get("/api/task_templates")[1]["templates"] == [])
 
+        # removing a project removes its tasks (and their chats), not other tasks
+        st, tmp_p = ece.post("/api/projects", {"name": "Throwaway"})
+        _, pt = ece.post("/api/tasks", {"title": "Doomed", "agent_id": "casper", "project_id": tmp_p["id"], "run": False})
+        _, ot = ece.post("/api/tasks", {"title": "Survivor", "agent_id": "casper", "run": False})
+        st, r = owner.delete("/api/projects/" + tmp_p["id"])
+        check("project removal reports its tasks", st == 200 and r.get("tasks_removed") == 1, r)
+        check("project's task is gone", ece.get("/api/tasks/" + pt["id"])[0] == 404
+              and not os.path.exists(os.path.join(vault, "Conversations", pt["conversation_id"] + ".jsonl")))
+        check("other tasks stay", ece.get("/api/tasks/" + ot["id"])[0] == 200)
+        ece.delete("/api/tasks/" + ot["id"])
+
         # ----------------------------------------------------- skills and rules
         st, s = owner.post("/api/skills", {"name": "Shell stuff", "tools": ["Bash", "Read"], "body": "Be careful.", "min_role": "editor"})
         check("shell skill forced to owner-only", st == 201 and s["min_role"] == "owner", s)

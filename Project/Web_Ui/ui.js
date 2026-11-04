@@ -53,12 +53,37 @@ export const closeModal = () => { root().innerHTML = ''; };
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
 // a button that asks twice ("Delete" -> "Really?") instead of a browser dialog
-export function twoStep(btn, ask, action) {
-  if (btn.dataset.sure) { delete btn.dataset.sure; return action(); }
+// First click asks, second click acts. `list` (optional, HTML string) is shown in a popup
+// while the pointer is over the asking button: what the action will remove.
+export function twoStep(btn, ask, action, list) {
+  if (btn.dataset.sure) { btn._twoStepReset?.(); return action(); }
   const old = btn.textContent;
   btn.dataset.sure = 1;
   btn.textContent = ask;
-  setTimeout(() => { btn.textContent = old; delete btn.dataset.sure; }, 3000);
+  let pop = null, timer = 0;
+  const hide = () => { pop?.remove(); pop = null; };
+  const show = () => {
+    if (!list || pop) return;
+    pop = document.createElement('div');
+    pop.className = 'twostep-pop';
+    pop.innerHTML = list;
+    document.body.appendChild(pop);
+    const r = btn.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+    pop.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + 'px';
+    pop.style.top = (r.top - h - 8 >= 8 ? r.top - h - 8 : r.bottom + 8) + 'px';
+  };
+  const arm = (ms) => { clearTimeout(timer); timer = setTimeout(reset, ms); };
+  const enter = () => { show(); clearTimeout(timer); };
+  const leave = () => { hide(); arm(3000); };
+  function reset() {
+    clearTimeout(timer); hide();
+    btn.removeEventListener('mouseenter', enter); btn.removeEventListener('mouseleave', leave);
+    btn.textContent = old; delete btn.dataset.sure; delete btn._twoStepReset;
+  }
+  btn._twoStepReset = reset;
+  btn.addEventListener('mouseenter', enter);
+  btn.addEventListener('mouseleave', leave);
+  if (btn.matches(':hover')) enter(); else arm(3000);
 }
 
 export async function copyText(text) {

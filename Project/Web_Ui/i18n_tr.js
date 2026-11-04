@@ -103,6 +103,7 @@ export const EXACT = {
   'Work in this project happens in': 'Bu projedeki iş şurada yapılır:', 'inside the Vault.': '(Kasa içinde).',
   'Chat here': 'Burada sohbet et', 'New task': 'Yeni görev', 'About': 'Hakkında', 'Summary': 'Özet',
   'every ghost working here reads this': 'burada çalışan her hayalet bunu okur', 'Remove project': 'Projeyi kaldır',
+  'The task chats go too. The files in the project folder stay on disk.': 'Görev sohbetleri de silinir. Proje klasöründeki dosyalar diskte kalır.', 'Untitled task': 'Adsız görev',
   'Notes — shared memory': 'Notlar — ortak hafıza', '+ Add note': '+ Not ekle',
   'Notes that are switched on are sent to every ghost working in this project. Ghosts with the Project notes skill can write notes too.':
     'Açık olan notlar bu projede çalışan her hayalete gönderilir. “Proje notları” yeteneği olan hayaletler de not yazabilir.',
@@ -230,7 +231,7 @@ export const EXACT = {
   'Only the person who created this task can delete it.': 'Bu görevi yalnızca oluşturan kişi silebilir.', 'Only the person who started this run can stop it.': 'Bu çalıştırmayı yalnızca başlatan kişi durdurabilir.',
   'You cannot write in this conversation.': 'Bu konuşmaya yazamazsın.', 'You cannot stop work in this conversation.': 'Bu konuşmadaki işi durduramazsın.',
   'The agent is still working here.': 'Ajan burada hâlâ çalışıyor.', 'The agent of this chat is not available.': 'Bu sohbetin ajanı kullanılamıyor.',
-  'This ghost is busy. Stop its work first.': 'Bu hayalet meşgul. Önce işini durdur.', 'Stop the work first.': 'Önce işi durdur.', 'Wait until the running work has finished.': 'Çalışan iş bitene kadar bekle.',
+  'This ghost is busy. Stop its work first.': 'Bu hayalet meşgul. Önce işini durdur.', 'Stop the work first.': 'Önce işi durdur.', "Stop the work in this project's tasks first.": 'Önce bu projenin görevlerindeki işi durdur.', 'Wait until the running work has finished.': 'Çalışan iş bitene kadar bekle.',
   'This task is already running.': 'Bu görev zaten çalışıyor.', 'This run is not active.': 'Bu çalıştırma etkin değil.', 'The task conversation is missing.': 'Görevin konuşması eksik.',
   'This agent is switched off.': 'Bu ajan kapalı.', 'This agent no longer exists.': 'Bu ajan artık yok.',
   'The file is too large (limit 200 MB).': 'Dosya çok büyük (sınır 200 MB).', 'A folder with this name exists.': 'Bu adda bir klasör var.',
@@ -299,6 +300,9 @@ export const EXACT = {
 };
 
 export const PATTERNS = [
+  // removing a project
+  ['Tasks ({#})', 'Görevler ({0})'], ['Notes ({#})', 'Notlar ({0})'], ['Ghost jobs ({#})', 'Hayalet görevleri ({0})'],
+  ['Project and {#} task(s) removed (its files stay on disk)', 'Proje ve {0} görev kaldırıldı (dosyaları diskte kalır)'],
   // wake-ups
   ['🪙 {} tokens today', '🪙 bugün {0} token'],
   ['Wakes every {#} min', 'Her {0} dakikada bir uyanır'], ['⏸ Wakes every {#} min', '⏸ Her {0} dakikada bir uyanır (duraklatıldı)'],

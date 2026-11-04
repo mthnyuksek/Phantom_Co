@@ -404,3 +404,10 @@ main#view:has(> .chats-layout) { padding: 0; overflow: hidden; }
   .auth-card { padding: 22px 18px; }
 }
 @media (prefers-reduced-motion: reduce) { .side, .scrim { transition: none; } }
+
+/* what a two-step delete will remove (ui.js twoStep), shown while hovering "Really remove?" */
+.twostep-pop { position: fixed; z-index: 1000; max-width: min(360px, calc(100vw - 16px)); max-height: 50vh; overflow: auto; background: #221b3b; border: 1px solid #7a2a38; border-radius: 12px; padding: 10px 14px; box-shadow: 0 8px 30px #0008; font-size: 13px; pointer-events: none; }
+.twostep-pop b { color: #ffc2cc; display: block; margin-bottom: 4px; }
+.twostep-pop ul { margin: 2px 0 6px; padding-left: 18px; }
+.twostep-pop li { margin: 1px 0; overflow-wrap: anywhere; }
+.twostep-pop .keep { color: var(--muted); font-size: 12px; margin: 4px 0 0; }

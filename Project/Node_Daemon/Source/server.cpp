@@ -710,8 +710,20 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         send(res, *store.project(req.matches[1]));
     });
     add("DELETE", "/api/projects/" + ID, kOwner, [&](auto& req, auto& res, Ctx&) {
-        if (!store.remove_project(req.matches[1])) return fail(res, 404, "Project not found");
-        send(res, {{"ok", true}});
+        std::string pid = req.matches[1];
+        if (!store.project(pid)) return fail(res, 404, "Project not found");
+        // the project's tasks (and their task chats) go with it; refuse while one of them is working
+        std::vector<json> gone;
+        for (auto& t : store.tasks())
+            if (t.value("project_id", "") == pid) gone.push_back(t);
+        for (auto& t : gone)
+            if (runner.conversation_busy(t.value("conversation_id", ""))) return fail(res, 409, "Stop the work in this project's tasks first.");
+        for (auto& t : gone) {
+            store.conv_delete(t.value("conversation_id", ""));
+            store.remove_task(t.value("id", ""));
+        }
+        if (!store.remove_project(pid)) return fail(res, 404, "Project not found");
+        send(res, {{"ok", true}, {"tasks_removed", gone.size()}});
     });
     add("POST", "/api/projects/" + ID + "/notes", kEditor, [&](auto& req, auto& res, Ctx&) {
         json b;
