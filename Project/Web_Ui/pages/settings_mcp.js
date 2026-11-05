@@ -25,6 +25,13 @@ function statusChip(s) {
   return c.ok ? `<span class="chip ok">Connected</span> <span class="acc-email">${esc(c.text)}</span>` : `<span class="chip">${esc(c.text)}</span>`;
 }
 
+let tg = null;  // the Telegram bridge: {state: off|on|error, text, bot}
+function listenChip(s) {
+  if (s.builtin !== 'telegram' || !s.options?.listen || !s.enabled) return '';
+  if (!tg || tg.state === 'off') return ' <span class="chip">Starting to listen…</span>';
+  return tg.state === 'on' ? ' <span class="chip ok">Listening</span>' : ` <span class="chip">${esc(tg.text)}</span>`;
+}
+
 const secretInput = (s, key, label) => `<label>${label}</label><input type="password" data-secret="${key}" maxlength="4000" autocomplete="off"
   placeholder="${(s.secrets_set || []).includes(key) ? 'Saved (leave empty to keep it)' : 'Paste it here'}">`;
 
@@ -34,7 +41,9 @@ function formHTML(s) {
   if (s.kind === 'builtin' && s.builtin === 'telegram') {
     body = `<p class="hint">In Telegram, talk to @BotFather, send /newbot and copy the token it gives. Then send /start to your new bot: a ghost can read your chat id with "read messages", or write it below as the default chat.</p>
       ${secretInput(s, 'bot_token', 'Bot token')}
-      <label>Default chat id <span class="hint-inline">where messages go when the ghost names no chat</span></label><input type="text" data-f="chat_id" maxlength="64" value="${esc(s.options?.chat_id || '')}" placeholder="e.g. 123456789">`;
+      <label>Default chat id <span class="hint-inline">where messages go when the ghost names no chat</span></label><input type="text" data-f="chat_id" maxlength="64" value="${esc(s.options?.chat_id || '')}" placeholder="e.g. 123456789">
+      <label class="check"><input type="checkbox" data-f="listen" ${s.options?.listen ? 'checked' : ''}> Let people talk to ghosts from Telegram (/agents, /&lt;ghost&gt; message, /new)</label>
+      <p class="hint">Each person connects their own Telegram account in their profile (Profile &gt; Telegram); the ghosts then work with that person's rights. Answers and approval requests come back to Telegram. Only one Phantom Co. window can listen to a bot.</p>`;
   } else if (s.kind === 'builtin' && s.builtin === 'youtube') {
     body = `<ol class="hint mcp-steps"><li>Open console.cloud.google.com, make a project and switch on YouTube Data API v3.</li>
       <li>OAuth consent screen: type External, add your own Google account as a test user.</li>
@@ -63,7 +72,7 @@ function formHTML(s) {
 function rowHTML(s) {
   return `<div class="acc-row mcp-row"><div class="acc-main"><div class="acc-title"><b>${esc(READY[s.name]?.icon || '🧩')} <span>${esc(s.label)}</span></b> <code>${esc(s.name)}</code>
       <span class="badge">${s.kind === 'builtin' ? 'built-in' : 'command'}</span>${s.approve ? ' <span class="badge">asks first</span>' : ''}</div>
-    <div class="acc-state">${statusChip(s)}</div>
+    <div class="acc-state">${statusChip(s)}${listenChip(s)}</div>
     <div class="meta">${s.skills.length ? `Skills: ${s.skills.map(esc).join(', ')}` : 'No skill uses it yet: tick it in a skill on the Skills page.'}</div>
     ${open === s.name ? formHTML(s) : ''}</div>
     <div class="acc-btns">${s.builtin === 'youtube' ? `<button class="btn small" data-mcp="google" data-name="${esc(s.name)}">Sign in with Google</button>` : ''}
@@ -85,7 +94,10 @@ function draw() {
 
 async function load() {
   data = await api('GET', '/api/mcp').catch(() => null);
+  tg = await api('GET', '/api/telegram').catch(() => null);
   draw();
+  if (data?.servers.some((s) => s.builtin === 'telegram' && s.options?.listen && s.enabled) && tg?.state !== 'on' && box?.isConnected)
+    setTimeout(async () => { tg = await api('GET', '/api/telegram').catch(() => tg); draw(); }, 4000);
   for (const s of data?.servers || [])
     if (s.kind === 'builtin' && s.enabled) api('GET', `/api/mcp/${s.name}/check`).then((c) => { checks[s.name] = c; draw(); }).catch(() => {});
 }
@@ -95,7 +107,7 @@ function collect(form) {
   const body = { approve: f('approve').checked, approve_tools: f('approve_tools').value.split(',').map((x) => x.trim()).filter(Boolean), secrets: {} };
   if (f('enabled')) body.enabled = f('enabled').checked;
   form.querySelectorAll('[data-secret]').forEach((i) => { if (i.value.trim()) body.secrets[i.dataset.secret] = i.value.trim(); });
-  if (f('chat_id')) body.options = { chat_id: f('chat_id').value.trim() };
+  if (f('chat_id')) body.options = { chat_id: f('chat_id').value.trim(), listen: f('listen').checked };
   if (f('command')) {
     body.command = f('command').value.trim();
     body.folder = f('folder').value.trim();

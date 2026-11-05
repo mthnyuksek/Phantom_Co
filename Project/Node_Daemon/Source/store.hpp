@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -100,6 +101,9 @@ public:
     //   {"t":"session","agent":..,"sid":..} {"t":"reset"}
     std::string conv_create(json meta);
     void conv_append(const std::string& id, json line);
+    // Called after every conversation line (under the Store's lock: keep it short, never call back into a lock that
+    // waits for the Store). Used by the Telegram bridge. Set once at start.
+    void set_append_hook(std::function<void(const std::string&, const json&)> f) { append_hook_ = std::move(f); }
     std::optional<json> conv_load(const std::string& id);  // {meta, messages, sessions}
     std::vector<json> conv_list();
     bool conv_delete(const std::string& id);
@@ -112,6 +116,7 @@ public:
     void recover_interrupted();
 
 private:
+    std::function<void(const std::string&, const json&)> append_hook_;
     std::string unique_id(const fs::path& dir, const std::string& name, bool folder);
     void load_run_index();
     void* lock_ = nullptr;  // open handle of <Vault>\.phantom_lock: one Phantom Co. window per Vault

@@ -14,6 +14,10 @@ json call(const std::string& builtin, const std::string& tool, const json& args,
 // Settings > MCP: does it work? {ok, text} (Telegram: the bot's name, YouTube: the channel's name).
 json check(const std::string& builtin, const json& secrets, const json& options);
 
+// Telegram Bot API (also used by the Telegram bridge): the "result" of a call, or null + error.
+json telegram_api(const std::string& token, const std::string& method, const json& body, std::string& error, int receive_ms = 120000);
+bool telegram_send(const std::string& token, const std::string& chat_id, const std::string& text, std::string& error);  // splits long texts
+
 // YouTube sign-in (OAuth for installed apps, loopback redirect, PKCE).
 std::string google_auth_url(const std::string& client_id, const std::string& redirect, const std::string& state, const std::string& challenge);
 std::string pkce_challenge(const std::string& verifier);

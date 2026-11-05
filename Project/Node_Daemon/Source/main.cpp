@@ -17,6 +17,7 @@
 #include "accounts.hpp"
 #include "auth.hpp"
 #include "mcp.hpp"
+#include "telegram_bridge.hpp"
 #include "runner.hpp"
 #include "server.hpp"
 #include "store.hpp"
@@ -510,6 +511,11 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         Mcp mcp(cfg.file.parent_path(), store);  // MCP servers of this copy (Settings > MCP)
         mcp.set_port(cfg.port);
         runner.set_mcp(&mcp);
+        // Talking to ghosts from Telegram (Settings > MCP > Telegram > listen). Never deleted: a long poll may still be
+        // waiting when the program quits; stop() only tells its threads to end.
+        auto* telegram = new TelegramBridge(store, auth, runner, mcp, cfg.file.parent_path());
+        store.set_append_hook([telegram](const std::string& conv, const json& line) { telegram->on_append(conv, line); });
+        telegram->start();
         g_cfg = &cfg;
         g_store = &store;
         g_runner = &runner;
@@ -524,6 +530,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         opt.config = &cfg;
         Tunnel tunnel;  // starts off
         opt.tunnel = &tunnel;
+        opt.telegram = telegram;
         if (!vault_existed) opt.fresh_vault = cfg.vault;
         std::promise<bool> listening;
         std::atomic<bool> signalled{false};
@@ -584,6 +591,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         }
         server.join();  // headless: returns when Ctrl+C stops the server
         tunnel.Stop();
+        telegram->stop();
         g_worker.stop();
         runner.shutdown();
         g_store = nullptr;

@@ -515,6 +515,8 @@ void Store::conv_append(const std::string& id, json line) {
     if (!line.contains("ts")) line["ts"] = now_iso();
     std::ofstream f(root_ / L"Conversations" / P(id + ".jsonl"), std::ios::app | std::ios::binary);
     f << dumps(line) << "\n";
+    f.close();
+    if (append_hook_) append_hook_(id, line);
 }
 
 std::optional<json> Store::conv_load(const std::string& id) {

@@ -305,6 +305,29 @@ function bindLend(el) {
 }
 
 // ------------------------------------------------------------------- profile
+// Profile > Telegram: connect your own Telegram account to talk to the ghosts (the owner switches listening on in Settings > MCP).
+function telegramHTML() {
+  const t = S.state.telegram;
+  if (!t || (!t.on && !t.linked.length)) return '';
+  return `<h3 class="subhead">Telegram</h3><div id="p-tg">
+    ${t.linked.length ? `<p class="hint">Connected: ${t.linked.map((x) => esc(x.name || '?')).join(', ')}. Write /agents to @${esc(t.bot)} to begin.</p>` : `<p class="hint">Talk to the ghosts from Telegram: /agents lists them, /&lt;ghost&gt; message writes to one, /new makes it forget the chat.</p>`}
+    <div class="inline">${t.on ? '<button class="btn small" id="p-tg-link">Connect Telegram</button>' : ''}${t.linked.length ? '<button class="btn small danger" id="p-tg-unlink">Disconnect</button>' : ''}</div>
+    <div id="p-tg-code"></div></div>`;
+}
+function bindTelegram(el) {
+  el.addEventListener('click', guard(async (e) => {
+    if (e.target.id === 'p-tg-link') {
+      const r = await api('POST', '/api/telegram/link', {});
+      $('#p-tg-code', el).innerHTML = `<p class="hint">Open the bot and press Start, or send this to @${esc(r.bot)} within 10 minutes:</p>
+        <div class="linkbox"><input type="text" readonly value="/link ${esc(r.code)}" data-no-i18n><a class="btn small primary" href="https://t.me/${encodeURIComponent(r.bot)}?start=link_${esc(r.code)}" target="_blank" rel="noopener">Open in Telegram</a></div>`;
+    } else if (e.target.id === 'p-tg-unlink') {
+      await api('DELETE', '/api/telegram/link');
+      toast('Telegram disconnected');
+      await refreshState();
+      $('#p-tg', el).outerHTML = telegramHTML() || '<div id="p-tg"></div>';
+    }
+  }));
+}
 // The app's own ghosts take the colour of the theme.
 window.addEventListener('pc2:theme', () => { if (S.state && !$('#app').hidden) paintShell(); });
 $('#me-chip').onclick = () => { setMenu(false); openProfile(); };
@@ -323,6 +346,7 @@ function openProfile() {
       <div id="p-theme">${themePickerHTML()}</div>
       <h3 class="subhead">Language</h3>
       <select id="p-lang" data-no-i18n>${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang ? 'selected' : ''}>${l.label}</option>`).join('')}</select>
+      ${telegramHTML()}
       ${lendHTML()}
     </div></div>
     <div class="modal-foot"><button class="btn danger" id="p-out" style="margin-right:auto">Sign out</button>
@@ -333,6 +357,7 @@ function openProfile() {
     $('#p-name', el).oninput = prev;
     prev();
     bindLend(el);
+    bindTelegram(el);
     $('#p-lang', el).onchange = (e) => setLang(e.target.value);
     bindThemePicker($('#p-theme', el));
     el.addEventListener('click', guard(async (e) => {

@@ -188,6 +188,7 @@ bool Mcp::save(const json& in, const std::map<std::string, std::string>& secrets
             std::string chat = src.value("chat_id", "");
             if (!std::regex_match(chat, std::regex("(-?[0-9]{1,20}|@[A-Za-z0-9_]{4,40})?"))) { error = "The chat id is a number (or @channelname)."; return false; }
             opt["chat_id"] = chat;
+            opt["listen"] = src.contains("listen") && src["listen"].is_boolean() && src["listen"].get<bool>();  // linked people talk to ghosts from Telegram
         }
         out["options"] = opt;
     } else {

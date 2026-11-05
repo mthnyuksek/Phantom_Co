@@ -80,8 +80,14 @@ static std::string sarg(const json& a, const char* k, const std::string& def = "
 static json schema(json props, json required) { return {{"type", "object"}, {"properties", props}, {"required", required}}; }
 
 // ----------------------------------------------------------------- telegram
-static json tg_api(const std::string& token, const std::string& method, const std::string& body, const std::string& ct, std::string& error) {
-    auto r = request("POST", "https://api.telegram.org/bot" + token + "/" + method, {}, body, ct, 120000, 120000);
+static json tg_api(const std::string& token, const std::string& method, const std::string& body, const std::string& ct, std::string& error, int receive_ms = 120000) {
+    // Tests point PHANTOM_TELEGRAM_API at a fake Telegram (Tests/telegram_test.py); always the real one otherwise.
+    static const std::string base = [] {
+        wchar_t buf[512];
+        DWORD n = GetEnvironmentVariableW(L"PHANTOM_TELEGRAM_API", buf, 512);
+        return n > 0 && n < 512 ? Narrow(std::wstring(buf, n)) : std::string("https://api.telegram.org");
+    }();
+    auto r = request("POST", base + "/bot" + token + "/" + method, {}, body, ct, receive_ms, 120000);
     json j = parse(r);
     if (!r) { error = "Telegram could not be reached."; return json(); }
     if (!j.is_object() || !j.value("ok", false)) {
@@ -89,6 +95,20 @@ static json tg_api(const std::string& token, const std::string& method, const st
         return json();
     }
     return j["result"];
+}
+
+json telegram_api(const std::string& token, const std::string& method, const json& body, std::string& error, int receive_ms) {
+    return tg_api(token, method, body.dump(), "application/json", error, receive_ms);
+}
+
+bool telegram_send(const std::string& token, const std::string& chat_id, const std::string& text, std::string& error) {
+    for (size_t at = 0; at < text.size();) {  // Telegram takes at most 4096 characters per message
+        std::string part = truncate_utf8(text.substr(at), 4000);
+        if (part.empty()) break;
+        at += part.size();
+        if (tg_api(token, "sendMessage", json{{"chat_id", chat_id}, {"text", part}}.dump(), "application/json", error).is_null()) return false;
+    }
+    return true;
 }
 
 static json telegram_tools() {

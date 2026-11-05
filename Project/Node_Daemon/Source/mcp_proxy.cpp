@@ -137,6 +137,29 @@ int serve_builtin() {
                     std::string why = wait_for_approval(tool, args);
                     if (!why.empty()) { write_out(error_result(id, why).dump()); return; }
                 }
+                if (kind == "telegram" && tool == "read_messages" && g_session.value("options", json::object()).value("listen", false)) {
+                    // Phantom Co. itself reads the bot (only one reader is possible): ask it for what came in.
+                    json r = host_post("/api/mcp/telegram_inbox", {{"key", g_key}, {"server", g_name}});
+                    std::string out;
+                    int limit = args.contains("limit") && args["limit"].is_number_integer() ? std::clamp(args["limit"].get<int>(), 1, 50) : 20;
+                    const json msgs = r.is_object() ? r.value("messages", json::array()) : json::array();
+                    for (size_t i = msgs.size() > (size_t)limit ? msgs.size() - limit : 0; i < msgs.size(); ++i) {
+                        const json& m = msgs[i];
+                        std::time_t t = (std::time_t)m.value("date", 0LL);
+                        char when[32] = "";
+                        std::tm tmv{};
+                        if (localtime_s(&tmv, &t) == 0) std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M", &tmv);
+                        out += std::string(when) + " · chat " + std::to_string(m.value("chat", 0LL)) + " (" + m.value("chat_name", "") + ") · " +
+                               m.value("from", "") + ": " + m.value("text", "") + "\n";
+                    }
+                    if (out.empty()) out = "No messages since Phantom Co. started.";
+                    json content = json::array();
+                    content.push_back({{"type", "text"}, {"text", out}});
+                    json msg = {{"jsonrpc", "2.0"}, {"id", id}};
+                    msg["result"] = {{"content", content}};
+                    write_out(msg.dump());
+                    return;
+                }
                 write_out(json{{"jsonrpc", "2.0"}, {"id", id}, {"result", builtin::call(kind, tool, args, g_session)}}.dump());
             });
         } else {

@@ -483,6 +483,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             }
             st["approvals"] = mine;
         }
+        if (opt.telegram) st["telegram"] = opt.telegram->link_info(c.id);  // Profile > Telegram
         {   // extra sign-ins of this PC: names only (the agent editor offers "claude#<id>"); Settings > Secrets shows more to the owner
             json acc = json::array();
             if (runner.accounts())
@@ -890,6 +891,31 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         if (!parse_body(req, res, b)) return;
         if (!is_this_pc(req) || !runner.mcp()) return fail(res, 403, "Forbidden");
         send(res, runner.mcp()->ask(str(b, "key", 64), str(b, "server", 24), str(b, "tool", 64), b.value("arguments", json::object()), str(b, "id", 64), 20));
+    });
+    // ---- talking to ghosts from Telegram: status (owner), connecting your own Telegram account (Profile)
+    add("GET", "/api/telegram", kOwner, [&](auto&, auto& res, Ctx&) {
+        if (!opt.telegram) return fail(res, 404, "Not available.");
+        send(res, opt.telegram->status());
+    });
+    add("POST", "/api/telegram/link", kViewer, [&](auto&, auto& res, Ctx& c) {
+        if (!opt.telegram) return fail(res, 404, "Not available.");
+        json info = opt.telegram->link_info(c.id);
+        if (!info.value("on", false)) return fail(res, 409, "Telegram is not listening. The owner switches it on in Settings > MCP > Telegram.");
+        info["code"] = opt.telegram->new_link_code(c.id);
+        send(res, info);
+    });
+    add("DELETE", "/api/telegram/link", kViewer, [&](auto&, auto& res, Ctx& c) {
+        if (!opt.telegram) return fail(res, 404, "Not available.");
+        opt.telegram->unlink(c.id);
+        send(res, opt.telegram->link_info(c.id));
+    });
+    // read_messages of the Telegram MCP server while the bridge reads the bot (getUpdates has only one reader)
+    add("POST", "/api/mcp/telegram_inbox", kPublic, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        std::string err;
+        if (!is_this_pc(req) || !runner.mcp() || !opt.telegram || !runner.mcp()->session(str(b, "key", 64), str(b, "server", 24), err)) return fail(res, 403, "Forbidden");
+        send(res, {{"messages", opt.telegram->inbox()}});
     });
     // ---- approvals: the person the ghost works for (or the owner) answers in the chat
     add("POST", "/api/mcp/approvals/" + ID, kEditor, [&](auto& req, auto& res, Ctx& c) {
