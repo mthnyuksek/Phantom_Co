@@ -24,6 +24,6 @@ skill: write_files
 Persona: how this agent thinks, talks and works. Keep it short, it is paid on every run.
 ```
 - provider: `claude` or `codex`. model may stay empty (default model).
-- form: classic, wizard, pirate, knight, robot, ninja, chef, detective, royal, cat, scientist.
+- form: classic, wizard, pirate, knight, robot, ninja, chef, detective, royal, cat, scientist, vampire, witch, astronaut, viking, cowboy, artist, dj, angel, devil, graduate, mummy, sprout.
 - color: `#rrggbb`. `skill:` lines are skill ids (file names in the Skills folder without `.md`); repeat the line for each skill.
 - Never delete files. To retire an agent set `enabled: false`. Do not give an agent a skill that runs commands unless the user asked for it.

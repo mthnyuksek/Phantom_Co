@@ -9,7 +9,7 @@ const DIR_HELP = { Agents: 'ghost definitions', Skills: 'skills', Rules: 'compan
 
 const listHTML = () => S.state.skills.map((s) => `<a class="chat-item ${s.id === selected ? 'on' : ''}" href="#/skills/${esc(s.id)}"><div class="mini big-emoji">🧰</div>
   <div class="ci-body"><div class="ci-title">${esc(s.name)}${s.min_role === 'owner' ? ' <span class="badge">owner</span>' : ''}${s.enabled ? '' : ' <span class="badge">off</span>'}${skillScopeBadge(s)}</div>
-  <div class="ci-prev">${esc(s.description)}</div></div><div class="ci-time">${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}</div></a>`).join('') || '<div class="empty small">No skills yet.</div>';
+  <div class="ci-prev">${esc(s.description)}</div></div><div class="ci-time">${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}${(s.mcp || []).length ? ' + MCP' : ''}</div></a>`).join('') || '<div class="empty small">No skills yet.</div>';
 
 function detail(s) {
   if (!s) return `<div class="empty big"><p>Skills are the only way a ghost gets tools.<br>${isOwner() ? 'Pick one on the left, or add one from a template.' : 'Pick one on the left to read it.'}</p></div>`;
@@ -21,6 +21,9 @@ function detail(s) {
       <div class="skill-list">${S.state.tools.map((t) => `<label class="check"><input type="checkbox" data-tool="${t}" ${s.tools.includes(t) ? 'checked' : ''} ${ro ? 'disabled' : ''}> ${t} <span class="hint-inline">${esc(TOOL_HELP[t] || '')}</span></label>`).join('')}</div>
       <label>May touch these parts of the Vault</label>
       <div class="skill-list">${Object.keys(DIR_HELP).map((d) => `<label class="check"><input type="checkbox" data-dir="${d}" ${s.dirs.includes(d) ? 'checked' : ''} ${ro ? 'disabled' : ''}> ${d} <span class="hint-inline">${esc(DIR_HELP[d])}</span></label>`).join('')}</div>
+      ${(S.state.mcp || []).length || (s.mcp || []).length ? `<label>Outside tools (MCP) <span class="hint-inline">servers from Settings &gt; MCP; the ghost sees their tools as mcp__name__…</span></label>
+      <div class="skill-list">${(S.state.mcp || []).map((m) => `<label class="check"><input type="checkbox" data-mcp="${esc(m.name)}" ${(s.mcp || []).includes(m.name) ? 'checked' : ''} ${ro ? 'disabled' : ''}> ${esc(m.label)} <span class="hint-inline">${esc(m.name)}${m.enabled ? '' : ' · off'}</span></label>`).join('')}
+        ${(s.mcp || []).filter((n) => !(S.state.mcp || []).some((m) => m.name === n)).map((n) => `<span class="hint">${esc(n)}: not added yet (Settings &gt; MCP)</span>`).join('')}</div>` : ''}
       <label>Only in these projects <span class="hint-inline">none ticked = everywhere; otherwise the ghost gets this skill only while it works in a ticked project</span></label>
       <div class="skill-list">${S.state.projects.map((p) => `<label class="check"><input type="checkbox" data-proj="${esc(p.id)}" ${(s.projects || []).includes(p.id) ? 'checked' : ''} ${ro ? 'disabled' : ''}> 📁 ${esc(p.name)}</label>`).join('') || '<span class="hint">No projects yet.</span>'}</div>
       <label>How to use it <span class="hint-inline">sent to the ghost on every run, keep it short</span></label>
@@ -36,7 +39,8 @@ async function templateModal() {
   const { templates } = await api('GET', '/api/skill_templates');
   modal(`<h2>Add a skill from a template</h2><p class="sub">Templates are ready-made skills. You can edit them afterwards.</p>
     <div class="tpl-list">${templates.map((t) => `<div class="tpl-item"><div><b>${esc(t.name)}</b> ${t.min_role === 'owner' ? '<span class="badge">owner</span>' : ''}<div class="meta">${esc(t.description)}</div>
-      <div class="meta">Tools: ${t.tools.length ? esc(t.tools.join(', ')) : 'none'}</div></div>
+      <div class="meta">Tools: ${t.tools.length ? esc(t.tools.join(', ')) : 'none'}</div>
+      ${(t.mcp || []).length ? `<div class="meta">Needs the MCP server ${t.mcp.map(esc).join(', ')} (Settings &gt; MCP)</div>` : ''}</div>
       ${t.installed ? '<span class="chip ok">added</span>' : `<button class="btn small primary" data-add="${esc(t.id)}">Add</button>`}</div>`).join('')}</div>
     <div class="modal-foot"><button class="btn" id="tp-close">Close</button></div>`,
   (m) => m.addEventListener('click', guard(async (e) => {
@@ -65,7 +69,8 @@ export async function render(v, arg) {
     } else if (act === 'save') {
       const tools = [...view.querySelectorAll('[data-tool]:checked')].map((x) => x.dataset.tool), dirs = [...view.querySelectorAll('[data-dir]:checked')].map((x) => x.dataset.dir);
       const projects = [...view.querySelectorAll('[data-proj]:checked')].map((x) => x.dataset.proj);
-      await api('PUT', '/api/skills/' + selected, { name: $('#sk-name', view).value, description: $('#sk-desc', view).value, tools, dirs, projects, body: $('#sk-body', view)?.value ?? '', enabled: $('#sk-on', view).checked });
+      const mcp = [...view.querySelectorAll('[data-mcp]:checked')].map((x) => x.dataset.mcp);
+      await api('PUT', '/api/skills/' + selected, { name: $('#sk-name', view).value, description: $('#sk-desc', view).value, tools, dirs, projects, mcp, body: $('#sk-body', view)?.value ?? '', enabled: $('#sk-on', view).checked });
       toast('Saved'); window.dispatchEvent(new Event('pc2:changed'));
     } else if (act === 'del') twoStep(el, 'Really delete?', async () => { await api('DELETE', '/api/skills/' + selected); toast('Skill deleted'); location.hash = '#/skills'; window.dispatchEvent(new Event('pc2:changed')); });
   });

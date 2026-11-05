@@ -11,6 +11,7 @@ using Headers = std::vector<std::pair<std::string, std::string>>;
 struct HttpResult {
     int status = 0;
     std::string body;
+    std::string location;  // the Location header, if any
 };
 
 // A small HTTP(S) client on WinHTTP (http:// for the home network, https:// for a Cloudflare tunnel).
@@ -18,7 +19,7 @@ struct HttpResult {
 class HttpClient {
 public:
     // `base_url` like http://192.168.1.20:7777 or https://name.trycloudflare.com ; times in milliseconds.
-    explicit HttpClient(const std::string& base_url, int connect_ms = 10000, int receive_ms = 60000);
+    explicit HttpClient(const std::string& base_url, int connect_ms = 10000, int receive_ms = 60000, int send_ms = 60000);
     ~HttpClient();
     HttpClient(const HttpClient&) = delete;
     HttpClient& operator=(const HttpClient&) = delete;

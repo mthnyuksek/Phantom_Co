@@ -8,14 +8,15 @@ Windows only. One program file, no installer, no cloud service of its own.
 
 ## What it does
 
-- **Ghost agents**: role, boss, persona, skills, brain (Claude Code, Codex, Gemini CLI or the free built-in Demo), model and time limit. 11 ghost forms and colours.
+- **Ghost agents**: role, boss, persona, skills, brain (Claude Code, Codex, Gemini CLI or the free built-in Demo), model and time limit. 23 ghost forms and colours.
 - **Several accounts per brain** (Settings > Secrets): besides the sign-in the CLI already has, add more subscription accounts or API keys (stored encrypted for your Windows user) and pick one per ghost. Gemini CLI works with an API key only.
 - **Chats** (private or shared) and **agent-to-agent hand-over**: a ghost can ask a colleague, and the answer comes back to it automatically.
 - **Projects**: a work folder plus notes and per-ghost jobs that every ghost working there reads.
 - **Tasks**: a job for a ghost with its own conversation and run history. Tasks can wake up on a schedule (every N minutes or daily) and can start from templates.
 - **Skills** are the only source of tools: a ghost can only do what its skills allow, and only with the rights of the person who asked.
+- **MCP servers** (Settings > MCP) give ghosts outside tools: a real browser (Playwright), uploading to your YouTube channel, a Telegram bot, or MCP servers you (or a ghost with the MCP builder skill) write yourself. Secrets stay encrypted on your PC, and a call can wait for your approval in the chat before it acts.
 - **Several people**: owner / editor / viewer roles, invitation links, private chats. Friends connect over the local network or through an optional Cloudflare quick tunnel. A friend can also lend their own Claude/Codex to the company (experimental: deletions are not sent back, big folders are slow, both PCs need the same version).
-- **Runs** with a live view, stop button, tokens and cost; a failed run can be tried again with one click. A **Files** browser. English and Turkish interface. Works on a phone browser too.
+- **Runs** with a live view, stop button, tokens and cost; a failed run can be tried again with one click. A **Files** browser. English and Turkish interface, light and dark colour themes. Works on a phone browser too.
 - Everything is stored as plain Markdown/JSON files in a folder (the **Vault**, `Documents\Phantom_Vault`).
 
 ## Get started
@@ -47,6 +48,7 @@ The path of the project must not contain spaces. Command-line options: `phantom_
 
 - **Sharing and the tunnel use plain HTTP** inside the program (the tunnel adds HTTPS on the internet side). Turn network sharing on only in a private network you trust. Every connection still needs a sign-in.
 - **Agents act on your PC** with the tools their skills give them (file writing, and for the owner shell commands). Give powerful skills only to ghosts you trust and check what they do in the Runs tab.
+- **MCP servers are programs that run on your PC** with the secrets you give them. Add only servers you trust, and keep "Ask me before it acts" on for anything that sends, posts or deletes.
 - **Subscription terms**: Phantom Co. never shares a login, and work always runs on the PC where the CLI is signed in. Still, letting other people use your Claude, Codex or Gemini access may be limited by Anthropic's, OpenAI's or Google's terms. Check them yourself before you rely on it.
 
 ## License

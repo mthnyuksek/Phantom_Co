@@ -96,7 +96,8 @@ static const std::vector<Field> kAgentF = {
 static const std::vector<Field> kSkillF = {
     {"name", "name", 'S', ""}, {"description", "description", 'S', ""}, {"tools", "tools", 'C', ""},
     {"dirs", "dirs", 'C', ""}, {"min_role", "min_role", 'S', "editor"}, {"enabled", "enabled", 'B', "true"},
-    {"default", "default", 'B', "false"}, {"projects", "projects", 'C', ""}};  // projects: empty = every project
+    {"default", "default", 'B', "false"}, {"projects", "projects", 'C', ""},  // projects: empty = every project
+    {"mcp", "mcp", 'C', ""}};  // MCP servers (Settings > MCP) this skill opens
 static const std::vector<Field> kRuleF = {{"name", "name", 'S', ""}, {"enabled", "enabled", 'B', "true"}};
 static const std::vector<Field> kProjectF = {{"name", "name", 'S', ""}, {"created", "created", 'S', ""}};
 static const std::vector<Field> kTaskF = {

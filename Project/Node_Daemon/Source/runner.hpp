@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "accounts.hpp"
+#include "mcp.hpp"
 #include "process.hpp"
 #include "prompt.hpp"
 #include "providers.hpp"
@@ -82,6 +83,8 @@ public:
     WorkerHub& hub() { return hub_; }  // friends' PCs that lend their Claude/Codex
     void set_accounts(Accounts* a) { accounts_ = a; }  // extra sign-ins of this PC ("claude#<id>")
     Accounts* accounts() { return accounts_; }
+    void set_mcp(Mcp* m) { mcp_ = m; }  // MCP servers the skills may open (Settings > MCP)
+    Mcp* mcp() { return mcp_; }
     bool brain_busy(const std::string& brain);  // a queued or running job uses this provider string
 
 private:
@@ -124,6 +127,7 @@ private:
     std::map<std::string, std::unique_ptr<Lane>> lanes_;
     WorkerHub hub_;
     Accounts* accounts_ = nullptr;
+    Mcp* mcp_ = nullptr;
     std::atomic<bool> stopping_{false};
 };
 

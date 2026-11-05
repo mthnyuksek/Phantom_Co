@@ -16,6 +16,7 @@
 
 #include "accounts.hpp"
 #include "auth.hpp"
+#include "mcp.hpp"
 #include "runner.hpp"
 #include "server.hpp"
 #include "store.hpp"
@@ -431,6 +432,21 @@ HWND make_window(HINSTANCE inst) {
 }  // namespace
 
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
+    {   // An MCP server of a ghost's run (started by Claude/Codex/Gemini): stdin/stdout are its pipes, so no console and no window.
+        int n = 0;
+        wchar_t** av = CommandLineToArgvW(GetCommandLineW(), &n);
+        if (av && n >= 2 && std::wstring(av[1]) == L"--mcp-proxy") {
+            std::string name, key;
+            int port = 0;
+            for (int i = 1; i + 1 < n; ++i) {
+                std::wstring a = av[i];
+                if (a == L"--mcp-proxy") name = Narrow(av[++i]);
+                else if (a == L"--mcp-port") port = _wtoi(av[++i]);
+                else if (a == L"--mcp-key") key = Narrow(av[++i]);
+            }
+            return mcp_proxy_main(name, port, key);
+        }
+    }
     // Started from a terminal? Then --help and errors can be printed there.
     if (AttachConsole(ATTACH_PARENT_PROCESS)) {
         FILE* f;
@@ -491,6 +507,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         Accounts accounts(cfg.file.parent_path());  // extra Claude/Codex sign-ins of this copy (Settings > Secrets)
         Runner runner(store);
         runner.set_accounts(&accounts);
+        Mcp mcp(cfg.file.parent_path(), store);  // MCP servers of this copy (Settings > MCP)
+        mcp.set_port(cfg.port);
+        runner.set_mcp(&mcp);
         g_cfg = &cfg;
         g_store = &store;
         g_runner = &runner;

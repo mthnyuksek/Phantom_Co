@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { S, isOwner, refreshState } from '../state.js';
 import { $, esc, guard, toast, copyText, twoStep } from '../ui.js';
+import { mcpCardHTML, bindMcp } from './settings_mcp.js';
 
 let view, net = null, tun = null, tunTimer = null;
 let acc = null, accTimer = null, accUntil = 0;  // sign-in states (Secrets), polled for a while after a sign-in window opened
@@ -39,6 +40,7 @@ function draw() {
         <input type="text" id="s-acc-name" maxlength="40" placeholder="Account name, e.g. Work">
         <input type="password" id="s-acc-key" maxlength="400" placeholder="Paste the API key" autocomplete="off" hidden>
         <button class="btn" data-act="acc-add">Add account</button></div></div>
+    ${mcpCardHTML()}
     <div class="card" id="s-about"><h3>About</h3>${aboutHTML()}</div>`;
 }
 
@@ -142,6 +144,7 @@ export async function render(v) {
   tun = await api('GET', '/api/tunnel').catch(() => null);
   acc = null;
   draw();
+  bindMcp(view);
   loadAccounts();
   loadAbout();
   if (tun && (tun.state === 'installing' || tun.state === 'starting')) tunTimer = setTimeout(pollTunnel, 1000);

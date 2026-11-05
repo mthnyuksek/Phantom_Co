@@ -21,7 +21,7 @@ AgentContext resolve_agent(Store& store, const json& agent, const std::string& u
     AgentContext c;
     c.agent = agent;
     static const std::set<std::string> kDirs = {"Agents", "Skills", "Rules", "Projects"};
-    std::set<std::string> tools, dirs;
+    std::set<std::string> tools, dirs, mcp;
     int rank = role_rank(user_role);
     for (auto& id : agent.value("skills", json::array())) {
         auto s = store.skill(id.get<std::string>());
@@ -30,12 +30,14 @@ AgentContext resolve_agent(Store& store, const json& agent, const std::string& u
         if (!skill_fits_project(*s, project_id)) continue;  // project skills stay out of other work
         for (auto& t : (*s)["tools"]) tools.insert(t.get<std::string>());
         for (auto& d : (*s)["dirs"]) if (kDirs.count(d.get<std::string>())) dirs.insert(d.get<std::string>());
+        for (auto& m : s->value("mcp", json::array())) if (m.is_string()) mcp.insert(m.get<std::string>());
         c.skills.push_back(*s);
     }
     for (const char* order : {"Read", "Glob", "Grep", "Write", "Edit", "Bash", "PowerShell", "WebSearch", "WebFetch"})
         if (tools.erase(order)) c.tools.push_back(order);
     for (auto& t : tools) c.tools.push_back(t);  // anything else, as written in the skill
     for (auto& d : dirs) c.add_dirs.push_back(U8(store.root() / P(d)));
+    c.mcp.assign(mcp.begin(), mcp.end());
     return c;
 }
 
@@ -75,6 +77,9 @@ std::string build_system_prompt(Store& store, const PromptInput& in) {
         p += "\n## Skills\n";
         for (auto& s : in.ctx->skills)
             if (!trim(s.value("body", "")).empty()) p += "### " + s.value("name", "") + "\n" + trim(s.value("body", "")) + "\n";
+        if (!in.ctx->mcp.empty())
+            p += "Tools named mcp__<server>__<tool> come from outside services. Some of them wait until a person approves the call in the chat; "
+                 "if a call is declined, do not try it again: say what you wanted to do and ask how to go on.\n";
     }
 
     if (in.project.is_object() && !in.project.is_null()) {

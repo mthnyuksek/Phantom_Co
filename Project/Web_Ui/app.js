@@ -1,6 +1,7 @@
 import { lang, setLang, LANGS } from './i18n.js';  // first: it translates what the other modules put on the screen
 import { api } from './api.js';
 import { ghostSVG } from './ghosts.js';
+import { brandColor, themePickerHTML, bindThemePicker } from './theme.js';
 import { $, $$, esc, guard, modal, closeModal, toast, ROLE_TEXT } from './ui.js';
 import { S, refreshState, forgetState, me, isOwner, canEdit, userGhost, providerLabel } from './state.js';
 import { ghostPickerHTML, bindGhostPicker } from './pickers.js';
@@ -29,7 +30,7 @@ function authCard(title, sub, body, mood = 'idle', form = 'wizard') {
   $('#app').hidden = true;
   authRoot.hidden = false;
   authRoot.innerHTML = `<div class="auth-card">
-    <div class="auth-ghost">${ghostSVG({ form, color: '#b69cff', mood, size: 120 })}</div>
+    <div class="auth-ghost">${ghostSVG({ form, color: brandColor(), mood, size: 120 })}</div>
     <h1>${esc(title)}</h1><p class="sub">${esc(sub)}</p>${body}${langSwitchHTML()}</div>`;
 }
 const langSwitchHTML = () => `<div class="auth-alt" data-no-i18n>${LANGS.map((l) => `<a href="#" data-lang="${l.id}" ${l.id === lang ? 'style="font-weight:700;pointer-events:none"' : ''}>${l.label}</a>`).join(' · ')}</div>`;
@@ -162,18 +163,18 @@ window.addEventListener('pc2:signedout', () => { if (running) boot(); });
 function paintShell() {
   const s = S.state;
   $('#brand-name').textContent = s.company.name;
-  $('#brand-ghost').innerHTML = ghostSVG({ form: 'classic', color: '#b69cff', size: 34 });
+  $('#brand-ghost').innerHTML = ghostSVG({ form: 'classic', color: brandColor(), size: 34 });
   $('#provider-chips').innerHTML = s.providers.filter((p) => p.id !== 'demo' && (p.id !== 'gemini' || p.available))  // Gemini only when installed: most people do not have it
     .map((p) => `<span class="chip ${p.available ? 'ok' : ''}" title="${p.available ? 'Found on this PC' : 'Not found on this PC'}">${esc(p.label)}</span>`).join('');
   $('#home-btn').hidden = !(bridge && isRemote);
   const m = s.me;
   $('#me-chip').innerHTML = `<span class="mini">${userGhost(m, 30)}</span><span class="me-text"><b>${esc(m.name)}</b><small>${esc(ROLE_TEXT[m.role] || m.role)}</small></span>`;
   const page = location.hash.replace(/^#\//, '').split('/')[0] || 'haunt';
-  const busyChats = s.jobs.length;
+  const busyChats = s.jobs.length, asks = (s.approvals || []).filter((x) => x.can_decide).length;  // ghost actions waiting for this person's yes/no
   $('#nav').innerHTML = NAV.filter((n) => !n.owner || m.role === 'owner')
-    .map((n) => `<a href="#/${n.id}" data-page="${n.id}" class="${n.id === page ? 'on' : ''}"><i>${n.icon}</i> ${n.label}${n.id === 'runs' && busyChats ? `<span class="count">${busyChats}</span>` : ''}</a>`).join('');
+    .map((n) => `<a href="#/${n.id}" data-page="${n.id}" class="${n.id === page ? 'on' : ''}"><i>${n.icon}</i> ${n.label}${n.id === 'runs' && busyChats ? `<span class="count">${busyChats}</span>` : ''}${n.id === 'chats' && asks ? `<span class="count ask" title="Waiting for your approval">🔐 ${asks}</span>` : ''}</a>`).join('');
   // phone top bar: page name, small ghost, profile button
-  $('#top-ghost').innerHTML = ghostSVG({ form: 'classic', color: '#b69cff', size: 26 });
+  $('#top-ghost').innerHTML = ghostSVG({ form: 'classic', color: brandColor(), size: 26 });
   $('#top-title').textContent = (NAV.find((n) => n.id === page) || NAV[0]).label;
   $('#top-me').innerHTML = userGhost(m, 30);
 }
@@ -304,6 +305,8 @@ function bindLend(el) {
 }
 
 // ------------------------------------------------------------------- profile
+// The app's own ghosts take the colour of the theme.
+window.addEventListener('pc2:theme', () => { if (S.state && !$('#app').hidden) paintShell(); });
 $('#me-chip').onclick = () => { setMenu(false); openProfile(); };
 $('#home-btn').onclick = () => bridge?.postMessage({ cmd: 'home' });
 function openProfile() {
@@ -316,6 +319,8 @@ function openProfile() {
       <h3 class="subhead">Change password</h3>
       <div class="two"><div><label>Current password</label><input type="password" id="p-old" autocomplete="current-password"></div>
         <div><label>New password</label><input type="password" id="p-new" autocomplete="new-password"></div></div>
+      <h3 class="subhead">Theme</h3>
+      <div id="p-theme">${themePickerHTML()}</div>
       <h3 class="subhead">Language</h3>
       <select id="p-lang" data-no-i18n>${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang ? 'selected' : ''}>${l.label}</option>`).join('')}</select>
       ${lendHTML()}
@@ -329,6 +334,7 @@ function openProfile() {
     prev();
     bindLend(el);
     $('#p-lang', el).onchange = (e) => setLang(e.target.value);
+    bindThemePicker($('#p-theme', el));
     el.addEventListener('click', guard(async (e) => {
       if (e.target.id === 'p-cancel') return closeModal();
       if (e.target.id === 'p-out') { await api('POST', '/api/auth/logout', {}); closeModal(); return boot(); }

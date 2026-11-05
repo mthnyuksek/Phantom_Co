@@ -7,7 +7,7 @@
 
 namespace pc2 {
 
-HttpClient::HttpClient(const std::string& base_url, int connect_ms, int receive_ms) {
+HttpClient::HttpClient(const std::string& base_url, int connect_ms, int receive_ms, int send_ms) {
     std::string rest = base_url;
     secure_ = rest.rfind("https://", 0) == 0;
     if (secure_) rest = rest.substr(8);
@@ -24,7 +24,7 @@ HttpClient::HttpClient(const std::string& base_url, int connect_ms, int receive_
     session_ = WinHttpOpen(L"PhantomCo", secure_ ? WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY : WINHTTP_ACCESS_TYPE_NO_PROXY,
                            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session_) return;
-    WinHttpSetTimeouts(session_, 10000, connect_ms, 60000, receive_ms);
+    WinHttpSetTimeouts(session_, 10000, connect_ms, send_ms, receive_ms);
     connection_ = WinHttpConnect(session_, Widen(rest).c_str(), port, 0);
 }
 
@@ -51,6 +51,15 @@ std::unique_ptr<HttpResult> HttpClient::Request(const wchar_t* method, const std
         DWORD status = 0, size = sizeof(status);
         WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX);
         out->status = (int)status;
+        DWORD lsize = 0;
+        WinHttpQueryHeaders(req, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX, WINHTTP_NO_OUTPUT_BUFFER, &lsize, WINHTTP_NO_HEADER_INDEX);
+        if (lsize > 0 && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+            std::wstring loc(lsize / sizeof(wchar_t), L'\0');
+            if (WinHttpQueryHeaders(req, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX, loc.data(), &lsize, WINHTTP_NO_HEADER_INDEX)) {
+                loc.resize(lsize / sizeof(wchar_t));
+                out->location = Narrow(loc);
+            }
+        }
         for (;;) {
             DWORD avail = 0;
             if (!WinHttpQueryDataAvailable(req, &avail) || avail == 0) break;

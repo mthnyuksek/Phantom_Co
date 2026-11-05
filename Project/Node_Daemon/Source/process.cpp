@@ -35,6 +35,13 @@ static bool is_script(const std::wstring& exe) {
     return l.ends_with(L".cmd") || l.ends_with(L".bat");
 }
 
+std::wstring command_line(const std::string& exe_u8, const std::vector<std::string>& args) {
+    std::wstring exe = Widen(exe_u8);
+    std::wstring cmd = quote_arg(exe);
+    for (auto& a : args) cmd += L" " + quote_arg(Widen(a));
+    return is_script(exe) ? L"cmd.exe /d /s /c \"" + cmd + L"\"" : cmd;
+}
+
 std::wstring environment_block(const std::vector<std::pair<std::string, std::string>>& changes) {
     if (changes.empty()) return L"";
     auto upper = [](std::wstring s) { for (auto& c : s) c = (wchar_t)towupper(c); return s; };
@@ -75,16 +82,7 @@ bool Process::start(const ProcessSpec& spec, std::string& error) {
     SetHandleInformation(out_read_, HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(in_w, HANDLE_FLAG_INHERIT, 0);
 
-    std::wstring exe = Widen(spec.exe);
-    std::wstring cmd;
-    if (is_script(exe)) {
-        std::wstring inner = quote_arg(exe);
-        for (auto& a : spec.args) inner += L" " + quote_arg(Widen(a));
-        cmd = L"cmd.exe /d /s /c \"" + inner + L"\"";
-    } else {
-        cmd = quote_arg(exe);
-        for (auto& a : spec.args) cmd += L" " + quote_arg(Widen(a));
-    }
+    std::wstring cmd = command_line(spec.exe, spec.args);
 
     STARTUPINFOW si{};
     si.cb = sizeof(si);

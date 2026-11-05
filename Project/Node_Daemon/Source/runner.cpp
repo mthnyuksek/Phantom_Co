@@ -402,6 +402,14 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     fs::create_directories(workdir, ec);
 
     AgentContext ctx = resolve_agent(store_, *agent, job.user_role, project.is_object() ? job.project_id : "");
+    // MCP servers run only on this PC: never on a friend's, and only the ones that exist and are switched on.
+    {
+        std::vector<std::string> keep;
+        if (!remote && mcp_)
+            for (auto& n : ctx.mcp)
+                if (auto s = mcp_->get(n); s && s->value("enabled", true)) keep.push_back(n);
+        ctx.mcp = keep;
+    }
     PromptInput pin;
     pin.ctx = &ctx;
     pin.user_name = user.is_object() ? user.value("name", "") : "";
@@ -463,6 +471,37 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     if (spec.provider == "claude" || spec.provider == "gemini") {  // Gemini reads it through GEMINI_SYSTEM_MD
         write_file_atomic(sysfile, spec.system_prompt);
         spec.system_file = U8(sysfile);
+    }
+
+    // MCP servers: a one-time key lets this run's proxies fetch them (and ask for approvals) while the run lives.
+    struct McpGuard {
+        Mcp* m = nullptr;
+        std::string key;
+        fs::path file;
+        ~McpGuard() {
+            if (m && !key.empty()) m->close_run(key);
+            std::error_code e;
+            if (!file.empty()) fs::remove(file, e);
+        }
+    } mcp_guard;
+    if (!ctx.mcp.empty()) {
+        McpRun r;
+        r.run_id = job.id;
+        r.agent_id = job.agent_id;
+        r.user_id = job.user_id;
+        r.conv = job.stack.front().conv;  // the person at the bottom of the reply stack answers approvals
+        r.workdir = U8(workdir);
+        r.servers.insert(ctx.mcp.begin(), ctx.mcp.end());
+        wchar_t self[MAX_PATH * 2];
+        DWORD n = GetModuleFileNameW(nullptr, self, MAX_PATH * 2);
+        mcp_guard.m = mcp_;
+        mcp_guard.key = mcp_->open_run(r);
+        mcp_guard.file = tmp / P(job.id + ".mcp.json");
+        spec.mcp = ctx.mcp;
+        spec.mcp_exe = Narrow(std::wstring(self, n));
+        spec.mcp_key = mcp_guard.key;
+        spec.mcp_port = mcp_->port();
+        spec.mcp_file = U8(mcp_guard.file);
     }
 
     ProcessSpec ps;

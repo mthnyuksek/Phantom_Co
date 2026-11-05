@@ -11,7 +11,16 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
     <button class="btn primary" id="cv-send">Send</button></div><div class="composer-note" id="cv-note"></div></div>`;
   const msgsEl = $('#cv-msgs', el), input = $('#cv-input', el), sendBtn = $('#cv-send', el), note = $('#cv-note', el);
 
+  const renderApproval = (m) => {
+    const a = agentById(m.agent), p = (data.approvals || []).find((x) => x.id === m.approval);
+    const forUser = p && !p.can_decide ? (S.state?.users || []).find((u) => u.id === p.user_id) : null;
+    return `<div class="approval ${p ? 'waiting' : ''}"><div class="approval-head">🔐 <b>${esc(a?.name || 'A ghost')}</b> <span>asks to use</span> <b>${esc(m.server)} › ${esc(m.tool)}</b></div>
+      <details ${p ? 'open' : ''}><summary>Details</summary><pre>${esc(m.args || '')}</pre></details>
+      ${p && p.can_decide ? `<div class="approval-btns"><button class="btn small primary" data-approve="${esc(m.approval)}">Approve</button><button class="btn small danger" data-decline="${esc(m.approval)}">Decline</button></div>`
+        : p ? `<div class="hint">Waiting for ${esc(forUser?.name || 'the person')} to answer.</div>` : ''}</div>`;
+  };
   const renderMsg = (m) => {
+    if (m.kind === 'approval') return renderApproval(m);
     const who = senderInfo(m.from || 'system');
     if (who.kind === 'system') return `<div class="sys">${esc(m.text)}</div>`;
     const mine = who.kind === 'user' && who.id === me().id;
@@ -43,7 +52,7 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
 
   function apply(d) {
     data = d;
-    const s = JSON.stringify([d.messages.length, d.busy, d.live, d.meta.title, d.can_write, d.can_retry, d.meta.shared, (S.state?.users || []).map((u) => u.online)]);
+    const s = JSON.stringify([d.messages.length, d.busy, d.live, d.meta.title, d.can_write, d.can_retry, d.meta.shared, (S.state?.users || []).map((u) => u.online), (d.approvals || []).map((x) => x.id)]);
     onData?.(d);
     if (s === sig) return;
     sig = s;
@@ -71,7 +80,12 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
   msgsEl.onclick = guard(async (e) => {
     if (e.target.closest('[data-stop]')) { await api('POST', `/api/chats/${id}/stop`, {}); load(); }
-    else if (e.target.closest('[data-retry]')) { e.target.closest('[data-retry]').disabled = true; sending = true; try { apply(await api('POST', `/api/chats/${id}/retry`, {})); } finally { sending = false; } }
+    else if (e.target.closest('[data-approve], [data-decline]')) {
+      const b = e.target.closest('[data-approve], [data-decline]');
+      b.parentElement.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+      await api('POST', '/api/mcp/approvals/' + (b.dataset.approve || b.dataset.decline), { approve: !!b.dataset.approve });
+      load();
+    } else if (e.target.closest('[data-retry]')) { e.target.closest('[data-retry]').disabled = true; sending = true; try { apply(await api('POST', `/api/chats/${id}/retry`, {})); } finally { sending = false; } }
   });
 
   return { destroy: () => { alive = false; }, reload: load, get data() { return data; } };

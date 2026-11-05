@@ -10,6 +10,9 @@
   <title>Phantom Co. · Ghost Company</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%91%BB%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="app.css">
+  <script>/* theme before the first paint (theme.js does the rest) */
+    try { let t = localStorage.getItem('pc2.theme'); if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'daylight' : 'midnight'; if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
 </head>
 <body>
   <div id="app" hidden>

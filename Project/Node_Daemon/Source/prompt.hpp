@@ -15,6 +15,7 @@ struct AgentContext {
     std::vector<json> skills;           // effective skills
     std::vector<std::string> tools;     // union of their tools (Claude tool names)
     std::vector<std::string> add_dirs;  // extra Vault folders the skills may touch (absolute)
+    std::vector<std::string> mcp;       // MCP servers the skills open (names; the runner keeps those that exist and are on)
     bool can_write() const;
     bool has_tool(const std::string& t) const;
 };

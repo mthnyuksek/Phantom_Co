@@ -53,6 +53,16 @@ static std::string join(const std::vector<std::string>& v) {
     return s;
 }
 
+static std::vector<std::string> proxy_args(const RunSpec& rs, const std::string& name) {
+    return {"--mcp-proxy", name, "--mcp-port", std::to_string(rs.mcp_port), "--mcp-key", rs.mcp_key};
+}
+
+// A TOML string for Codex's -c option: a literal string ('...') unless the text has a quote in it.
+static std::string toml_str(const std::string& s) {
+    if (s.find('\'') == std::string::npos) return "'" + s + "'";
+    return "\"" + replace_all(replace_all(s, "\\", "\\\\"), "\"", "\\\"") + "\"";
+}
+
 bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
     out = {};
     out.cwd = rs.workdir;
@@ -65,11 +75,24 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
             return false;
         }
         out.stdin_data = rs.prompt;
-        // Lean profile: own system prompt, only the tools the skills grant, no MCP servers, no slash commands.
+        // Lean profile: own system prompt, only the tools the skills grant, only our MCP servers, no slash commands.
         out.args = {"-p", "--output-format", "stream-json", "--verbose", "--system-prompt-file", rs.system_file,
                     "--tools", join(rs.tools), "--strict-mcp-config", "--disable-slash-commands",
                     "--setting-sources", "project", "--permission-prompts", "none", "--max-turns", std::to_string(rs.max_turns)};
-        if (!rs.tools.empty()) { out.args.push_back("--allowedTools"); out.args.push_back(join(rs.tools)); }
+        std::vector<std::string> allowed = rs.tools;
+        if (!rs.mcp.empty()) {
+            json servers = json::object();
+            for (auto& n : rs.mcp) {
+                servers[n] = {{"type", "stdio"}, {"command", rs.mcp_exe}, {"args", proxy_args(rs, n)}};
+                allowed.push_back("mcp__" + n);  // every tool of that server
+            }
+            if (!write_file_atomic(P(rs.mcp_file), json{{"mcpServers", servers}}.dump(2))) { error = "Could not write the MCP settings of the run."; return false; }
+            out.args.push_back("--mcp-config");
+            out.args.push_back(rs.mcp_file);
+            out.env.push_back({"MCP_TIMEOUT", "120000"});        // npx may download a server first
+            out.env.push_back({"MCP_TOOL_TIMEOUT", "3600000"});  // a call may wait for a person's approval
+        }
+        if (!allowed.empty()) { out.args.push_back("--allowedTools"); out.args.push_back(join(allowed)); }
         if (!rs.model.empty()) { out.args.push_back("--model"); out.args.push_back(rs.model); }
         if (!rs.session_id.empty()) { out.args.push_back("--resume"); out.args.push_back(rs.session_id); }
         for (auto& d : rs.add_dirs) { out.args.push_back("--add-dir"); out.args.push_back(d); }
@@ -95,6 +118,18 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
             out.args = {"exec", "resume", rs.session_id, "--json", "--skip-git-repo-check", "-c", "sandbox_mode=\"" + sandbox + "\""};
         }
         if (!rs.model.empty()) { out.args.push_back("-m"); out.args.push_back(rs.model); }
+        // Only our MCP servers: this replaces the mcp_servers of the user's own config.toml (empty = none at all).
+        std::string table;
+        for (auto& n : rs.mcp) {
+            std::string args;
+            for (auto& a : proxy_args(rs, n)) args += (args.empty() ? "" : ",") + toml_str(a);
+            // Codex asks before every MCP call and `exec` cannot ask anybody ("approval policy is never"): our proxy does
+            // the asking (Settings > MCP > Ask me before it acts), so Codex itself approves.
+            table += (table.empty() ? "" : ",") + n + "={command=" + toml_str(rs.mcp_exe) + ",args=[" + args +
+                     "],startup_timeout_sec=120,tool_timeout_sec=3600,default_tools_approval_mode='approve'}";
+        }
+        out.args.push_back("-c");
+        out.args.push_back("mcp_servers={" + table + "}");
         out.args.push_back("-");  // read the prompt from stdin
         return true;
     }
@@ -109,8 +144,19 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
         // the approval mode follows the skills (shell -> yolo, files -> auto_edit, else read-only tools only).
         out.stdin_data = rs.prompt;
         const bool shell = std::find(rs.tools.begin(), rs.tools.end(), "Bash") != rs.tools.end();
-        out.args = {"-p", "", "-o", "stream-json", "--skip-trust", "-e", "none", "--allowed-mcp-server-names", "phantom_none",
-                    "--approval-mode", shell ? "yolo" : rs.can_write ? "auto_edit" : "default"};
+        out.args = {"-p", "", "-o", "stream-json", "--skip-trust", "-e", "none", "--approval-mode", shell ? "yolo" : rs.can_write ? "auto_edit" : "default"};
+        if (rs.mcp.empty()) { out.args.push_back("--allowed-mcp-server-names"); out.args.push_back("phantom_none"); }
+        else {
+            // Our servers come from a system settings file of the run; only they are allowed (not the user's own ones).
+            json servers = json::object();
+            for (auto& n : rs.mcp) {
+                servers[n] = {{"command", rs.mcp_exe}, {"args", proxy_args(rs, n)}, {"trust", true}, {"timeout", 3600000}};
+                out.args.push_back("--allowed-mcp-server-names");
+                out.args.push_back(n);
+            }
+            if (!write_file_atomic(P(rs.mcp_file), json{{"mcpServers", servers}}.dump(2))) { error = "Could not write the MCP settings of the run."; return false; }
+            out.env.push_back({"GEMINI_CLI_SYSTEM_SETTINGS_PATH", rs.mcp_file});
+        }
         if (!rs.model.empty()) { out.args.push_back("-m"); out.args.push_back(rs.model); }
         if (!rs.session_id.empty()) { out.args.push_back("--resume"); out.args.push_back(rs.session_id); }
         for (auto& d : rs.add_dirs) { out.args.push_back("--include-directories"); out.args.push_back(d); }

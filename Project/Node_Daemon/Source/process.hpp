@@ -17,6 +17,9 @@ struct ProcessSpec {
     std::vector<std::pair<std::string, std::string>> env;
 };
 
+// Command line for CreateProcessW: arguments quoted; .cmd/.bat run through cmd.exe.
+std::wstring command_line(const std::string& exe, const std::vector<std::string>& args);
+
 // The inherited environment with these changes, as a CreateProcessW(CREATE_UNICODE_ENVIRONMENT) block ("" = no change).
 std::wstring environment_block(const std::vector<std::pair<std::string, std::string>>& changes);
 

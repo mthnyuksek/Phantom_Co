@@ -31,6 +31,11 @@ struct RunSpec {
     int max_turns = 40;
     bool can_write = false;                // maps to the Codex sandbox mode
     std::vector<std::pair<std::string, std::string>> env;  // account of this run (CLAUDE_CONFIG_DIR / CODEX_HOME), empty = Auto
+    // MCP servers of this run: each one is "<this exe> --mcp-proxy <name> --mcp-port <port> --mcp-key <key>" (see mcp.hpp).
+    std::vector<std::string> mcp;          // server names
+    std::string mcp_exe, mcp_key;
+    int mcp_port = 0;
+    std::string mcp_file;                  // Claude: --mcp-config file; Gemini: system settings file (written by build_command)
 };
 
 bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error);

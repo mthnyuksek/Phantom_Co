@@ -21,6 +21,7 @@
 
 #include "embedded.hpp"
 #include "httplib.h"
+#include "mcp_builtin.hpp"
 #include "prompt.hpp"
 #include "update_check.hpp"
 #include "version.hpp"
@@ -29,7 +30,8 @@ namespace pc2 {
 
 static httplib::Server* g_server = nullptr;
 
-static const std::set<std::string> kForms = {"classic", "wizard", "pirate", "knight", "robot", "ninja", "chef", "detective", "royal", "cat", "scientist"};
+static const std::set<std::string> kForms = {"classic", "wizard", "pirate", "knight", "robot", "ninja", "chef", "detective", "royal", "cat", "scientist",
+                                             "vampire", "witch", "astronaut", "viking", "cowboy", "artist", "dj", "angel", "devil", "graduate", "mummy", "sprout"};
 static const std::set<std::string> kTools = {"Read", "Glob", "Grep", "Write", "Edit", "Bash", "PowerShell", "WebSearch", "WebFetch"};
 static const std::set<std::string> kDirs = {"Agents", "Skills", "Rules", "Projects"};
 static const std::set<std::string> kRoles = {"owner", "editor", "viewer"};
@@ -469,6 +471,18 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         json st = {{"company", store.company()}, {"me", public_user(c.profile)}, {"users", users}, {"providers", providers},
                    {"agents", agents}, {"skills", skills}, {"rules", store.rules()}, {"projects", store.projects()}, {"jobs", jobs},
                    {"forms", kForms}, {"tools", kTools}};
+        if (runner.mcp()) {  // MCP servers (names for the skill editor) and the tool calls waiting for this person's approval
+            json names = json::array();
+            for (auto& s : runner.mcp()->list()) names.push_back({{"name", s["name"]}, {"label", s.value("label", "")}, {"enabled", s.value("enabled", true)}});
+            st["mcp"] = names;
+            json mine = json::array();
+            for (auto a : runner.mcp()->pending("", c.id, owner)) {
+                if (!conv_visible(a.value("conversation_id", ""), c)) continue;
+                if (auto cv = store.conv_load(a.value("conversation_id", ""))) a["task_id"] = (*cv)["meta"].value("task_id", "");  // where to answer it
+                mine.push_back(a);
+            }
+            st["approvals"] = mine;
+        }
         {   // extra sign-ins of this PC: names only (the agent editor offers "claude#<id>"); Settings > Secrets shows more to the owner
             json acc = json::array();
             if (runner.accounts())
@@ -731,6 +745,162 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         send(res, {{"ok", true}});
     });
 
+    // =================================================================== MCP
+    // Settings > MCP (owner): outside tools for the ghosts. Commands and secrets are entered only at this PC (a server
+    // is a program that runs here). The proxies of running ghosts (phantom_co.exe --mcp-proxy) call /api/mcp/session and
+    // /api/mcp/ask from this PC with their run's one-time key, without a session.
+    auto mcp_secrets = [&](const json& b) {
+        std::map<std::string, std::string> out;
+        if (b.contains("secrets") && b["secrets"].is_object())
+            for (auto& [k, v] : b["secrets"].items()) if (v.is_string()) out[k] = v.get<std::string>();
+        return out;
+    };
+    add("GET", "/api/mcp", kOwner, [&](auto&, auto& res, Ctx&) {
+        Mcp* m = runner.mcp();
+        if (!m) return fail(res, 404, "Not available.");
+        json list = m->list();
+        for (auto& s : list) {  // which skills open it
+            json skills = json::array();
+            for (auto& k : store.skills())
+                for (auto& n : k.value("mcp", json::array())) if (n == s["name"]) skills.push_back(k.value("name", ""));
+            s["skills"] = skills;
+            if (s["kind"] == "command") {  // is the program there? (npx, python...)
+                std::wstring w = Widen(s.value("command", ""));
+                wchar_t buf[MAX_PATH * 2];
+                bool found = w.find_first_of(L"\\/") != std::wstring::npos ? fs::exists(P(s.value("command", ""))) : false;
+                for (const wchar_t* ext : {L".exe", L".cmd", L".bat", L""})
+                    if (!found && SearchPathW(nullptr, w.c_str(), ext, MAX_PATH * 2, buf, nullptr) > 0) found = true;
+                s["found"] = found;
+            }
+        }
+        send(res, {{"servers", list}, {"catalog", Mcp::catalog()}});
+    });
+    add("POST", "/api/mcp", kOwner, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        Mcp* m = runner.mcp();
+        if (!m) return fail(res, 404, "Not available.");
+        if (!is_this_pc(req)) return fail(res, 403, "MCP servers can only be added on the PC that runs Phantom Co.");
+        std::string err, skill;
+        json in = b;
+        if (b.contains("catalog")) {  // a ready-made one, plus its skill
+            in = json();
+            for (auto& c : Mcp::catalog()) if (c["name"] == str(b, "catalog", 24)) in = c;
+            if (in.is_null()) return fail(res, 404, "Unknown ready-made server.");
+            skill = in.value("skill", "");
+        }
+        if (!m->save(in, mcp_secrets(b), true, err)) return fail(res, 400, err);
+        json out = *m->get(in.value("name", ""));
+        if (!skill.empty()) {
+            bool have = false;
+            for (auto& s : store.skills()) if (s["id"] == skill) have = true;
+            if (!have) if (auto s = store.install_skill_template(skill)) out["skill_id"] = (*s)["id"];
+            if (have) out["skill_id"] = skill;
+        }
+        send(res, out, 201);
+    });
+    add("PUT", "/api/mcp/" + ID, kOwner, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        Mcp* m = runner.mcp();
+        if (!m) return fail(res, 404, "Not available.");
+        if (!is_this_pc(req)) return fail(res, 403, "MCP servers can only be changed on the PC that runs Phantom Co.");
+        b["name"] = std::string(req.matches[1]);
+        std::string err;
+        if (!m->save(b, mcp_secrets(b), false, err)) return fail(res, 400, err);
+        send(res, *m->get(req.matches[1]));
+    });
+    add("DELETE", "/api/mcp/" + ID, kOwner, [&](auto& req, auto& res, Ctx&) {
+        Mcp* m = runner.mcp();
+        if (!m || !m->remove(req.matches[1])) return fail(res, 404, "Server not found.");
+        send(res, {{"ok", true}});
+    });
+    add("POST", "/api/mcp/" + ID + "/refresh", kOwner, [&](auto& req, auto& res, Ctx&) {
+        Mcp* m = runner.mcp();
+        std::string err;
+        if (!m) return fail(res, 404, "Not available.");
+        if (!is_this_pc(req)) return fail(res, 403, "Only on the PC that runs Phantom Co.");
+        if (!m->refresh_folder(req.matches[1], err)) return fail(res, 400, err);
+        send(res, {{"ok", true}});
+    });
+    add("GET", "/api/mcp/" + ID + "/check", kOwner, [&](auto& req, auto& res, Ctx&) {
+        Mcp* m = runner.mcp();
+        auto s = m ? m->get(req.matches[1]) : std::nullopt;
+        if (!s) return fail(res, 404, "Server not found.");
+        if ((*s)["kind"] != "builtin") return send(res, {{"ok", true}, {"text", ""}});
+        json sec = json::object();
+        for (const char* k : {"bot_token", "client_id", "client_secret", "refresh_token"}) sec[k] = m->secret(req.matches[1], k);
+        send(res, builtin::check((*s)["builtin"], sec, s->value("options", json::object())));
+    });
+    // YouTube: "Sign in with Google" opens Google's page in the browser; Google sends the browser back to /api/mcp/oauth.
+    static std::mutex oauth_mu;
+    static std::map<std::string, std::pair<std::string, std::string>> oauth_wait;  // state -> {server, verifier}
+    auto redirect_uri = [&] { return "http://127.0.0.1:" + std::to_string(cfg.port) + "/api/mcp/oauth"; };
+    add("POST", "/api/mcp/" + ID + "/google_login", kOwner, [&](auto& req, auto& res, Ctx&) {
+        Mcp* m = runner.mcp();
+        auto s = m ? m->get(req.matches[1]) : std::nullopt;
+        if (!s || s->value("builtin", "") != "youtube") return fail(res, 404, "Server not found.");
+        if (!is_this_pc(req)) return fail(res, 403, "Only on the PC that runs Phantom Co.");
+        const std::string id = m->secret(req.matches[1], "client_id");
+        if (id.empty() || m->secret(req.matches[1], "client_secret").empty()) return fail(res, 400, "Save the OAuth client id and secret first.");
+        std::string state = sha256_hex_of(new_id() + std::to_string(GetTickCount64())).substr(0, 32), verifier = sha256_hex_of(new_id() + state);
+        {
+            std::lock_guard<std::mutex> l(oauth_mu);
+            oauth_wait[state] = {req.matches[1], verifier};
+        }
+        send(res, {{"url", builtin::google_auth_url(id, redirect_uri(), state, builtin::pkce_challenge(verifier))}});
+    });
+    add("GET", "/api/mcp/oauth", kPublic, [&](auto& req, auto& res, Ctx&) {
+        auto page = [&](const std::string& title, const std::string& text) {
+            res.set_content("<!doctype html><meta charset=utf-8><title>Phantom Co.</title><body style=\"font:16px system-ui;background:#0c0a14;color:#ebe8f7;"
+                            "display:flex;align-items:center;justify-content:center;height:90vh;text-align:center\"><div><h2>" + title + "</h2><p>" + text + "</p></div>",
+                            "text/html; charset=utf-8");
+        };
+        std::pair<std::string, std::string> w;
+        {
+            std::lock_guard<std::mutex> l(oauth_mu);
+            auto it = oauth_wait.find(req.get_param_value("state"));
+            if (it == oauth_wait.end()) return page("Unknown sign-in", "Start the sign-in again in Phantom Co. (Settings &gt; MCP).");
+            w = it->second;
+            oauth_wait.erase(it);
+        }
+        Mcp* m = runner.mcp();
+        if (!m || req.has_param("error") || !req.has_param("code")) return page("Not connected", "Google did not give access. You can close this tab and try again.");
+        std::string refresh, err;
+        if (!builtin::google_exchange(m->secret(w.first, "client_id"), m->secret(w.first, "client_secret"), req.get_param_value("code"), w.second, redirect_uri(), refresh, err)) {
+            std::string safe;
+            for (char ch : err) safe += ch == '<' ? std::string("&lt;") : ch == '&' ? std::string("&amp;") : std::string(1, ch);
+            return page("Not connected", safe);
+        }
+        m->set_secret(w.first, "refresh_token", refresh);
+        page("YouTube is connected", "You can close this tab and go back to Phantom Co.");
+    });
+    // ---- the proxies of running ghosts (this PC only, one-time key of the run)
+    add("POST", "/api/mcp/session", kPublic, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        if (!is_this_pc(req) || !runner.mcp()) return fail(res, 403, "Forbidden");
+        std::string err;
+        auto s = runner.mcp()->session(str(b, "key", 64), str(b, "server", 24), err);
+        if (!s) return fail(res, 403, err);
+        send(res, *s);
+    });
+    add("POST", "/api/mcp/ask", kPublic, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        if (!is_this_pc(req) || !runner.mcp()) return fail(res, 403, "Forbidden");
+        send(res, runner.mcp()->ask(str(b, "key", 64), str(b, "server", 24), str(b, "tool", 64), b.value("arguments", json::object()), str(b, "id", 64), 20));
+    });
+    // ---- approvals: the person the ghost works for (or the owner) answers in the chat
+    add("POST", "/api/mcp/approvals/" + ID, kEditor, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        if (!runner.mcp()) return fail(res, 404, "Not available.");
+        std::string err;
+        if (!runner.mcp()->decide(req.matches[1], c.id, c.name, c.role == "owner", b.value("approve", false), err)) return fail(res, 409, err);
+        send(res, {{"ok", true}});
+    });
+
     add("POST", "/api/agents", kEditor, [&](auto& req, auto& res, Ctx&) {
         json b, a;
         if (!parse_body(req, res, b)) return;
@@ -773,6 +943,9 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             for (auto& p : in["projects"])
                 if (p.is_string() && store.project(p.get<std::string>())) out["projects"].push_back(p);
         } else out["projects"] = base.value("projects", json::array());
+        out["mcp"] = json::array();  // MCP servers this skill opens (names from Settings > MCP)
+        for (auto& n : in.contains("mcp") ? in["mcp"] : base.value("mcp", json::array()))
+            if (n.is_string() && runner.mcp() && runner.mcp()->get(n.get<std::string>())) out["mcp"].push_back(n);
         // Powerful skills are owner-only: agents act with the rights of the person who asks.
         bool powerful = false;
         for (auto& t : out["tools"]) if (t == "Bash" || t == "PowerShell") powerful = true;
@@ -943,6 +1116,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         json out = {{"meta", (*cv)["meta"]}, {"messages", (*cv)["messages"]}, {"busy", busy},
                     {"live", runner.conversation_live(id)}, {"can_write", can_write},
                     {"can_retry", can_write && !busy && c.role != "viewer" && retry_index(*cv, c) >= 0}};
+        out["approvals"] = runner.mcp() ? runner.mcp()->pending(id, c.id, c.role == "owner") : json::array();  // tool calls waiting for a yes/no
         return out;
     };
 
