@@ -40,6 +40,7 @@ add_executable(phantom_co WIN32
   Source/telegram_bridge.cpp
   Source/script_value.cpp
   Source/script_expr.cpp
+  Source/script_doc.cpp
   Source/runner.cpp
   Source/worker_hub.cpp
   Source/worker.cpp

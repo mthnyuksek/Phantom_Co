@@ -226,7 +226,7 @@ void init_vault(const fs::path& root) {
         fresh = true;
     }
 
-    for (const wchar_t* d : {L"Company", L"Users", L"Agents", L"Skills", L"Rules", L"Projects", L"Tasks", L"Task_Templates", L"Conversations", L"Runs", L"Shared_Files"})
+    for (const wchar_t* d : {L"Company", L"Users", L"Agents", L"Skills", L"Rules", L"Projects", L"Tasks", L"Task_Templates", L"Scripts", L"Script_Runs", L"Conversations", L"Runs", L"Shared_Files"})
         fs::create_directories(root / d, ec);
 
     for (size_t i = 0; i < kEmbeddedCount; ++i) {  // starting files from the template; existing files are kept
@@ -279,12 +279,12 @@ void Store::switch_root(const fs::path& new_root) {
     load_run_index();
 }
 
-std::string Store::unique_id(const fs::path& dir, const std::string& name, bool folder) {
+std::string Store::unique_id(const fs::path& dir, const std::string& name, bool folder, const char* ext) {
     std::string base = slugify(name, 32);
     std::error_code ec;
     for (int i = 1; i < 10000; ++i) {
         std::string id = i == 1 ? base : base + "_" + std::to_string(i);
-        if (!fs::exists(dir / P(folder ? id : id + ".md"), ec)) return id;
+        if (!fs::exists(dir / P(folder ? id : id + ext), ec)) return id;
     }
     return base + "_" + new_id().substr(18);
 }
@@ -384,6 +384,51 @@ json Store::save_task_template(json t) {
     }
     write_entity(root_ / L"Task_Templates" / P(t["id"].get<std::string>() + ".md"), t, kTemplateF, "description");
     return t;
+}
+
+// ----------------------------------------------------------------- scripts
+std::vector<json> Store::scripts() {
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    std::vector<json> v;
+    std::error_code ec;
+    for (auto& e : fs::directory_iterator(root_ / L"Scripts", ec)) {
+        if (!e.is_regular_file() || e.path().extension() != L".json") continue;
+        json s = read_json(e.path(), json());
+        if (!s.is_object()) continue;
+        s["id"] = U8(e.path().stem());
+        v.push_back(s);
+    }
+    sort_by(v, "name");
+    return v;
+}
+std::optional<json> Store::script(const std::string& id) {
+    if (!valid_id(id)) return std::nullopt;
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    std::error_code ec;
+    fs::path f = root_ / L"Scripts" / P(id + ".json");
+    if (!fs::exists(f, ec)) return std::nullopt;
+    json s = read_json(f, json());
+    if (!s.is_object()) return std::nullopt;
+    s["id"] = id;
+    return s;
+}
+json Store::save_script(json s) {
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    std::error_code ec;
+    fs::create_directories(root_ / L"Scripts", ec);
+    if (!s.contains("id") || !s["id"].is_string() || s["id"].get<std::string>().empty()) {
+        s["id"] = unique_id(root_ / L"Scripts", s.value("name", "script"), false, ".json");
+        s["created"] = now_iso();
+    }
+    s["updated"] = now_iso();
+    write_json(root_ / L"Scripts" / P(s["id"].get<std::string>() + ".json"), s);
+    return s;
+}
+bool Store::remove_script(const std::string& id) {
+    if (!valid_id(id)) return false;
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    std::error_code ec;
+    return fs::remove(root_ / L"Scripts" / P(id + ".json"), ec);
 }
 
 std::vector<json> Store::skill_templates() { return embedded_skills(); }

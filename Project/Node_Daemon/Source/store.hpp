@@ -96,6 +96,12 @@ public:
     json save_task_template(json t);
     bool remove_task_template(const std::string& id);
 
+    // Visual scripts: Scripts/<id>.json (JSON, not Markdown: a graph), see Development/Docs/visual_scripts.md
+    std::vector<json> scripts();                    // by name
+    std::optional<json> script(const std::string& id);
+    json save_script(json s);                       // assigns id from the name when missing
+    bool remove_script(const std::string& id);
+
     // Conversations: Conversations/<id>.jsonl, one JSON object per line
     //   {"t":"meta",...} {"t":"msg","from":"user:ID|agent:ID|system","text":..} {"t":"title"} {"t":"share"}
     //   {"t":"session","agent":..,"sid":..} {"t":"reset"}
@@ -117,7 +123,7 @@ public:
 
 private:
     std::function<void(const std::string&, const json&)> append_hook_;
-    std::string unique_id(const fs::path& dir, const std::string& name, bool folder);
+    std::string unique_id(const fs::path& dir, const std::string& name, bool folder, const char* ext = ".md");
     void load_run_index();
     void* lock_ = nullptr;  // open handle of <Vault>\.phantom_lock: one Phantom Co. window per Vault
 

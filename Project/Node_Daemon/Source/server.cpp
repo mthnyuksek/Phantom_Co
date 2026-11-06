@@ -23,6 +23,7 @@
 #include "httplib.h"
 #include "mcp_builtin.hpp"
 #include "prompt.hpp"
+#include "script_doc.hpp"
 #include "update_check.hpp"
 #include "version.hpp"
 
@@ -1460,6 +1461,69 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         if (!cur) return fail(res, 404, "Template not found");
         if (cur->value("created_by", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who made this template can delete it.");
         store.remove_task_template(req.matches[1]);
+        send(res, {{"ok", true}});
+    });
+
+    // ======================================================== visual scripts
+    // Graphs of prompt / set / if / delay blocks (Development/Docs/visual_scripts.md). Team-wide like templates;
+    // editors make them, only the maker or the owner changes one. A half-finished script is saved, "check" lists its problems.
+    script::ScriptLookup script_lookup{
+        [&](const std::string& id) { return store.agent(id).has_value(); },
+        [&](const std::string& id) { return store.project(id).has_value(); },
+    };
+    auto script_view = [&](const json& s) {
+        json v = s;
+        v["check"] = script::check_script(s, script_lookup);
+        return v;
+    };
+    add("GET", "/api/scripts", kViewer, [&](auto&, auto& res, Ctx&) {
+        json list = json::array();
+        for (const json& s : store.scripts()) {
+            json chk = script::check_script(s, script_lookup);
+            list.push_back({{"id", s.value("id", "")}, {"name", s.value("name", "")}, {"description", s.value("description", "")},
+                            {"draft", s.value("draft", false)}, {"created_by", s.value("created_by", "")},
+                            {"updated", s.value("updated", "")}, {"prompt_count", chk["prompt_count"]},
+                            {"error_count", chk["errors"].size()}});
+        }
+        send(res, {{"scripts", list}});
+    });
+    add("GET", "/api/scripts/" + ID, kViewer, [&](auto& req, auto& res, Ctx&) {
+        auto s = store.script(req.matches[1]);
+        if (!s) return fail(res, 404, "Script not found");
+        send(res, script_view(*s));
+    });
+    add("POST", "/api/scripts/validate", kEditor, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        std::string err;
+        auto s = script::clean_script(b, json::object(), err);
+        if (!s) return fail(res, 400, err);
+        send(res, script::check_script(*s, script_lookup));
+    });
+    add("POST", "/api/scripts", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        std::string err;
+        auto s = script::clean_script(b, {{"created_by", c.id}}, err);
+        if (!s) return fail(res, 400, err);
+        send(res, script_view(store.save_script(*s)), 201);
+    });
+    add("PUT", "/api/scripts/" + ID, kEditor, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        auto cur = store.script(req.matches[1]);
+        if (!cur) return fail(res, 404, "Script not found");
+        if (cur->value("created_by", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who made this script can change it.");
+        std::string err;
+        auto s = script::clean_script(b, *cur, err);
+        if (!s) return fail(res, 400, err);
+        send(res, script_view(store.save_script(*s)));
+    });
+    add("DELETE", "/api/scripts/" + ID, kEditor, [&](auto& req, auto& res, Ctx& c) {
+        auto cur = store.script(req.matches[1]);
+        if (!cur) return fail(res, 404, "Script not found");
+        if (cur->value("created_by", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who made this script can delete it.");
+        store.remove_script(req.matches[1]);
         send(res, {{"ok", true}});
     });
 
