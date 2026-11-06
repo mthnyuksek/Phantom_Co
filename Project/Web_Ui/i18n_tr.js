@@ -329,6 +329,8 @@ export const EXACT = {
   'Describe what your company is here to achieve.': 'Şirketinin ne için var olduğunu anlat.',
   '⏳ Invitation not used yet': '⏳ Davet henüz kullanılmadı',
   'Agent management': 'Ajan yönetimi', 'How the app works': 'Uygulama nasıl çalışır', 'Project notes': 'Proje notları', 'Read files': 'Dosya okuma',
+  'Visual scripts': 'Görsel betikler',
+  'Write visual scripts (Scripts tab) for the person: saved as drafts that only a person can run. No tools, about 1000 tokens.': 'Kişi için görsel betik yazar (Betikler sekmesi): yalnızca bir insanın çalıştırabileceği taslaklar olarak kaydedilir. Araç yok, yaklaşık 1000 token.',
   'Rule editing': 'Kural düzenleme', 'Run commands': 'Komut çalıştırma', 'Web research': 'Web araştırması', 'Write files': 'Dosya yazma',
   'Create and edit agents (files in the Agents folder). Owner only.': 'Ajanları oluşturur ve düzenler (Agents klasöründeki dosyalar). Yalnızca sahip.',
   'Explains Phantom Co. to the agent (no tools, about 250 tokens).': 'Phantom Co.’yu ajana anlatır (araç yok, yaklaşık 250 token).',
@@ -544,6 +546,12 @@ export const EXACT = {
 };
 
 export const PATTERNS = [
+  ['🧩 {} wrote the script "{}". It is a draft in Scripts: check it there and press Run.', '🧩 {0}, "{1}" betiğini yazdı. Betikler’de taslak olarak duruyor: orada kontrol et ve Çalıştır’a bas.'],
+  ['🧩 {} wrote the script "{}". It is a draft in Scripts: check it there and press Run. It has {#} problem(s); {} was asked to fix them.', '🧩 {0}, "{1}" betiğini yazdı. Betikler’de taslak olarak duruyor: orada kontrol et ve Çalıştır’a bas. {2} sorunu var; {3} düzeltmesi istendi.'],
+  ['⚠ {} wrote a script, but has no Visual scripts skill: it was not saved.', '⚠ {0} bir betik yazdı ama Görsel betikler yeteneği yok: kaydedilmedi.'],
+  ['⚠ {} wrote a script, but viewers cannot make scripts: it was not saved.', '⚠ {0} bir betik yazdı ama izleyiciler betik oluşturamaz: kaydedilmedi.'],
+  ['⚠ The script of {} was not saved: {}', '⚠ {0} betiği kaydedilmedi: {1}'],
+  ['⚠ Could not hand the problems back to {}: {}', '⚠ Sorunlar {0} adlı hayalete iletilemedi: {1}'],
   ['{#} prompt blocks', '{0} prompt bloğu'], ['{} (+{#})', '{0} (+{1})'], ['Problems ({#})', 'Sorunlar ({0})'],
   ["Unknown variable '{}'", "Bilinmeyen değişken '{0}'"], ["Unknown variable '{}'.", "Bilinmeyen değişken '{0}'."],
   ['Unknown variable in the prompt: {}', 'Promptta bilinmeyen değişken: {0}'],

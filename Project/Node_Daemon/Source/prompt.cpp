@@ -134,6 +134,26 @@ static std::string attr(const std::string& tag, const std::string& name) {
 ParsedReply parse_reply(const std::string& raw) {
     ParsedReply r;
     std::string text = raw;
+    // scripts first: the prompts inside a script may mention <send> or <title>
+    for (size_t pos = 0; (pos = text.find("<script", pos)) != std::string::npos;) {
+        size_t gt = text.find('>', pos);
+        size_t end = gt == std::string::npos ? std::string::npos : text.find("</script>", gt);
+        if (gt == std::string::npos || end == std::string::npos) break;
+        std::string tag = text.substr(pos, gt - pos);
+        ScriptBlock b;
+        b.name = clean_title(attr(tag, "name"));
+        b.id = attr(tag, "id");
+        b.body = trim(text.substr(gt + 1, end - gt - 1));
+        if (b.body.rfind("```", 0) == 0) {  // models like to wrap JSON in a code fence
+            size_t nl = b.body.find('\n');
+            b.body = nl == std::string::npos ? "" : b.body.substr(nl + 1);
+            size_t close = b.body.rfind("```");
+            if (close != std::string::npos) b.body = b.body.substr(0, close);
+            b.body = trim(b.body);
+        }
+        r.scripts.push_back(std::move(b));
+        text.erase(pos, end + 9 - pos);
+    }
     for (size_t pos = 0; (pos = text.find("<send", pos)) != std::string::npos;) {
         size_t gt = text.find('>', pos);
         size_t end = gt == std::string::npos ? std::string::npos : text.find("</send>", gt);

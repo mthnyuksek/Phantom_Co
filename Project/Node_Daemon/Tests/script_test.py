@@ -393,6 +393,49 @@ def run_tests(exe, vault, data, procs, owner, ece, vera):
     ece.post("/api/scripts/agent_draft/run")
     check("running a draft makes it a normal script", ece.get("/api/scripts/agent_draft")[1].get("draft") is False)
 
+    # 7b. ghosts write scripts (<script> in their answer): drafts in the asker's name, problems go back to the ghost
+    owner.post("/api/agents", {"name": "Scribe", "provider": "demo", "skills": ["visual_scripts"]})
+    check("Visual scripts skill installed by default", os.path.exists(os.path.join(vault, "Skills", "visual_scripts.md")))
+
+    def chat_with(client, agent, text):
+        st, chat = client.post("/api/chats", {"agent_id": agent})
+        cid = chat["meta"]["id"]
+        client.post(f"/api/chats/{cid}/send", {"text": text})
+        t0 = time.time()
+        while time.time() - t0 < 60:
+            st, v = client.get("/api/chats/" + cid)
+            if st == 200 and not v["busy"]:
+                return v
+            time.sleep(0.3)
+        return v
+
+    before = {s["id"] for s in ece.get("/api/scripts")[1]["scripts"]}
+    v = chat_with(ece, "scribe", "make me a flow demo:script")
+    after = ece.get("/api/scripts")[1]["scripts"]
+    new = [s for s in after if s["id"] not in before]
+    check("ghost's script saved", len(new) == 1 and new[0]["name"] == "Demo script", new)
+    drafted = ece.get("/api/scripts/" + new[0]["id"])[1] if new else {}
+    check("saved as a draft in the asker's name", drafted.get("draft") is True and drafted.get("created_by") == "ece", drafted)
+    check("ghost's script has no problems", drafted.get("check", {}).get("errors") == [], drafted.get("check"))
+    check("a <send> inside the script stays in the script", "<send" in json.dumps(drafted.get("nodes", []))
+          and not any("asked" in (m.get("text") or "") for m in v["messages"] if m["from"] == "system"), v["messages"])
+    sys_lines = [m["text"] for m in v["messages"] if m["from"] == "system"]
+    check("the chat says where the draft is", any("Demo script" in t and "draft" in t for t in sys_lines), sys_lines)
+    agent_text = [m["text"] for m in v["messages"] if m["from"] == "agent:scribe"]
+    check("the script block is not shown as answer text", agent_text and "<script" not in agent_text[0], agent_text)
+
+    v = chat_with(ece, "scribe", "make a broken one demo:badscript")
+    sys_lines = [m["text"] for m in v["messages"] if m["from"] == "system"]
+    check("problems announced", any("problem" in t and "asked to fix" in t for t in sys_lines), sys_lines)
+    reports = [m["text"] for m in v["messages"] if m["from"] == "agent:scribe"]
+    check("problems handed back to the ghost", len(reports) >= 2 and reports[-1].startswith("Thanks, I got the report")
+          and "nobody_here" in reports[-1], reports)
+
+    v = chat_with(ece, "quill", "no skill here demo:script")
+    sys_lines = [m["text"] for m in v["messages"] if m["from"] == "system"]
+    check("a ghost without the skill cannot save scripts", any("no Visual scripts skill" in t for t in sys_lines), sys_lines)
+    check("nothing saved without the skill", len(ece.get("/api/scripts")[1]["scripts"]) == len(after) + 1)  # +1 = the bad one above
+
     # 8. a run goes on after the program closed
     st, r = make_and_run(ece, chain("Survivor", [START, {"id": "w", "type": "delay", "props": {"mode": "for", "expr": "30"}},
                                                   P("p", "quill", "demo:slow after"), END]))

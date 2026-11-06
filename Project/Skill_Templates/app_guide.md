@@ -29,7 +29,7 @@ Closing the window does not stop the company: it keeps running in the hidden ico
 - Profile (bottom left): name, look, colour theme (Midnight, Daylight, Swamp, Deep sea, Pumpkin, Sakura or "Same as Windows"), language, and for friends "Lend my AI" (run the company's ghosts on their own Claude/Codex). Lending is still experimental: files the AI deletes are not deleted in the company, big folders are slow, work fails while the friend's PC is off, and both PCs need the same Phantom Co. version (a different version shows "Different versions" in the profile).
 
 ## Skills that come with the program
-Read files, Write files, Project notes, How the app works, Agent management (owner), Rule editing (owner), Run commands (owner, risky: shell commands on this PC), Web research, MCP builder; Browser, YouTube and Telegram (owner) come with their MCP servers. Skills marked owner work only when the owner is the one asking.
+Read files, Write files, Project notes, How the app works, Visual scripts (the ghost writes script drafts for the person to check and run), Agent management (owner), Rule editing (owner), Run commands (owner, risky: shell commands on this PC), Web research, MCP builder; Browser, YouTube and Telegram (owner) come with their MCP servers. Skills marked owner work only when the owner is the one asking.
 
 ## Hand-overs
 A ghost can ask any colleague. For a team, hire a Planner and a few specialists, set "Reports to" to the Planner, and ask the Planner for the whole job: it splits the work and collects the answers. Watch it in Chats > Agents or in Runs.

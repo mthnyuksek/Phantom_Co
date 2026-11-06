@@ -59,6 +59,7 @@ struct JobState {
     std::atomic<bool> finished{false};
     Process* proc = nullptr;
     std::string answer, answer_error;  // set by route(): the answer without <send>/<title>, or why it failed
+    bool can_script = false;           // the agent has the Visual scripts skill in this run (its <script> blocks are saved)
 };
 
 // Called after every job has finished (no Runner lock held): status = done | failed | cancelled | timeout.
@@ -125,6 +126,7 @@ private:
     Outcome run_demo(const std::shared_ptr<JobState>& js, const AgentContext& ctx, const std::string& workdir, const std::string& system_prompt);
     void route(const std::shared_ptr<JobState>& js, const Outcome& o);
     void handle_send(const std::shared_ptr<JobState>& js, const SendBlock& blk, const std::string& sender_name);
+    void handle_script(const std::shared_ptr<JobState>& js, const ScriptBlock& blk, const std::string& sender_name);
     bool has_pending_request(const std::string& sender, const std::string& target);
     void emit(JobState& js, json ev);
     void say(const std::string& conv, const std::string& text);  // system line in a conversation

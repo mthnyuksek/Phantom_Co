@@ -42,10 +42,17 @@ struct SendBlock {
     std::string text;
     bool reply = true;
 };
+// <script name="..." id="...">{json}</script>: a visual script written by a ghost (saved as a draft, see Runner::handle_script)
+struct ScriptBlock {
+    std::string name;
+    std::string id;    // set = change this draft instead of making a new script
+    std::string body;  // the JSON (code fences removed)
+};
 struct ParsedReply {
     std::string text;   // what is shown to people (blocks removed)
     std::string title;  // from <title>..</title>
     std::vector<SendBlock> sends;
+    std::vector<ScriptBlock> scripts;
 };
 ParsedReply parse_reply(const std::string& raw);
 std::string clean_title(const std::string& s);  // one line, max 50 chars

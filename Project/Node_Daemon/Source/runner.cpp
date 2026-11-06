@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <chrono>
 
+#include "script_doc.hpp"
+
 namespace pc2 {
 
 using namespace std::chrono_literals;
@@ -411,6 +413,7 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     fs::create_directories(workdir, ec);
 
     AgentContext ctx = resolve_agent(store_, *agent, job.user_role, project.is_object() ? job.project_id : "");
+    for (auto& sk : ctx.skills) if (sk.value("id", "") == "visual_scripts") js->can_script = true;
     // MCP servers run only on this PC: never on a friend's, and only the ones that exist and are switched on.
     {
         std::vector<std::string> keep;
@@ -673,6 +676,21 @@ Runner::Outcome Runner::run_demo(const std::shared_ptr<JobState>& js, const Agen
         for (char& ch : shown) if (ch == '<') ch = '[';
         text += "\n[system prompt]\n" + shown;
     }
+    // demo:script / demo:badscript: a tiny visual script (a good one, or one with an unknown ghost)
+    if ((p.find("demo:script") != std::string::npos || p.find("demo:badscript") != std::string::npos) && job.kind != "report") {
+        const bool bad = p.find("demo:badscript") != std::string::npos;
+        // the prompt inside mentions <send>: it must stay part of the script, not become a hand-over
+        text += R"(
+Here is the script.
+<script name="Demo script">
+```json
+{"vars": [{"name": "n", "type": "Number", "init": "1"}],
+ "nodes": [{"id": "s", "type": "start", "x": 0, "y": 0},
+           {"id": "p", "type": "prompt", "x": 0, "y": 120, "props": {"agent_id": ")" + std::string(bad ? "nobody_here" : job.agent_id) + R"(", "text": "Say hi <send to=\"x\">no</send>"}}],
+ "edges": [{"from": "s", "to": "p"}]}
+```
+</script>)";
+    }
     for (const char* kw : {"demo:send:", "demo:tell:"}) {  // tell = information only (reply="no")
         size_t s = p.find(kw);
         if (s == std::string::npos || job.kind == "report") continue;
@@ -738,6 +756,85 @@ void Runner::handle_send(const std::shared_ptr<JobState>& js, const SendBlock& b
     else say(conv, "→ " + sender_name + " asked " + target->value("name", blk.to) + (blk.reply ? "" : " (information only)") + ".");
 }
 
+// A ghost with the Visual scripts skill wrote <script name="..." [id="..."]>{json}</script>. It becomes a draft in Scripts,
+// made in the name of the person the work is for (only a person's Run starts it). Problems go back to the ghost as a
+// report, so it can send the script again with id="..." (only drafts that person owns can be changed this way).
+void Runner::handle_script(const std::shared_ptr<JobState>& js, const ScriptBlock& blk, const std::string& sender_name) {
+    const Job& job = js->job;
+    const std::string conv = job.conv();
+    if (!js->can_script) {
+        say(conv, "⚠ " + sender_name + " wrote a script, but has no Visual scripts skill: it was not saved.");
+        return;
+    }
+    if (role_rank(job.user_role) < role_rank("editor")) {
+        say(conv, "⚠ " + sender_name + " wrote a script, but viewers cannot make scripts: it was not saved.");
+        return;
+    }
+    std::string problem;
+    json saved;
+    json in = json::parse(blk.body, nullptr, false);
+    if (!in.is_object()) {
+        problem = "The script is not valid JSON (one object with vars, nodes and edges).";
+    } else {
+        if (!blk.name.empty()) in["name"] = blk.name;
+        json base = {{"created_by", job.user_id}};
+        if (!blk.id.empty()) {
+            auto cur = store_.script(blk.id);
+            if (!cur) problem = "There is no script with the id \"" + blk.id + "\". Leave out id to make a new one.";
+            else if (!cur->value("draft", false) || cur->value("created_by", "") != job.user_id)
+                problem = "The script \"" + blk.id + "\" is not a draft you made for this person, so it cannot be changed. Leave out id to make a new one.";
+            else base = *cur;
+        }
+        if (problem.empty()) {
+            if (!in.contains("name") && base.contains("name")) in["name"] = base["name"];
+            std::string err;
+            auto clean = script::clean_script(in, base, err);
+            if (!clean) problem = err;
+            else {
+                (*clean)["draft"] = true;  // a ghost's script never runs by itself
+                saved = store_.save_script(*clean);
+            }
+        }
+    }
+    json errors = json::array();
+    if (problem.empty()) {
+        script::ScriptLookup lookup{[this](const std::string& id) { return store_.agent(id).has_value(); },
+                                    [this](const std::string& id) { return store_.project(id).has_value(); }};
+        errors = script::check_script(saved, lookup)["errors"];
+        say(conv, "🧩 " + sender_name + " wrote the script \"" + saved.value("name", "") + "\". It is a draft in Scripts: check it there and press Run." +
+                      (errors.empty() ? "" : " It has " + std::to_string(errors.size()) + " problem(s); " + sender_name + " was asked to fix them."));
+    } else {
+        say(conv, "⚠ The script of " + sender_name + " was not saved: " + problem);
+    }
+    if (problem.empty() && errors.empty()) return;
+
+    // tell the ghost what is wrong (hops keep a ghost from fixing for ever)
+    if (job.hops + 1 > store_.setting_int("max_hops")) return;
+    std::string list;
+    for (auto& e : errors) {
+        std::string where = e.contains("node") ? "block \"" + e["node"].get<std::string>() + "\"" : e.contains("var") ? "variable \"" + e["var"].get<std::string>() + "\"" : e.contains("edge") ? "arrow " + std::to_string(e["edge"].get<int>() + 1) : "script";
+        list += "- " + where + ": " + e.value("message", "") + "\n";
+    }
+    Job rj;
+    rj.kind = "report";
+    rj.agent_id = job.agent_id;
+    rj.user_id = job.user_id;
+    rj.user_role = job.user_role;
+    rj.task_id = job.task_id;
+    rj.project_id = job.project_id;
+    rj.hops = job.hops + 1;
+    rj.stack = job.stack;
+    // never a whole <script>...</script> pair in here: a ghost that quotes the report would write a script by accident
+    rj.prompt = problem.empty()
+        ? "Report from Phantom Co.: your script \"" + saved.value("name", "") + "\" was saved as a draft, but it cannot run yet:\n" + list +
+              "Send the whole fixed script again: begin with <script id=\"" + saved.value("id", "") + "\" name=\"" + saved.value("name", "") +
+              "\">, then the JSON, then the closing script tag."
+        : "Report from Phantom Co.: your script was not saved: " + problem +
+              "\nSend the whole script again: the opening script tag with a name, the JSON, then the closing script tag.";
+    std::string err;
+    if (enqueue_internal(rj, err, false).empty()) say(conv, "⚠ Could not hand the problems back to " + sender_name + ": " + err);
+}
+
 void Runner::route(const std::shared_ptr<JobState>& js, const Outcome& o) {
     const Job& job = js->job;
     const std::string name = agent_name(store_, job.agent_id);
@@ -762,6 +859,7 @@ void Runner::route(const std::shared_ptr<JobState>& js, const Outcome& o) {
         if (!text.empty()) store_.conv_append(conv, {{"t", "msg"}, {"from", "agent:" + job.agent_id}, {"text", text}, {"run", job.id}});
         if (o.max_turns) say(conv, "⏸ " + name + " reached the step limit. Write \"continue\" to go on.");
         if (job.name_chat && !pr.title.empty()) store_.conv_append(conv, {{"t", "title"}, {"title", pr.title}});
+        for (auto& b : pr.scripts) handle_script(js, b, name);
         for (auto& b : pr.sends) handle_send(js, b, name);
     }
 
