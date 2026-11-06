@@ -54,6 +54,7 @@ struct JobState {
     std::vector<json> events;
     std::ofstream events_file;
     std::deque<std::string> activity;  // last short lines, for the live view
+    bool slow = false;                 // OpenCode said nothing for a while (a busy free service; OpenCode retries quietly)
     std::string brain;  // the agent's provider when queued: "claude", "claude#<account>", "claude@<friend>" (= its lane)
     std::atomic<bool> cancel{false};
     std::atomic<bool> finished{false};
@@ -111,7 +112,7 @@ private:
         std::string status = "done";  // done | failed | cancelled | timeout
         std::string text, error, session_id;
         int exit_code = 0;
-        long long tokens_in = 0, tokens_out = 0;
+        long long tokens_in = 0, tokens_out = 0, tokens_cached = 0;
         double cost = -1;
         bool max_turns = false;
     };

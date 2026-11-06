@@ -3,6 +3,8 @@ import { S, agentById, agentGhost, userById, canEdit, me, providerLabel } from '
 import { $, esc, guard, ago, sleep, pill, modal, duration, renderEvent, toast } from '../ui.js';
 
 let view, runs = [];
+// The share of the input read from the prompt cache (much cheaper than new input), for the list rows.
+const cachedPart = (r) => (r.tokens_cached && r.tokens_in ? ` · ${Math.round((100 * r.tokens_cached) / r.tokens_in)}% cached` : '');
 
 export async function openRunModal(id) {
   const r = await api('GET', '/api/runs/' + id);
@@ -15,6 +17,7 @@ export async function openRunModal(id) {
     <div class="modal-foot"><button class="btn" id="rm-close">Close</button></div>`,
   (m) => {
     const foot = (rec) => [rec.started ? '⏱ ' + esc(duration(rec.started, rec.ended)) : '', rec.tokens_in || rec.tokens_out ? '🔤 ' + (rec.tokens_in + rec.tokens_out).toLocaleString() + ' tokens' : '',
+      rec.tokens_cached ? `<span title="Read again from the prompt cache: these cost about a tenth of new input.">♻️ ${rec.tokens_cached.toLocaleString()} from the cache</span>` : '',
       rec.cost ? '💲 ' + Number(rec.cost).toFixed(4) : '', rec.error ? '⚠️ ' + esc(rec.error) : ''].filter(Boolean).map((x) => `<span>${x}</span>`).join('');
     $('#rm-foot', m).innerHTML = foot(r);
     $('#rm-close', m).onclick = () => { alive = false; $('#modal-root').innerHTML = ''; };
@@ -54,7 +57,7 @@ function draw() {
       return `<div class="row run-row" data-act="open" data-id="${esc(r.id)}"><div class="mini">${agentGhost(a, { size: 34 })}</div>
         <div><div class="title">${esc(a?.name || r.agent_id)} <span class="meta">${esc(r.kind)} · ${esc(providerLabel(r.provider))}${u ? ' · for ' + esc(u.name) : ''}</span></div>
           <div class="meta">${esc(ago(r.created))}${r.started ? ' · ' + esc(duration(r.started, r.ended)) : ''}</div></div>
-        <div class="meta hide-s">${r.tokens_in || r.tokens_out ? (r.tokens_in + r.tokens_out).toLocaleString() + ' tokens' : ''}</div><div>${pill(r.status)}</div><div class="hide-s"></div></div>`;
+        <div class="meta hide-s">${r.tokens_in || r.tokens_out ? (r.tokens_in + r.tokens_out).toLocaleString() + ' tokens' + cachedPart(r) : ''}</div><div>${pill(r.status)}</div><div class="hide-s"></div></div>`;
     }).join('') : '<div class="empty">Nothing has run yet.</div>'}</div>`;
 }
 

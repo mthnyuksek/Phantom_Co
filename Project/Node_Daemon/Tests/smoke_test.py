@@ -254,6 +254,14 @@ def main():
             v = owner.wait_idle(och["meta"]["id"], 120)
             texts = v and [m["text"] for m in v["messages"]]
             check("nvidia model by short name reaches the service", texts and any("refused the API key (403" in t for t in texts), texts)
+            # a bare model name gets the account's service in front; "thinking" becomes --variant (ignored by this model)
+            st, ag = owner.put("/api/agents/" + ob["id"], {"model": "llama-3.2-90b-vision-instruct", "thinking": "low"})
+            check("thinking saved", st == 200 and ag.get("thinking") == "low", ag)
+            check("unknown thinking refused", owner.put("/api/agents/" + ob["id"], {"thinking": "max"})[1].get("thinking") == "", ag)
+            owner.post(f"/api/chats/{och['meta']['id']}/send", {"text": "hi again"})
+            v = owner.wait_idle(och["meta"]["id"], 120)
+            texts = v and [m["text"] for m in v["messages"]]
+            check("bare model name gets the account's service", texts and sum("refused the API key (403" in t for t in texts) == 2, texts)
         owner.delete("/api/accounts/" + oa["id"])
         # other model services: picked in Settings (keys without a telling prefix need it), prefixes checked
         st, og = owner.post("/api/accounts", {"provider": "opencode", "name": "Groq", "kind": "api_key", "service": "groq", "key": "gsk_PhantomTest" + "x" * 24})

@@ -124,6 +124,11 @@ export const EXACT = {
   'This conversation is read-only for you.': 'Bu konuşma senin için salt okunur.',
   'The agent is working… you can write again when it is done.': 'Ajan çalışıyor… bitince yine yazabilirsin.',
   'is working…': 'çalışıyor…', 'is waiting in line…': 'sırada bekliyor…',
+  'The model service has not answered for a while. Free services have a request limit; it tries again by itself.': 'Model servisi bir süredir cevap vermiyor. Ücretsiz servislerin istek sınırı var; kendiliğinden yeniden deniyor.',
+  'No answer from the model service for 20 s. Free services have a request limit; OpenCode waits and tries again by itself.': 'Model servisi 20 sn’dir cevap vermiyor. Ücretsiz servislerin istek sınırı var; OpenCode bekleyip kendiliğinden yeniden deniyor.',
+  'Thinking': 'Düşünme', 'Model default': 'Modelin varsayılanı', 'Low (faster)': 'Az (daha hızlı)', 'Medium': 'Orta', 'High (slower, more careful)': 'Çok (daha yavaş, daha dikkatli)',
+  'For models that think before they answer (e.g. MiniMax, Kimi, GLM). Others ignore it.': 'Cevaplamadan önce düşünen modeller için (ör. MiniMax, Kimi, GLM). Diğerleri bunu yok sayar.',
+  'Read again from the prompt cache: these cost about a tenth of new input.': 'İstem önbelleğinden yeniden okunanlar: yeni girdinin yaklaşık onda biri kadar tutar.',
   'Enter sends, Shift+Enter adds a line.': 'Enter gönderir, Shift+Enter yeni satır ekler.',
 
   // ---- projects
@@ -552,6 +557,7 @@ export const EXACT = {
 };
 
 export const PATTERNS = [
+  ['♻️ {} from the cache', '♻️ {0} önbellekten'], ['{} tokens · {#}% cached', '{0} token · %{1} önbellek'],
   ['New chat with {}', '{0} ile yeni sohbet'],  // the server's default chat title (until the first answer names the chat)
   ['🧩 {} wrote the script "{}". It is a draft in Scripts: check it there and press Run.', '🧩 {0}, "{1}" betiğini yazdı. Betikler’de taslak olarak duruyor: orada kontrol et ve Çalıştır’a bas.'],
   ['🧩 {} wrote the script "{}". It is a draft in Scripts: check it there and press Run. It has {#} problem(s); {} was asked to fix them.', '🧩 {0}, "{1}" betiğini yazdı. Betikler’de taslak olarak duruyor: orada kontrol et ve Çalıştır’a bas. {2} sorunu var; {3} düzeltmesi istendi.'],

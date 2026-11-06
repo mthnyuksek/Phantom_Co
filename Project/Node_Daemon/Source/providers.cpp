@@ -338,7 +338,10 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
         // {file:...} makes OpenCode read the prompt itself (it is never parsed as part of this JSON).
         json cfg = {{"$schema", "https://opencode.ai/config.json"}, {"autoupdate", false}, {"share", "disabled"}, {"mcp", mcp}, {"provider", provider},
                     {"agent", {{"phantom", {{"mode", "primary"}, {"prompt", "{file:" + replace_all(rs.system_file, "\\", "/") + "}"},
-                                            {"steps", rs.max_turns}, {"permission", perm}}}}}};
+                                            {"steps", rs.max_turns}, {"permission", perm}}},
+                               // OpenCode names every new session with an extra request to the same model (max 32000 tokens):
+                               // one more wait and one more request against a free service's limit. We name chats ourselves.
+                               {"title", {{"disable", true}}}}}};
         if (!write_file_atomic(P(rs.mcp_file), cfg.dump(2))) { error = "Could not write the OpenCode settings of the run."; return false; }
         // An empty config folder of our own: the user's global OpenCode config (agents, plugins, MCP servers) stays out.
         const fs::path cfg_home = P(rs.mcp_file).parent_path() / L"OpenCode_Config";
@@ -358,6 +361,7 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
         out.args = {"run", "--pure", "--format", "json", "--agent", "phantom", "--dir", rs.workdir};
         if (!rs.model.empty()) { out.args.push_back("-m"); out.args.push_back(rs.model); }
         if (!rs.session_id.empty()) { out.args.push_back("-s"); out.args.push_back(rs.session_id); }
+        if (!rs.thinking.empty()) { out.args.push_back("--variant"); out.args.push_back(rs.thinking); }  // models that do not think ignore it
         return true;
     }
     error = "Unknown provider: " + rs.provider;
@@ -505,6 +509,7 @@ std::vector<json> LineParser::feed_gemini(const json& j, const std::string& type
             usage = j["stats"];
             tokens_in = usage.value("input_tokens", 0LL);
             tokens_out = usage.value("output_tokens", 0LL);
+            if (usage.contains("cached") && usage["cached"].is_number_integer()) tokens_cached = usage["cached"];  // part of input_tokens
         }
         if (j.value("status", "") == "error") {
             is_error = true;
@@ -578,6 +583,7 @@ std::vector<json> LineParser::feed_opencode(const json& j, const std::string& ty
             const json t = part["tokens"];
             const json c = t.contains("cache") && t["cache"].is_object() ? t["cache"] : json::object();
             tokens_in += t.value("input", 0LL) + c.value("read", 0LL) + c.value("write", 0LL);
+            tokens_cached += c.value("read", 0LL);
             tokens_out += t.value("output", 0LL) + t.value("reasoning", 0LL);
             usage = {{"input_tokens", tokens_in}, {"output_tokens", tokens_out}};
         }
@@ -645,6 +651,7 @@ std::vector<json> LineParser::feed(const std::string& line) {
             if (j.contains("usage")) {
                 usage = j["usage"];
                 tokens_in = usage.value("input_tokens", 0LL) + usage.value("cache_creation_input_tokens", 0LL) + usage.value("cache_read_input_tokens", 0LL);
+                tokens_cached = usage.value("cache_read_input_tokens", 0LL);
                 tokens_out = usage.value("output_tokens", 0LL);
             }
             if (is_error) ev.push_back({{"kind", "error"}, {"text", result_text.empty() ? "The run reported an error." : result_text}});
@@ -689,6 +696,7 @@ std::vector<json> LineParser::feed(const std::string& line) {
         if (j.contains("usage")) {
             usage = j["usage"];
             tokens_in += usage.value("input_tokens", 0LL);
+            tokens_cached += usage.value("cached_input_tokens", 0LL);  // part of input_tokens
             tokens_out += usage.value("output_tokens", 0LL);
         }
     } else if (type == "turn.failed" || type == "error") {

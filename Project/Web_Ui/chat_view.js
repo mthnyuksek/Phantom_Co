@@ -33,6 +33,7 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
     return `<div class="msg" style="--gc:${esc(a?.color || '#888')}"><div class="mini">${agentGhost(a, { mood: l.status === 'running' ? 'working' : 'queued', size: 34 })}</div>
       <div class="msg-body"><div class="who">${esc(a?.name || l.agent_id)}</div>
       <div class="bubble typing"><span class="dots"><i></i><i></i><i></i></span> <span class="live-status">${l.status === 'running' ? 'is working…' : 'is waiting in line…'}</span>
+      ${l.slow ? `<div class="hint">The model service has not answered for a while. Free services have a request limit; it tries again by itself.</div>` : ''}
       ${acts ? `<div class="activity" data-no-i18n>${acts}</div>` : ''}
       ${d.can_write || me().role === 'owner' ? `<button class="btn small" data-stop="1">Stop</button>` : ''}</div></div></div>`;
   }).join('') || (d.busy ? `<div class="sys">Waiting for a colleague…</div>` : '');

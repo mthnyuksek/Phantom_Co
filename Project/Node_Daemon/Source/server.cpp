@@ -610,6 +610,8 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         out["reports_to"] = str(in, "reports_to", 64, base.value("reports_to", ""));
         out["enabled"] = in.contains("enabled") && in["enabled"].is_boolean() ? in["enabled"].get<bool>() : base.value("enabled", true);
         out["timeout_min"] = in.contains("timeout_min") && in["timeout_min"].is_number_integer() ? std::clamp(in["timeout_min"].get<int>(), 1, 240) : base.value("timeout_min", 30);
+        out["thinking"] = str(in, "thinking", 8, base.value("thinking", ""));
+        if (out["thinking"] != "" && out["thinking"] != "low" && out["thinking"] != "medium" && out["thinking"] != "high") out["thinking"] = "";
         out["skills"] = base.value("skills", json::array());
         if (in.contains("skills") && in["skills"].is_array()) {
             out["skills"] = json::array();

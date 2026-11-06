@@ -22,7 +22,7 @@ export function openAgentModal(agent, tpl) {
   const draft = agent ? { ...agent, skills: [...agent.skills] } : {
     name: NAMES[Math.floor(Math.random() * NAMES.length)], role: 'Assistant', provider: firstReal?.id || 'demo', model: '', reports_to: '',
     form: FORMS[Math.floor(Math.random() * FORMS.length)].id, color: PALETTE[Math.floor(Math.random() * PALETTE.length)],
-    persona: '', timeout_min: 30, enabled: true, skills: ['read_files', 'write_files'].filter((id) => skillById(id)),
+    persona: '', timeout_min: 30, thinking: '', enabled: true, skills: ['read_files', 'write_files'].filter((id) => skillById(id)),
   };
   const apply = (t) => Object.assign(draft, { role: t.role, form: t.form, color: t.color, persona: t.persona, skills: t.skills.filter((id) => skillById(id)) });
   if (tpl) apply(tpl);
@@ -40,6 +40,8 @@ export function openAgentModal(agent, tpl) {
         <div id="f-pick">${ghostPickerHTML()}</div>
         <div class="two"><div><label>Brain (provider)</label><select id="f-provider">${brainOptions(draft.provider).map((p) => `<option value="${esc(p.id)}" ${p.available || p.id === draft.provider ? '' : 'disabled'}>${esc(p.label)}${p.note}</option>`).join('')}</select></div>
           <div><label>Model (optional)</label><input type="text" id="f-model" placeholder="provider default" list="f-model-list" autocomplete="off"><datalist id="f-model-list"></datalist></div></div>
+        <div class="two" id="f-think-row" hidden><div><label>Thinking</label><select id="f-thinking"><option value="">Model default</option><option value="low">Low (faster)</option><option value="medium">Medium</option><option value="high">High (slower, more careful)</option></select></div>
+          <div class="hint">For models that think before they answer (e.g. MiniMax, Kimi, GLM). Others ignore it.</div></div>
         <div class="two"><div><label>Reports to</label><select id="f-boss"><option value="">Nobody (top of the company)</option>${bosses.map((b) => `<option value="${esc(b.id)}">${esc(b.name)} — ${esc(b.role)}</option>`).join('')}</select></div>
           <div><label>Time limit per run (minutes)</label><input type="number" id="f-timeout" min="1" max="240"></div></div>
         <label>Skills <span class="hint-inline">what this ghost may do - agents act with the rights of the person asking</span></label>
@@ -57,7 +59,7 @@ export function openAgentModal(agent, tpl) {
       q('#prev').innerHTML = ghostSVG({ form: draft.form, color: draft.color, mood: 'idle', size: 150 }) + `<div class="pname">${esc(draft.name || '…')}</div><div class="meta">${esc(draft.role)}</div>`;
     };
     const fill = () => {
-      q('#f-name').value = draft.name; q('#f-role').value = draft.role; q('#f-model').value = draft.model; q('#f-timeout').value = draft.timeout_min;
+      q('#f-name').value = draft.name; q('#f-role').value = draft.role; q('#f-model').value = draft.model; q('#f-timeout').value = draft.timeout_min; q('#f-thinking').value = draft.thinking || '';
       q('#f-provider').value = draft.provider; q('#f-boss').value = draft.reports_to || ''; q('#f-persona').value = draft.persona; q('#f-enabled').checked = draft.enabled;
       m.querySelectorAll('#f-skills input').forEach((c) => { c.checked = draft.skills.includes(c.value); });
       modelHint();
@@ -70,6 +72,7 @@ export function openAgentModal(agent, tpl) {
     let ocModels = null;
     const modelHint = () => {
       const [base, acc] = draft.provider.split('#'), list = q('#f-model-list');
+      q('#f-think-row').hidden = base !== 'opencode';
       if (base !== 'opencode') {
         q('#f-model').placeholder = base.split('@')[0] === 'gemini' ? 'gemini-flash-lite-latest' : t('provider default');
         list.innerHTML = '';
@@ -98,6 +101,7 @@ export function openAgentModal(agent, tpl) {
     m.addEventListener('change', (e) => {
       if (e.target.id === 'f-provider') { draft.provider = e.target.value; modelHint(); }
       if (e.target.id === 'f-boss') draft.reports_to = e.target.value;
+      if (e.target.id === 'f-thinking') draft.thinking = e.target.value;
       if (e.target.id === 'f-enabled') draft.enabled = e.target.checked;
       if (e.target.closest('#f-skills')) draft.skills = [...m.querySelectorAll('#f-skills input:checked')].map((c) => c.value);
     });
@@ -113,7 +117,7 @@ export function openAgentModal(agent, tpl) {
       }
       if (e.target.id === 'f-save') {
         const body = { name: draft.name, role: draft.role, provider: draft.provider, model: draft.model, reports_to: draft.reports_to, form: draft.form, color: draft.color,
-          persona: draft.persona, timeout_min: draft.timeout_min, enabled: draft.enabled, skills: draft.skills };
+          persona: draft.persona, timeout_min: draft.timeout_min, thinking: draft.thinking || '', enabled: draft.enabled, skills: draft.skills };
         if (isNew) await api('POST', '/api/agents', body); else await api('PUT', '/api/agents/' + agent.id, body);
         closeModal(); toast(isNew ? draft.name + ' joined the haunt! 👻' : 'Saved'); window.dispatchEvent(new Event('pc2:changed'));
       }

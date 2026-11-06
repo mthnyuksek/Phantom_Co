@@ -29,6 +29,7 @@ struct RunSpec {
     std::vector<std::string> add_dirs;     // extra folders the run may touch
     std::string session_id;                // resume this session ("" = new)
     int max_turns = 40;
+    std::string thinking;                  // OpenCode: --variant (reasoning effort: low | medium | high), "" = the model's default
     bool can_write = false;                // maps to the Codex sandbox mode
     std::vector<std::pair<std::string, std::string>> env;  // account of this run (CLAUDE_CONFIG_DIR / CODEX_HOME), empty = Auto
     // MCP servers of this run: each one is "<this exe> --mcp-proxy <name> --mcp-port <port> --mcp-key <key>" (see mcp.hpp).
@@ -98,6 +99,7 @@ public:
     bool stop_now = false;    // the run cannot succeed (Gemini: quota used up, Google sign-in refused): kill the CLI
     double cost_usd = -1;     // -1 = unknown
     long long tokens_in = 0, tokens_out = 0;
+    long long tokens_cached = 0;  // the part of tokens_in read from the prompt cache (much cheaper than new input)
     json usage;
     json rate_limits;         // Claude: the last rate_limit_info (subscription usage windows), null when none came
 

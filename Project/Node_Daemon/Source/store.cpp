@@ -92,6 +92,7 @@ static const std::vector<Field> kAgentF = {
     {"name", "name", 'S', ""},          {"role", "role", 'S', ""},          {"reports_to", "reports_to", 'S', ""},
     {"provider", "provider", 'S', "claude"}, {"model", "model", 'S', ""},   {"form", "form", 'S', "classic"},
     {"color", "color", 'S', "#b69cff"}, {"enabled", "enabled", 'B', "true"}, {"timeout_min", "timeout_min", 'I', "30"},
+    {"thinking", "thinking", 'S', ""},  // OpenCode reasoning effort: "" | low | medium | high
     {"skill", "skills", 'L', ""},       {"created", "created", 'S', ""}};
 static const std::vector<Field> kSkillF = {
     {"name", "name", 'S', ""}, {"description", "description", 'S', ""}, {"tools", "tools", 'C', ""},
@@ -119,7 +120,7 @@ static const std::vector<Field> kRunF = {
     {"provider", "provider", 'S', ""}, {"model", "model", 'S', ""}, {"conversation", "conversation_id", 'S', ""},
     {"status", "status", 'S', ""}, {"created", "created", 'S', ""}, {"started", "started", 'S', ""}, {"ended", "ended", 'S', ""},
     {"exit_code", "exit_code", 'I', "0"}, {"tokens_in", "tokens_in", 'I', "0"}, {"tokens_out", "tokens_out", 'I', "0"},
-    {"cost", "cost", 'S', ""}, {"error", "error", 'S', ""}};
+    {"tokens_cached", "tokens_cached", 'I', "0"}, {"cost", "cost", 'S', ""}, {"error", "error", 'S', ""}};
 
 static std::optional<json> read_entity(const fs::path& p, const std::vector<Field>& f, const char* body) {
     std::string text;

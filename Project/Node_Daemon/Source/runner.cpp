@@ -302,7 +302,7 @@ json Runner::conversation_live(const std::string& conv) {
         std::lock_guard<std::mutex> l2(js->mu);
         json act = json::array();
         for (size_t i = js->activity.size() > 4 ? js->activity.size() - 4 : 0; i < js->activity.size(); ++i) act.push_back(js->activity[i]);
-        out.push_back({{"agent_id", js->job.agent_id}, {"run_id", id}, {"status", js->status}, {"activity", act}});
+        out.push_back({{"agent_id", js->job.agent_id}, {"run_id", id}, {"status", js->status}, {"activity", act}, {"slow", js->slow}});
     }
     return out;
 }
@@ -376,6 +376,7 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
         rec["exit_code"] = out.exit_code;
         rec["tokens_in"] = out.tokens_in;
         rec["tokens_out"] = out.tokens_out;
+        if (out.tokens_cached > 0) rec["tokens_cached"] = out.tokens_cached;
         if (out.cost >= 0) rec["cost"] = std::to_string(out.cost);
         if (!out.error.empty()) rec["error"] = out.error;
         rec["result"] = out.text;
@@ -481,8 +482,17 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
             return;
         }
     }
-    // A model service's model written without its maker ("nvidia/minimax-m3.1-flash") gets it from the service's list.
-    if (spec.provider == "opencode") spec.model = opencode_full_model(spec.model);
+    if (spec.provider == "opencode") {
+        // A bare model name ("llama-3.2-90b-vision-instruct", "meta/llama-...") gets the service of the ghost's account in front.
+        const std::string head = spec.model.substr(0, spec.model.find('/'));
+        bool known = std::any_of(opencode_locals().begin(), opencode_locals().end(), [&](auto& l) { return head == l.id; });
+        known = known || opencode_service(head) != nullptr;
+        auto acc = account.empty() || !accounts_ ? std::nullopt : accounts_->get(account);
+        if (!known && acc) { if (auto sv = opencode_service(acc->value("service", ""))) spec.model = std::string(sv->id) + "/" + spec.model; }
+        // A model service's model written without its maker ("nvidia/minimax-m3.1-flash") gets it from the service's list.
+        spec.model = opencode_full_model(spec.model);
+        spec.thinking = agent->value("thinking", "");
+    }
 
     if (spec.provider == "demo") {
         o = run_demo(js, ctx, U8(workdir), spec.system_prompt);
@@ -553,13 +563,31 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     bool wdone = false;
     std::atomic<bool> timed_out{false};
     int limit_min = std::clamp(agent->value("timeout_min", 30), 1, 240);
+    // OpenCode prints nothing while it waits for a busy service (on 429 it retries quietly for about a minute): after
+    // 20 s without a line the live bubble says so, until the next line comes.
+    std::atomic<long long> last_line{(long long)GetTickCount64()};
+    const bool watch_quiet = spec.provider == "opencode";
     std::thread watchdog([&] {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(limit_min);
         std::unique_lock<std::mutex> lk(wm);
-        if (!wcv.wait_for(lk, std::chrono::minutes(limit_min), [&] { return wdone; })) { timed_out = true; proc.kill(); }
+        bool said = false;
+        while (!wdone) {
+            if (std::chrono::steady_clock::now() >= deadline) { timed_out = true; proc.kill(); break; }
+            wcv.wait_for(lk, std::chrono::seconds(watch_quiet ? 2 : 60), [&] { return wdone; });
+            if (wdone || !watch_quiet) continue;
+            const bool quiet = (long long)GetTickCount64() - last_line.load() > 20000;
+            { std::lock_guard<std::mutex> l2(js->mu); js->slow = quiet; }
+            if (quiet && !said) {
+                said = true;
+                emit(*js, {{"kind", "status"}, {"text", "No answer from the model service for 20 s. Free services have a request limit; OpenCode waits and tries again by itself."}});
+            }
+            if (!quiet) said = false;
+        }
     });
 
     LineParser parser(spec.provider);
     proc.read_lines([&](const std::string& line) {
+        last_line = (long long)GetTickCount64();
         const bool stopped = parser.stop_now;
         for (auto& ev : parser.feed(line)) emit(*js, std::move(ev));
         if (parser.stop_now && !stopped) proc.kill();  // a run that cannot succeed (Gemini quota / refused sign-in)
@@ -582,6 +610,7 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     o.session_id = parser.session_id.empty() || account.empty() ? parser.session_id : "#" + account + ":" + parser.session_id;
     o.tokens_in = parser.tokens_in;
     o.tokens_out = parser.tokens_out;
+    o.tokens_cached = parser.tokens_cached;
     o.cost = parser.cost_usd;
     o.max_turns = parser.max_turns;
     if (js->cancel) o.status = "cancelled";
@@ -633,6 +662,7 @@ Runner::Outcome Runner::run_remote(const std::shared_ptr<JobState>& js, const Ru
     o.exit_code = r.value("exit_code", 0);
     o.tokens_in = r.value("tokens_in", 0LL);
     o.tokens_out = r.value("tokens_out", 0LL);
+    o.tokens_cached = r.value("tokens_cached", 0LL);
     o.cost = r.value("cost", -1.0);
     o.max_turns = r.value("max_turns", false);
     std::string sid = r.value("session_id", "");

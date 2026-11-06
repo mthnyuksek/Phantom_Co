@@ -303,6 +303,7 @@ void WorkerClient::run_job(const json& job) {
         result["session_id"] = parser.session_id;
         result["tokens_in"] = parser.tokens_in;
         result["tokens_out"] = parser.tokens_out;
+        result["tokens_cached"] = parser.tokens_cached;
         result["cost"] = parser.cost_usd;
         result["max_turns"] = parser.max_turns;
         if (cancel || stopping_) result["status"] = "cancelled";
