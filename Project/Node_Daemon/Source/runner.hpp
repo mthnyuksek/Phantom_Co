@@ -24,7 +24,7 @@ namespace pc2 {
 // has [user@C1, A@X] (X = the A<->B conversation). B's answer goes into X and, because A
 // wants a report, comes back to A as a "report" job that works in C1 again.
 struct Frame {
-    std::string kind;    // "user" | "agent"
+    std::string kind;    // "user" | "agent" | "script" (id = "<script run id>/<block id>", see ScriptRunner)
     std::string id;
     std::string conv;
     bool notify = true;  // agent frames: send the answer back as a report job
@@ -32,7 +32,7 @@ struct Frame {
 
 struct Job {
     std::string id;       // run id (set by the Runner)
-    std::string kind;     // chat | task | msg | report
+    std::string kind;     // chat | task | msg | report | script
     std::string agent_id;
     std::string user_id;  // the person this work is done for
     std::string user_role;
@@ -57,7 +57,11 @@ struct JobState {
     std::atomic<bool> cancel{false};
     std::atomic<bool> finished{false};
     Process* proc = nullptr;
+    std::string answer, answer_error;  // set by route(): the answer without <send>/<title>, or why it failed
 };
+
+// Called after every job has finished (no Runner lock held): status = done | failed | cancelled | timeout.
+using JobFinishHook = std::function<void(const Job& job, const std::string& status, const std::string& answer, const std::string& error)>;
 
 // Runs jobs with the provider CLIs, stores answers in conversations and passes work
 // between agents. At most `max_concurrent` runs per provider; an agent never runs twice at once.
@@ -68,6 +72,9 @@ public:
 
     // Returns the run id, or "" and `error` (queue limit, unknown agent...).
     std::string enqueue(Job job, std::string& error);
+    // Work that no person typed (script blocks): no per-person queue limit, no "conversation busy" refusal.
+    std::string enqueue_routed(Job job, std::string& error) { return enqueue_internal(std::move(job), error, false); }
+    void set_finish_hook(JobFinishHook f) { finish_hook_ = std::move(f); }  // set once at start
 
     bool cancel_run(const std::string& run_id);
     int cancel_conversation(const std::string& conv_id);
@@ -128,6 +135,7 @@ private:
     WorkerHub hub_;
     Accounts* accounts_ = nullptr;
     Mcp* mcp_ = nullptr;
+    JobFinishHook finish_hook_;
     std::atomic<bool> stopping_{false};
 };
 

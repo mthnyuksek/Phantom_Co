@@ -190,13 +190,22 @@ void Runner::worker_loop(Lane& lane) {
             } catch (const std::exception&) {}
         }
         js->finished = true;
-        { std::lock_guard<std::mutex> lk(js->mu); if (js->events_file.is_open()) js->events_file.close(); }
+        std::string final_status;
+        {
+            std::lock_guard<std::mutex> lk(js->mu);
+            if (js->events_file.is_open()) js->events_file.close();
+            final_status = js->status;
+        }
         {
             std::lock_guard<std::mutex> lk(lane.mu);
             lane.running_agents.erase(js->job.agent_id);
             --lane.running;
         }
         lane.cv.notify_all();
+        // After `finished`: jobs this one started (sends, reports) are registered already, so "conversation busy" is right.
+        if (finish_hook_ && !stopping_) {
+            try { finish_hook_(js->job, final_status, js->answer, js->answer_error); } catch (const std::exception&) {}
+        }
     }
 }
 
@@ -428,7 +437,7 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     spec.tools = ctx.tools;
     spec.add_dirs = ctx.add_dirs;
     spec.can_write = ctx.can_write();
-    spec.max_turns = (job.kind == "chat" || job.kind == "task") ? 40 : 25;
+    spec.max_turns = (job.kind == "chat" || job.kind == "task" || job.kind == "script") ? 40 : 25;
     // A session lives on the PC and in the sign-in that ran it: remote ids are stored as "@<worker>:<id>", account ids as
     // "#<account>:<id>", Auto ids plain. Another brain starts a new session.
     if (conv && (*conv)["sessions"].contains(job.agent_id)) {
@@ -730,6 +739,7 @@ void Runner::route(const std::shared_ptr<JobState>& js, const Outcome& o) {
     const Frame top = job.stack.back();
     const std::string conv = top.conv;
 
+    js->answer_error = o.error;
     if (o.status == "cancelled") { say(conv, "■ " + name + " was stopped."); return; }
 
     ParsedReply pr;
@@ -737,6 +747,7 @@ void Runner::route(const std::shared_ptr<JobState>& js, const Outcome& o) {
     if (o.status == "done") {
         pr = parse_reply(o.text);
         text = pr.text;
+        js->answer = text;
     } else {
         failure = "⚠ " + name + " could not finish: " + (o.error.empty() ? o.status : o.error);
         say(conv, failure);

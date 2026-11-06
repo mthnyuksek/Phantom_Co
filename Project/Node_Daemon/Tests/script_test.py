@@ -205,18 +205,217 @@ def errors_of(check_result):
     return [e["message"] for e in check_result["errors"]]
 
 
+def chain(name, nodes, edges=None, vars=(), **extra):
+    """A script; without edges the blocks are joined one after another."""
+    if edges is None:
+        edges = [{"from": a["id"], "to": b["id"]} for a, b in zip(nodes, nodes[1:])]
+    return dict({"name": name, "vars": list(vars), "nodes": nodes, "edges": edges}, **extra)
+
+
+def P(id, agent, text, **props):
+    return {"id": id, "type": "prompt", "props": dict({"agent_id": agent, "text": text}, **props)}
+
+
+START, END = {"id": "s", "type": "start"}, {"id": "e", "type": "end"}
+
+
+def make_and_run(client, script):
+    st, s = client.post("/api/scripts", script)
+    if st != 201:
+        return st, s
+    return client.post(f"/api/scripts/{s['id']}/run")
+
+
+def wait_run(client, run_id, until=("done", "failed", "stopped"), timeout=60, cond=None):
+    t0 = time.time()
+    r = None
+    while time.time() - t0 < timeout:
+        st, r = client.get("/api/script_runs/" + run_id)
+        if st == 200 and (cond(r) if cond else r["status"] in until):
+            return r
+        time.sleep(0.15)
+    return r
+
+
+def node_state(r, nid):
+    return r["nodes"][nid]["state"] if r else None
+
+
+def event_index(r, kind, node):
+    for i, e in enumerate(r["events"]):
+        if e.get("kind") == kind and e.get("node") == node:
+            return i
+    return -1
+
+
+def login(name, password):
+    c = Client()
+    c.post("/api/auth/login", {"name": name, "password": password})
+    return c
+
+
+def run_tests(exe, vault, data, procs, owner, ece, vera):
+    # 1. value from a ghost, If, skip, join, {var} in a prompt
+    sc = chain("Rate and build", [
+        START,
+        P("rate", "quill", "<value>7,5</value> rate it", target="score"),
+        {"id": "ok", "type": "if", "props": {"expr": "score >= 7.5"}},
+        P("build", "bolt", "Build {score} for {who}"),
+        {"id": "zero", "type": "set", "props": {"var": "score", "expr": "0"}},
+        END,
+    ], edges=[{"from": "s", "to": "rate"}, {"from": "rate", "to": "ok"},
+              {"from": "ok", "port": "true", "to": "build"}, {"from": "ok", "port": "false", "to": "zero"},
+              {"from": "build", "to": "e"}, {"from": "zero", "to": "e"}],
+        vars=[{"name": "score", "type": "Number", "init": "0"}, {"name": "who", "type": "Text", "init": "Meto"}])
+    st, r = make_and_run(ece, sc)
+    check("editor starts a run", st == 201 and r.get("status") in ("running", "done"), r)
+    r = wait_run(ece, r["id"])
+    check("run finishes", r and r["status"] == "done", r and (r["status"], r.get("error")))
+    check("value taken from the ghost's answer", r and r["vars"]["score"] == {"type": "Number", "value": 750}, r and r["vars"])
+    check("true branch ran, false branch skipped", r and node_state(r, "build") == "done" and node_state(r, "zero") == "skipped")
+    check("join after an If still runs", r and node_state(r, "e") == "done")
+    check("{var} filled into the prompt", r and "Build 7.50 for Meto" in r["nodes"]["build"].get("output", ""), r and r["nodes"]["build"])
+    check("run state file in the Vault", r and os.path.exists(os.path.join(vault, "Script_Runs", r["id"] + ".json")))
+    conv = r["nodes"]["rate"].get("conv", "") if r else ""
+    st, cv = vera.get("/api/chats/" + conv)
+    check("block conversation visible to the team", st == 200, cv)
+    st, chats = vera.get("/api/chats")
+    check("block conversations stay out of the chat list", st == 200 and all(c.get("kind") != "script" for c in chats["chats"]))
+    st, runs = vera.get("/api/script_runs?script=rate_and_build")
+    check("runs listed per script", st == 200 and len(runs["runs"]) == 1 and runs["runs"][0]["status"] == "done", runs)
+
+    # 2. parallel branches, join waits for all, delay
+    sc = chain("Fan out", [START, P("a", "quill", "A demo:write"), P("b", "bolt", "B"),
+                           {"id": "join", "type": "set", "props": {"var": "n", "expr": "n + 1"}},
+                           {"id": "wait", "type": "delay", "props": {"mode": "for", "expr": "20"}}, END],
+               edges=[{"from": "s", "to": "a"}, {"from": "s", "to": "b"}, {"from": "a", "to": "join"}, {"from": "b", "to": "join"},
+                      {"from": "join", "to": "wait"}, {"from": "wait", "to": "e"}],
+               vars=[{"name": "n", "type": "Number"}])
+    t0 = time.time()
+    st, r = make_and_run(ece, sc)
+    r1 = wait_run(ece, r["id"], cond=lambda x: node_state(x, "wait") == "running")
+    check("both branches ran before the join", r1 and min(event_index(r1, "node_done", "a"), event_index(r1, "node_done", "b")) >= 0
+          and max(event_index(r1, "node_done", "a"), event_index(r1, "node_done", "b")) < event_index(r1, "node_started", "join"), r1 and r1["events"])
+    check("both branches started together", r1 and event_index(r1, "node_started", "b") < event_index(r1, "node_done", "a"), r1 and r1["events"])
+    check("delay waits", r1 and r1["status"] == "running")
+    r = wait_run(ece, r["id"])
+    check("run after the delay finishes", r and r["status"] == "done" and r["vars"]["n"]["value"] == 100, r and (r["status"], r["vars"]))
+    check("delay took its time (20 test minutes = 2 s)", time.time() - t0 >= 2.0)
+
+    # 3. no usable value: asked once more, then the run fails
+    st, r = make_and_run(ece, chain("No value", [START, P("p", "quill", "nothing here", target="when"), END],
+                                    vars=[{"name": "when", "type": "Date"}]))
+    r = wait_run(ece, r["id"])
+    check("missing value fails the run after one retry", r and r["status"] == "failed" and node_state(r, "p") == "failed"
+          and "usable value" in r["nodes"]["p"].get("error", "") and len(r["nodes"]["p"].get("runs", [])) == 2, r and r["nodes"]["p"])
+    check("retry noted in the events", r and any("asking once more" in e.get("text", "") for e in r["events"]))
+    check("later blocks never start after a failure", r and node_state(r, "e") == "waiting")
+
+    # 4. a ghost asks a helper: the block waits for the report
+    st, r = make_and_run(ece, chain("Helper", [START, P("p", "quill", "demo:send:bolt"), END]))
+    r = wait_run(ece, r["id"])
+    check("block waits for the helper's report", r and r["status"] == "done" and r["nodes"]["p"].get("output", "").startswith("Thanks, I got the report"),
+          r and r["nodes"]["p"].get("output"))
+
+    # 5. stop, rights, one run at a time, delete while running
+    st, s = ece.post("/api/scripts", chain("Slow", [START, P("p", "quill", "demo:slow"), END]))
+    st, r = ece.post("/api/scripts/slow/run")
+    check("slow run started", st == 201, r)
+    check("a script runs once at a time", ece.post("/api/scripts/slow/run")[0] == 409)
+    check("viewer cannot run", vera.post("/api/scripts/slow/run")[0] == 403)
+    check("running script cannot be deleted", ece.delete("/api/scripts/slow")[0] == 409)
+    st, other = owner.post("/api/scripts", chain("Owner slow", [START, P("p", "quill", "demo:slow"), END]))
+    st, orun = owner.post("/api/scripts/owner_slow/run")
+    check("someone else's run cannot be stopped", ece.post(f"/api/script_runs/{orun['id']}/stop")[0] == 403)
+    check("owner stops any run", owner.post(f"/api/script_runs/{r['id']}/stop")[0] == 200)
+    owner.post(f"/api/script_runs/{orun['id']}/stop")
+    r = wait_run(ece, r["id"])
+    check("stopped run", r and r["status"] == "stopped" and node_state(r, "p") == "stopped", r and (r["status"], r["nodes"]))
+    check("stop on an ended run refused", ece.post(f"/api/script_runs/{r['id']}/stop")[0] == 409)
+    time.sleep(0.5)
+    st, cv = ece.get("/api/chats/" + r["nodes"]["p"]["conv"])
+    check("the ghost was stopped too", st == 200 and not cv.get("busy"), cv)
+
+    # 6. pause and step
+    st, r = make_and_run(ece, chain("Steps", [START, P("p", "quill", "hi"), {"id": "a", "type": "set", "props": {"var": "x", "expr": "x + 1"}},
+                                               {"id": "b", "type": "set", "props": {"var": "x", "expr": "x * 10"}}, END],
+                                    vars=[{"name": "x", "type": "Number"}]))
+    rid = r["id"]
+    check("pause", ece.post(f"/api/script_runs/{rid}/pause")[0] == 200)
+    check("pause twice refused", ece.post(f"/api/script_runs/{rid}/pause")[0] == 409)
+    r = wait_run(ece, rid, cond=lambda x: node_state(x, "a") == "ready")
+    check("paused run keeps the next block waiting", r and r["status"] == "paused" and node_state(r, "p") == "done", r and r["nodes"])
+    st, r = ece.post(f"/api/script_runs/{rid}/step")
+    check("step starts exactly one block", st == 200 and node_state(r, "a") == "done" and node_state(r, "b") == "ready" and r["vars"]["x"]["value"] == 100, r)
+    st, r = ece.post(f"/api/script_runs/{rid}/resume")
+    check("resume runs the rest", st == 200 and r["status"] == "done" and r["vars"]["x"]["value"] == 1000, r)
+    check("step on an ended run refused", ece.post(f"/api/script_runs/{rid}/step")[0] == 409)
+
+    # 7. runs refused or failing cleanly
+    st, r = ece.post("/api/scripts/broken/run")
+    check("a script with problems does not run", st == 400 and r.get("check", {}).get("errors"), r)
+    st, r = make_and_run(ece, chain("Divide", [START, {"id": "d", "type": "set", "props": {"var": "x", "expr": "x / 0"}}, END],
+                                    vars=[{"name": "x", "type": "Number", "init": "1"}]))
+    r = wait_run(ece, r["id"])
+    check("division by zero fails the run", r and r["status"] == "failed" and "Division by zero" in r.get("error", ""), r and r.get("error"))
+    st, r = make_and_run(ece, chain("Usage", [START, {"id": "u", "type": "if", "props": {"expr": "claude_left_5h > 50"}}, END],
+                                    edges=[{"from": "s", "to": "u"}, {"from": "u", "port": "true", "to": "e"}]))
+    r = wait_run(ece, r["id"])
+    check("unknown built-in fails cleanly", r and r["status"] == "failed" and "not known" in r.get("error", ""), r and r.get("error"))
+    st, s = ece.post("/api/scripts", chain("Agent draft", [START, END], draft=True))
+    check("draft saved as draft", s.get("draft") is True)
+    ece.post("/api/scripts/agent_draft/run")
+    check("running a draft makes it a normal script", ece.get("/api/scripts/agent_draft")[1].get("draft") is False)
+
+    # 8. a run goes on after the program closed
+    st, r = make_and_run(ece, chain("Survivor", [START, {"id": "w", "type": "delay", "props": {"mode": "for", "expr": "30"}},
+                                                  P("p", "quill", "demo:slow after"), END]))
+    rid = r["id"]
+    time.sleep(1)
+    stop_server(procs[-1], hard=True)
+    procs.append(start_server(exe, vault, data))
+    ece2 = login("Ece", "ece password 1")
+    r = wait_run(ece2, rid, cond=lambda x: node_state(x, "p") == "running", timeout=20)
+    check("delay goes on after a restart", r and r["status"] == "running" and node_state(r, "w") == "done", r and (r["status"], r["nodes"]))
+    time.sleep(1)
+    stop_server(procs[-1], hard=True)
+    procs.append(start_server(exe, vault, data))
+    ece3 = login("Ece", "ece password 1")
+    r = wait_run(ece3, rid, timeout=60)
+    check("interrupted prompt starts again after a restart", r and r["status"] == "done" and r["nodes"]["p"].get("restarted") is True,
+          r and (r["status"], r["nodes"]["p"]))
+    check("restart noted in the events", r and any("Interrupted by a restart" in e.get("text", "") for e in r["events"]))
+
+
+def start_server(exe, vault, data):
+    env = dict(os.environ, PHANTOM_SCRIPT_MINUTE_MS="100")  # a script minute lasts 0.1 s in the tests
+    proc = subprocess.Popen([exe, "--vault", vault, "--data", data, "--port", str(PORT), "--no-window"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+    for _ in range(60):
+        try:
+            Client().get("/api/auth/status")
+            break
+        except Exception:
+            time.sleep(0.2)
+    return proc
+
+
+def stop_server(proc, hard=False):
+    if hard:
+        proc.kill()  # like a crash or a power cut
+    else:
+        proc.terminate()
+    try:
+        proc.wait(5)
+    except Exception:
+        proc.kill()
+
+
 def server_tests(exe):
     tmp = tempfile.mkdtemp(prefix="pc2_script_")
     vault, data = os.path.join(tmp, "Vault"), os.path.join(tmp, "Data")
-    proc = subprocess.Popen([exe, "--vault", vault, "--data", data, "--port", str(PORT), "--no-window"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    procs = [start_server(exe, vault, data)]
     try:
-        for _ in range(60):
-            try:
-                Client().get("/api/auth/status")
-                break
-            except Exception:
-                time.sleep(0.2)
         owner, ece, vera = Client(), Client(), Client()
         owner.post("/api/auth/setup", {"name": "Meto", "password": "correct horse 1"})
         tok_e = owner.post("/api/users", {"name": "Ece", "role": "editor"})[1]["invite_token"]
@@ -308,12 +507,10 @@ def server_tests(exe):
         st, cleaned = ece.post("/api/scripts", {"name": "Clean me", "extra": 1, "nodes": [{"id": "s", "type": "start", "x": 1e12, "y": "a", "props": {"evil": 1}}]})
         check("unknown fields dropped, coordinates clamped", st == 201 and "extra" not in cleaned and cleaned["nodes"][0]["x"] == 100000
               and cleaned["nodes"][0]["y"] == 0 and cleaned["nodes"][0]["props"] == {}, cleaned)
+
+        run_tests(exe, vault, data, procs, owner, ece, vera)
     finally:
-        proc.terminate()
-        try:
-            proc.wait(5)
-        except Exception:
-            proc.kill()
+        stop_server(procs[-1])
         shutil.rmtree(tmp, ignore_errors=True)
 
 

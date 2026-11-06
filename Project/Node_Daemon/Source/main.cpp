@@ -20,6 +20,7 @@
 #include "telegram_bridge.hpp"
 #include "runner.hpp"
 #include "script_expr.hpp"
+#include "script_runner.hpp"
 #include "server.hpp"
 #include "store.hpp"
 #include "tunnel.hpp"
@@ -540,6 +541,13 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         Mcp mcp(cfg.file.parent_path(), store);  // MCP servers of this copy (Settings > MCP)
         mcp.set_port(cfg.port);
         runner.set_mcp(&mcp);
+        // Visual scripts: prompt blocks are Runner jobs; the Runner tells the script runner when each job ends.
+        ScriptRunner scripts(store, runner, [&auth, &store](const std::string& id) {
+            auto u = store.user(id);
+            return u && !u->value("disabled", false) && auth.exists(id) ? auth.role(id) : std::string();
+        });
+        runner.set_finish_hook([&scripts](const Job& j, const std::string& st, const std::string& a, const std::string& e) { scripts.on_job_finished(j, st, a, e); });
+        scripts.start();
         // Talking to ghosts from Telegram (Settings > MCP > Telegram > listen). Never deleted: a long poll may still be
         // waiting when the program quits; stop() only tells its threads to end.
         auto* telegram = new TelegramBridge(store, auth, runner, mcp, cfg.file.parent_path());
@@ -560,6 +568,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         Tunnel tunnel;  // starts off
         opt.tunnel = &tunnel;
         opt.telegram = telegram;
+        opt.scripts = &scripts;
         if (!vault_existed) opt.fresh_vault = cfg.vault;
         std::promise<bool> listening;
         std::atomic<bool> signalled{false};
@@ -623,6 +632,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         telegram->stop();
         g_worker.stop();
         runner.shutdown();
+        scripts.shutdown();
         g_store = nullptr;
         g_runner = nullptr;
         if (single) ReleaseMutex(single);

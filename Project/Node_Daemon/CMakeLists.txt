@@ -41,6 +41,7 @@ add_executable(phantom_co WIN32
   Source/script_value.cpp
   Source/script_expr.cpp
   Source/script_doc.cpp
+  Source/script_runner.cpp
   Source/runner.cpp
   Source/worker_hub.cpp
   Source/worker.cpp

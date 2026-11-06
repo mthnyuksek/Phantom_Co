@@ -101,6 +101,12 @@ public:
     std::optional<json> script(const std::string& id);
     json save_script(json s);                       // assigns id from the name when missing
     bool remove_script(const std::string& id);
+    // Script runs: Script_Runs/<id>.json (state, rewritten after every change) + <id>.jsonl (event log)
+    void script_run_save(const json& st);
+    std::optional<json> script_run_get(const std::string& id);
+    std::vector<json> script_runs(const std::string& script_id = "", size_t limit = 50);  // newest first
+    void script_run_log(const std::string& id, const json& ev);
+    std::vector<json> script_run_events(const std::string& id, size_t limit = 500);       // the last `limit` events
 
     // Conversations: Conversations/<id>.jsonl, one JSON object per line
     //   {"t":"meta",...} {"t":"msg","from":"user:ID|agent:ID|system","text":..} {"t":"title"} {"t":"share"}

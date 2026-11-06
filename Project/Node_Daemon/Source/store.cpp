@@ -431,6 +431,60 @@ bool Store::remove_script(const std::string& id) {
     return fs::remove(root_ / L"Scripts" / P(id + ".json"), ec);
 }
 
+void Store::script_run_save(const json& st) {
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    std::string id = st.value("id", "");
+    if (!valid_id(id)) return;
+    std::error_code ec;
+    fs::create_directories(root_ / L"Script_Runs", ec);
+    write_json(root_ / L"Script_Runs" / P(id + ".json"), st);
+}
+std::optional<json> Store::script_run_get(const std::string& id) {
+    if (!valid_id(id)) return std::nullopt;
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    json st = read_json(root_ / L"Script_Runs" / P(id + ".json"), json());
+    if (!st.is_object() || !st.contains("id")) return std::nullopt;
+    return st;
+}
+std::vector<json> Store::script_runs(const std::string& script_id, size_t limit) {
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    std::vector<std::string> ids;
+    std::error_code ec;
+    for (auto& e : fs::directory_iterator(root_ / L"Script_Runs", ec))
+        if (e.is_regular_file() && e.path().extension() == L".json") ids.push_back(U8(e.path().stem()));
+    std::sort(ids.rbegin(), ids.rend());  // ULIDs: newest first
+    std::vector<json> out;
+    for (const auto& id : ids) {
+        if (out.size() >= limit) break;
+        auto st = script_run_get(id);
+        if (st && (script_id.empty() || st->value("script_id", "") == script_id)) out.push_back(*st);
+    }
+    return out;
+}
+void Store::script_run_log(const std::string& id, const json& ev) {
+    if (!valid_id(id)) return;
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    std::ofstream f(root_ / L"Script_Runs" / P(id + ".jsonl"), std::ios::app | std::ios::binary);
+    f << dumps(ev) << "\n";
+}
+std::vector<json> Store::script_run_events(const std::string& id, size_t limit) {
+    std::vector<json> out;
+    if (!valid_id(id)) return out;
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    std::string text;
+    if (!read_file(root_ / L"Script_Runs" / P(id + ".jsonl"), text)) return out;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t e = text.find('\n', pos);
+        if (e == std::string::npos) e = text.size();
+        json ev = json::parse(text.substr(pos, e - pos), nullptr, false);
+        if (ev.is_object()) out.push_back(std::move(ev));
+        pos = e + 1;
+    }
+    if (out.size() > limit) out.erase(out.begin(), out.end() - limit);
+    return out;
+}
+
 std::vector<json> Store::skill_templates() { return embedded_skills(); }
 std::optional<json> Store::install_skill_template(const std::string& id) {
     std::lock_guard<std::recursive_mutex> l(mu_);

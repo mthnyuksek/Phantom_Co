@@ -192,7 +192,8 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
     // Conversation visibility: owner sees all; others see their own, shared ones and task conversations.
     auto visible = [&](const json& meta, const Ctx& c) {
         if (c.role == "owner") return true;
-        return meta.value("user_id", "") == c.id || meta.value("shared", false) || meta.value("kind", "") == "task";
+        const std::string k = meta.value("kind", "");
+        return meta.value("user_id", "") == c.id || meta.value("shared", false) || k == "task" || k == "script";
     };
     auto writable = [&](const json& meta, const Ctx& c) {
         std::string k = meta.value("kind", "");
@@ -1177,7 +1178,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
     add("GET", "/api/chats", kViewer, [&](auto&, auto& res, Ctx& c) {
         json list = json::array();
         for (auto& m : store.conv_list()) {
-            if (!visible(m, c) || m.value("kind", "") == "task") continue;
+            if (!visible(m, c) || m.value("kind", "") == "task" || m.value("kind", "") == "script") continue;
             m["busy"] = runner.conversation_busy(m["id"]);
             list.push_back(m);
         }
@@ -1523,8 +1524,50 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         auto cur = store.script(req.matches[1]);
         if (!cur) return fail(res, 404, "Script not found");
         if (cur->value("created_by", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who made this script can delete it.");
+        if (opt.scripts && opt.scripts->script_active(req.matches[1])) return fail(res, 409, "This script is running. Stop it first.");
         store.remove_script(req.matches[1]);
         send(res, {{"ok", true}});
+    });
+
+    // Running a script: any editor may start a checked script (pressing Run is also what lets an agent's draft run);
+    // it runs with the starter's rights. Only the starter or the owner stops/pauses/steps it.
+    add("POST", "/api/scripts/" + ID + "/run", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        if (!opt.scripts) return fail(res, 503, "Scripts are not available.");
+        auto s = store.script(req.matches[1]);
+        if (!s) return fail(res, 404, "Script not found");
+        json chk = script::check_script(*s, script_lookup);
+        if (!chk["errors"].empty()) {
+            json body = {{"error", "Fix the problems of this script first."}, {"check", chk}};
+            res.status = 400;
+            return res.set_content(dumps(body), "application/json");
+        }
+        std::string err;
+        std::string run_id = opt.scripts->run(*s, c.id, err);
+        if (run_id.empty()) return fail(res, 409, err);
+        if (s->value("draft", false)) {  // a person ran it: it is no longer just an agent's suggestion
+            (*s)["draft"] = false;
+            store.save_script(*s);
+        }
+        send(res, opt.scripts->get(run_id).value_or(json{{"id", run_id}}), 201);
+    });
+    add("GET", "/api/script_runs", kViewer, [&](auto& req, auto& res, Ctx&) {
+        if (!opt.scripts) return send(res, {{"runs", json::array()}});
+        json list = json::array();
+        for (auto& r : opt.scripts->list(req.has_param("script") ? req.get_param_value("script") : "")) list.push_back(r);
+        send(res, {{"runs", list}});
+    });
+    add("GET", "/api/script_runs/" + ID, kViewer, [&](auto& req, auto& res, Ctx&) {
+        auto st = opt.scripts ? opt.scripts->get(req.matches[1]) : std::nullopt;
+        if (!st) return fail(res, 404, "Run not found");
+        send(res, *st);
+    });
+    add("POST", "/api/script_runs/" + ID + "/(stop|pause|resume|step)", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        auto st = opt.scripts ? opt.scripts->get(req.matches[1]) : std::nullopt;
+        if (!st) return fail(res, 404, "Run not found");
+        if (st->value("user_id", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who started this run can control it.");
+        std::string err;
+        if (!opt.scripts->control(req.matches[1], req.matches[2], err)) return fail(res, 409, err);
+        send(res, opt.scripts->get(req.matches[1]).value_or(json()));
     });
 
     // ================================================================== runs
