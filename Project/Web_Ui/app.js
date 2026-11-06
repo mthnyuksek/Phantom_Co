@@ -13,6 +13,7 @@ const NAV = [
   { id: 'chats', label: 'Chats', icon: '💬' },
   { id: 'projects', label: 'Projects', icon: '📁' },
   { id: 'tasks', label: 'Tasks', icon: '📋' },
+  { id: 'scripts', label: 'Scripts', icon: '🧩' },
   { id: 'skills', label: 'Skills', icon: '🧰' },
   { id: 'rules', label: 'Rules', icon: '📜' },
   { id: 'runs', label: 'Runs', icon: '⏱️' },
@@ -20,7 +21,7 @@ const NAV = [
   { id: 'team', label: 'Team', icon: '👥' },
   { id: 'settings', label: 'Settings', icon: '⚙️', owner: true },
 ];
-const PAGES = ['haunt', 'chats', 'projects', 'tasks', 'skills', 'rules', 'runs', 'files', 'team', 'settings'];
+const PAGES = ['haunt', 'chats', 'projects', 'tasks', 'scripts', 'skills', 'rules', 'runs', 'files', 'team', 'settings'];
 
 let token = 0, current = null, currentCtx = null, timer = null, running = false;
 

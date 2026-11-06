@@ -215,7 +215,7 @@ json check_script(const json& s, const ScriptLookup& lookup) {
             if (!project.empty() && !lookup.project_exists(project)) add("Unknown project '" + project + "'.", {{"node", id}, {"field", "project_id"}});
             if (text.empty()) add("The prompt is empty.", {{"node", id}, {"field", "text"}});
             for (const std::string& name : text_placeholders(text))
-                if (!env.count(name)) add("Unknown variable {" + name + "} in the prompt.", {{"node", id}, {"field", "text"}});
+                if (!env.count(name)) add("Unknown variable in the prompt: {" + name + "}", {{"node", id}, {"field", "text"}});
             if (!target.empty()) writable(target, where, "target");
         } else if (type == "set") {
             std::string var = p.value("var", "");
