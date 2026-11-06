@@ -5,6 +5,7 @@ import { api } from '../api.js';
 import { S, me, isOwner, canEdit, agentById, projectById } from '../state.js';
 import { $, esc, guard, toast, twoStep } from '../ui.js';
 import { createCanvas, BLOCKS } from '../script_canvas.js';
+import { renderRun, runPill } from './script_run.js';
 
 const TYPES = ['Number', 'Time', 'Date', 'Bool', 'Text'];
 const TYPE_HINT = { Number: '0.00', Time: '16:00', Date: '2026-11-16', Bool: 'false', Text: 'text' };
@@ -18,17 +19,18 @@ let check = { errors: [], prompt_count: 0 }, saveTimer = 0, saving = false, dirt
 
 const short = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
-// the text inside a block on the canvas (user data: escaped, not translated)
+// the text inside a block on the canvas: user data in data-no-i18n spans, the small hints are translated
+const raw = (html) => `<span data-no-i18n>${html}</span>`;
 function summary(n) {
   const p = n.props || {};
   if (n.type === 'start') return '';
   if (n.type === 'prompt') {
-    const who = p.agent_id ? esc(agentById(p.agent_id)?.name || p.agent_id) : '<span class="sc-miss">no ghost</span>';
-    return `<b>${who}</b> ${esc(short(p.text, 70)) || '<span class="sc-miss">no prompt</span>'}${p.target ? ` <span class="sc-var">→ ${esc(p.target)}</span>` : ''}`;
+    const who = p.agent_id ? raw(`<b>${esc(agentById(p.agent_id)?.name || p.agent_id)}</b>`) : '<span class="sc-miss">no ghost</span>';
+    return `${who} ${p.text ? raw(esc(short(p.text, 70))) : '<span class="sc-miss">no prompt</span>'}${p.target ? ` <span class="sc-var">→ ${raw(esc(p.target))}</span>` : ''}`;
   }
   if (n.type === 'set') return `<code>${esc(p.var || '?')} = ${esc(p.expr || '?')}</code>`;
   if (n.type === 'if') return `<code>${esc(p.expr || '?')}</code>`;
-  if (n.type === 'delay') return p.mode === 'until' ? `until <code>${esc(p.expr || '?')}</code>` : `<code>${esc(p.expr || '?')}</code> min`;
+  if (n.type === 'delay') return p.mode === 'until' ? `<span>until</span> <code>${esc(p.expr || '?')}</code>` : `<code>${esc(p.expr || '?')}</code> <span>min</span>`;
   return '';
 }
 
@@ -42,6 +44,16 @@ async function loadList() {
   list = (await api('GET', '/api/scripts')).scripts;
   const el = $('#sc-list', view);
   if (el) el.innerHTML = listHTML();
+}
+
+// the page frame: the list on the left, an empty pane on the right
+async function listShell(v, openId) {
+  view = v;
+  cur = openId ? { id: openId } : null;  // marks the open script in the list until the real one is loaded
+  view.innerHTML = `<div class="chats-layout sc-layout ${openId ? 'has-chat' : ''}"><div class="chat-side"><div class="chat-side-head"><h1>Scripts</h1>${canEdit() ? '<button class="btn small primary" data-act="new">+ New</button>' : ''}</div>
+    <div class="chat-list" id="sc-list"></div></div><div class="chat-pane" id="sc-detail"></div></div>`;
+  await loadList();
+  cur = null;
 }
 
 // ---------------------------------------------------------------- saving
@@ -114,7 +126,8 @@ function scriptPanel() {
     <div id="sc-vars">${varRows || '<p class="muted small">No variables yet.</p>'}</div>
     ${editable ? '<button class="btn small" data-act="var-add">+ Variable</button>' : ''}
     <details class="sc-help"><summary>Built-in variables</summary>${BUILTINS.map(([n, t, d]) => `<div><code>${n}</code> <span class="muted" data-no-i18n>${t}</span> <span class="muted">${d}</span></div>`).join('')}</details>
-    <div id="sc-problems-all"></div>`;
+    <div id="sc-problems-all"></div>
+    <h3 class="sc-sub">Runs</h3><div id="sc-runs"><p class="muted small">Loading…</p></div>`;
 }
 
 function nodePanel(n) {
@@ -158,9 +171,21 @@ function paintPanel() {
   if (!el) return;
   if (sel?.kind === 'node') { const n = cur.nodes.find((x) => x.id === sel.id); el.innerHTML = n ? nodePanel(n) : scriptPanel(); }
   else if (sel?.kind === 'edge') el.innerHTML = edgePanel(sel.index);
-  else el.innerHTML = scriptPanel();
+  else { el.innerHTML = scriptPanel(); paintRuns(); }
   paintProblems();
 }
+// the last runs of this script (in the script panel)
+async function paintRuns() {
+  if (!cur) return;
+  const id = cur.id;
+  const runs = (await api('GET', '/api/script_runs?script=' + encodeURIComponent(id)).catch(() => ({ runs: [] }))).runs;
+  const el = $('#sc-runs', view);
+  if (!el || !cur || cur.id !== id) return;
+  el.innerHTML = runs.length ? runs.slice(0, 10).map((r) => `<a class="sc-run-row" href="#/scripts/${esc(id)}/run/${esc(r.id)}">${runPill(r.status)}
+      <span class="muted small" data-no-i18n>${esc(new Date(r.created).toLocaleString())}</span></a>`).join('')
+    : '<p class="muted small">Not run yet.</p>';
+}
+
 function paintProblems() {
   const mine = $('#sc-node-problems', view);  // the selected block's own problems (the inputs around it stay as they are)
   if (mine && sel?.kind === 'node') mine.innerHTML = problemList(problemsOf((e) => e.node === sel.id));
@@ -188,11 +213,12 @@ function detailHTML() {
 }
 
 export async function render(v, arg, c) {
+  const [sid, mode, runId] = (arg || '').split('/');
+  if (mode === 'run' && runId) return renderRun(v, sid, runId, c, () => listShell(v, sid));
+  arg = sid;
   view = v; ctx = c;
   cur = null; sel = null; canvas = null; dirty = false; check = { errors: [], prompt_count: 0 };
-  view.innerHTML = `<div class="chats-layout sc-layout ${arg ? 'has-chat' : ''}"><div class="chat-side"><div class="chat-side-head"><h1>Scripts</h1>${canEdit() ? '<button class="btn small primary" data-act="new">+ New</button>' : ''}</div>
-    <div class="chat-list" id="sc-list"></div></div><div class="chat-pane" id="sc-detail"></div></div>`;
-  await loadList();
+  await listShell(view, arg);
   if (arg) {
     try { cur = await api('GET', '/api/scripts/' + encodeURIComponent(arg)); } catch (e) { toast(e.message, true); }
     if (!ctx.isCurrent()) return;
@@ -266,9 +292,8 @@ export async function render(v, arg, c) {
     } else if (act === 'run') {
       await save();
       if (check.errors.length) { toast('Fix the problems of this script first.', true); return; }
-      await api('POST', `/api/scripts/${cur.id}/run`);
-      toast('Started');
-      if (cur.draft) { cur.draft = false; $('.sc-draft', view)?.remove(); loadList(); }
+      const r = await api('POST', `/api/scripts/${cur.id}/run`);
+      location.hash = `#/scripts/${cur.id}/run/${r.id}`;
     } else if (act === 'del') {
       twoStep(el, 'Really delete?', async () => {
         clearTimeout(saveTimer); dirty = false;

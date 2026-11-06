@@ -524,6 +524,21 @@ export const EXACT = {
   'Only the person who started this run can control it.': 'Bu çalıştırmayı yalnızca onu başlatan kişi yönetebilir.',
   "Missing ')'": "')' eksik", 'Empty expression': 'Boş ifade', 'Expression ends too early': 'İfade erken bitiyor', 'Use == to compare': 'Karşılaştırmak için == kullan',
   "Join comparisons with 'and'": "Karşılaştırmaları 'and' ile birleştir", 'Text without closing quote': 'Kapanış tırnağı olmayan metin',
+  // script run view
+  'Paused': 'Duraklatıldı', 'Ready to start': 'Başlamaya hazır', 'Skipped': 'Atlandı', 'Waiting': 'Bekliyor',
+  'Back to the editor': 'Editöre dön', '⏸ Pause': '⏸ Duraklat', '⏭ Step': '⏭ Adım', '▶ Resume': '▶ Devam', '■ Stop': '■ Durdur',
+  '▶ Run again': '▶ Yeniden çalıştır', 'Run started': 'Çalıştırma başladı', 'started': 'başladı', 'skipped': 'atlandı', 'Run ended': 'Çalıştırma bitti',
+  'working…': 'çalışıyor…', 'reading the usage limits…': 'kullanım limitleri okunuyor…', 'until': 'şu saate kadar:', 'min': 'dk',
+  'no ghost': 'hayalet yok', 'no prompt': 'prompt yok', 'Not run yet.': 'Henüz çalıştırılmadı.',
+  'Goes on at': 'Devam saati:', 'Started again after the program was restarted.': 'Program yeniden açıldıktan sonra tekrar başlatıldı.',
+  'Answer': 'Cevap', 'Result': 'Sonuç', '💬 Open the conversation': '💬 Konuşmayı aç', '⏱️ Run details': '⏱️ İş ayrıntıları',
+  'This script has no variables.': 'Bu betiğin değişkeni yok.', 'What happened': 'Neler oldu',
+  'The script finished.': 'Betik bitti.', 'The script failed.': 'Betik başarısız oldu.', 'The script was stopped.': 'Betik durduruldu.',
+  'The ghost was stopped.': 'Hayalet durduruldu.', 'The ghost gave no answer.': 'Hayalet cevap vermedi.',
+  'The run is not running.': 'Çalıştırma şu an çalışmıyor.', 'The run is not paused.': 'Çalıştırma duraklatılmış değil.',
+  'Pause the run first: a step starts one waiting block.': 'Önce duraklat: bir adım bekleyen tek bir bloğu başlatır.',
+  'No block is waiting to start.': 'Başlamayı bekleyen blok yok.', 'This run has already ended.': 'Bu çalıştırma zaten bitti.',
+  'Division by zero': 'Sıfıra bölme', 'Number too big': 'Sayı çok büyük',
   'Name on the canvas': 'Tuvaldeki adı', 'The script can run once these are fixed.': 'Bunlar düzelince betik çalışabilir.', '✓ Ready to run': '✓ Çalışmaya hazır',
 };
 

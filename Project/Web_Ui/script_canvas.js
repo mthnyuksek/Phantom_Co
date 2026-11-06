@@ -28,6 +28,7 @@ export function createCanvas(host, opts) {
   let sel = null;            // {kind: 'node', id} | {kind: 'edge', index}
   let errors = new Map();    // node id -> [messages]
   let states = new Map();    // node id -> run state (run view)
+  let edgeStates = [];       // per arrow: pending | fired | skipped (run view)
   let pending = null;        // tap-to-connect: {from, port}
   let pan = { x: 0, y: 0 }, zoom = 1;
   const heights = new Map();
@@ -74,7 +75,7 @@ export function createCanvas(host, opts) {
     return `<div class="${cls}" data-node="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px;width:${NODE_W}px" ${errs ? `title="${esc(errs[0] + (errs.length > 1 ? ` (+${errs.length - 1})` : ''))}"` : ''}>
       ${b.hasIn ? `<span class="sc-port in ${pending ? 'target' : ''}" data-in="1"></span>` : ''}
       <div class="sc-node-head"><i>${b.icon}</i><b data-no-i18n>${esc(n.label || b.label)}</b>${errs ? '<span class="sc-err-dot">!</span>' : ''}</div>
-      <div class="sc-node-sum" data-no-i18n>${o.summary(n)}</div>${outs}</div>`;
+      <div class="sc-node-sum">${o.summary(n)}</div>${outs}</div>`;
   }
   function drawEdges() {
     let html = '';
@@ -84,7 +85,7 @@ export function createCanvas(host, opts) {
       const d = curve(portOut(a, e.port || 'out'), portIn(b));
       const on = sel?.kind === 'edge' && sel.index === i;
       const cls = e.port === 'true' ? 'yes' : e.port === 'false' ? 'no' : '';
-      const st = states.size ? (states.get(e.from) === 'done' ? 'lit' : '') : '';
+      const st = edgeStates[i] === 'fired' ? 'lit' : edgeStates[i] === 'skipped' ? 'dim' : '';
       html += `<path class="sc-edge ${cls} ${on ? 'sel' : ''} ${st}" d="${d}"/><path class="sc-hit" data-edge="${i}" d="${d}"/>`;
     });
     html += '<path class="sc-temp" d="" />';
@@ -365,7 +366,7 @@ export function createCanvas(host, opts) {
       for (const er of list || []) if (er.node) (errors.get(er.node) || errors.set(er.node, []).get(er.node)).push(er.message);
       render();
     },
-    setStates(map) { states = new Map(Object.entries(map || {})); render(); },
+    setStates(map, edges) { states = new Map(Object.entries(map || {})); edgeStates = edges || []; render(); },
     select(s) { select(s); },
     selected: () => sel,
     remove: removeSelected,
