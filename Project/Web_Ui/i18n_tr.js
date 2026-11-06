@@ -539,6 +539,7 @@ export const EXACT = {
   'Pause the run first: a step starts one waiting block.': 'Önce duraklat: bir adım bekleyen tek bir bloğu başlatır.',
   'No block is waiting to start.': 'Başlamayı bekleyen blok yok.', 'This run has already ended.': 'Bu çalıştırma zaten bitti.',
   'Division by zero': 'Sıfıra bölme', 'Number too big': 'Sayı çok büyük',
+  'Script settings': 'Betik ayarları', 'Now tap the block this should lead to.': 'Şimdi bunun gideceği bloğa dokun.',
   'Name on the canvas': 'Tuvaldeki adı', 'The script can run once these are fixed.': 'Bunlar düzelince betik çalışabilir.', '✓ Ready to run': '✓ Çalışmaya hazır',
 };
 

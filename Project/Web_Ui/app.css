@@ -651,3 +651,30 @@ main#view:has(> .chats-layout) { padding: 0; overflow: hidden; }
 .sc-conv-modal { height: 62vh; height: 62dvh; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .sc-run-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; color: inherit; }
 .sc-run-row:hover { background: var(--hover); }
+/* script canvas on touch screens and phones */
+.sc-banner { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 5; background: var(--modal); border: 1px solid var(--accent); border-radius: 12px;
+  padding: 8px 10px 8px 14px; display: flex; align-items: center; gap: 10px; font-size: 13px; box-shadow: 0 8px 24px var(--shadow); max-width: calc(100% - 24px); }
+.sc-banner[hidden] { display: none; }
+.sc-sheet-btn, .sc-sheet-bar { display: none; }
+@media (pointer: coarse) {
+  .sc-port { width: 20px; height: 20px; }
+  .sc-port.in.target { width: 24px; height: 24px; }
+  .sc-port.out::before { inset: -14px; }
+}
+@media (max-width: 720px) {
+  .sc-head { padding: 8px 10px; gap: 6px; }
+  .sc-head #sc-name { flex: 1 1 120px; font-size: 15px; }
+  .sc-sheet-btn { display: inline-flex; }
+  .sc-body.sheet { display: block; position: relative; flex: 1; min-height: 0; }
+  .sc-body.sheet .sc-host { position: absolute; inset: 0; }
+  .sc-body.sheet .sc-panel { position: absolute; left: 0; right: 0; bottom: 0; max-height: 64%; z-index: 8; border-left: 0; border-top: 1px solid var(--line2);
+    border-radius: 18px 18px 0 0; padding: 4px 16px calc(24px + env(safe-area-inset-bottom)); box-shadow: 0 -10px 30px var(--shadow);
+    transform: translateY(105%); transition: transform .22s ease; }
+  .sc-body.sheet.sheet-open .sc-panel { transform: none; }
+  .sc-body.sheet .sc-sheet-bar { display: flex; align-items: center; justify-content: center; position: sticky; top: 0; background: var(--bg2); padding: 6px 0 8px; z-index: 1; }
+  .sc-grab { width: 42px; height: 5px; border-radius: 3px; background: var(--line2); }
+  .sc-sheet-bar .btn { position: absolute; right: 0; }
+  .sc-tools { top: 8px; right: 8px; gap: 4px; }
+  .sc-palette { width: min(260px, 82%); }
+}
+@media (prefers-reduced-motion: reduce) { .sc-body.sheet .sc-panel, .sc-palette { transition: none; } .sc-node.st-running { animation: none; } }

@@ -207,9 +207,11 @@ function detailHTML() {
       <span id="sc-check"></span><span id="sc-saved" class="sc-saved"></span>
       ${canEdit() ? '<button class="btn primary small" data-act="run">▶ Run</button>' : ''}
       ${editable ? '<button class="btn small danger" data-act="del">Delete</button>' : ''}
+      <button class="btn small sc-sheet-btn" data-act="sheet-script" title="Script settings">⚙</button>
     </div>
     ${cur.draft ? '<div class="sc-draft">📝 A ghost wrote this script. It never runs by itself: check it, then press Run.</div>' : ''}
-    <div class="sc-body"><div class="sc-host" id="sc-host"></div><aside class="sc-panel" id="sc-panel"></aside></div>`;
+    <div class="sc-body sheet"><div class="sc-host" id="sc-host"></div>
+      <aside class="sc-panel"><div class="sc-sheet-bar"><span class="sc-grab"></span><button class="btn small" data-act="sheet-close" title="Close">✕</button></div><div id="sc-panel"></div></aside></div>`;
 }
 
 export async function render(v, arg, c) {
@@ -234,7 +236,7 @@ export async function render(v, arg, c) {
     canvas = createCanvas($('#sc-host', view), {
       script: cur, readOnly: !editable, summary,
       onChange: () => { changed(); if (sel?.kind === 'edge' && !cur.edges[sel.index]) sel = null; },
-      onSelect: (s) => { sel = s; paintPanel(); },
+      onSelect: (s) => { sel = s; paintPanel(); setSheet(!!s); },
       onWarn: (m) => toast(m, true),
     });
     canvas.setErrors(check.errors);
@@ -287,6 +289,11 @@ export async function render(v, arg, c) {
     } else if (act === 'var-del') {
       cur.vars.splice(+el.closest('[data-var]').dataset.var, 1);
       paintPanel(); changed();
+    } else if (act === 'sheet-close') {
+      setSheet(false);
+    } else if (act === 'sheet-script') {
+      canvas.select(null);
+      setSheet(true);
     } else if (act === 'remove') {
       canvas.remove();
     } else if (act === 'run') {
@@ -303,6 +310,9 @@ export async function render(v, arg, c) {
     }
   });
 }
+
+// Phones: the properties panel is a sheet that slides up over the canvas (CSS does nothing with it on wide screens).
+const setSheet = (open) => $('.sc-body', view)?.classList.toggle('sheet-open', open);
 
 // A renamed variable is renamed in the blocks that use it as a target / Set variable too (not inside expressions or prompts).
 function renameOrSetVar(i, field, value) {

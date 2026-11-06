@@ -45,6 +45,7 @@ export function createCanvas(host, opts) {
         ${PALETTE.map((t) => `<div class="sc-pal-item" data-add="${t}"><i>${BLOCKS[t].icon}</i><div><b data-no-i18n>${BLOCKS[t].label}</b><small>${BLOCKS[t].hint}</small></div></div>`).join('')}
         <p class="sc-pal-tip">Drag a block onto the canvas, or tap it.</p></div>`}
       <div class="sc-menu" hidden></div>
+      <div class="sc-banner" hidden><span>Now tap the block this should lead to.</span> <button class="btn small" data-sc="cancel-link">Cancel</button></div>
     </div>`;
   const root = host.firstElementChild;
   const world = root.querySelector('.sc-world');
@@ -92,6 +93,7 @@ export function createCanvas(host, opts) {
     svg.innerHTML = html;
   }
   function render() {
+    root.querySelector('.sc-banner').hidden = !pending;
     nodesEl.innerHTML = script.nodes.map(nodeHTML).join('');
     nodesEl.querySelectorAll('.sc-node').forEach((el) => heights.set(el.dataset.node, el.offsetHeight));
     drawEdges();
@@ -110,6 +112,7 @@ export function createCanvas(host, opts) {
     const n = { id: newId(type), type, x: snap(x - NODE_W / 2), y: snap(y - 20), props: defaultProps(type) };
     script.nodes.push(n);
     sel = { kind: 'node', id: n.id };
+    if (root.clientWidth < 600) togglePalette(false);  // a phone: the palette would hide the new block
     changed();
     o.onSelect(sel);
   }
@@ -215,11 +218,22 @@ export function createCanvas(host, opts) {
     hideMenu();
     it?.run();
   });
+  let longPressAt = 0;
+  // When the finger of a long press lifts, the browser sends a click to the same spot, which is now under the menu:
+  // it would pick the first item at once. Swallow that one click.
+  let pressFired = false, swallowUntil = 0;
+  root.addEventListener('click', (e) => {
+    if (Date.now() < swallowUntil) { swallowUntil = 0; e.stopPropagation(); e.preventDefault(); }
+  }, true);
   root.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    if (Date.now() - longPressAt < 900) return;  // a touch browser's own long-press menu right after ours
+    openContext(e.target, e.clientX, e.clientY);
+  });
+  function openContext(target, cx, cy) {
     if (o.readOnly) return;
-    const w = toWorld(e.clientX, e.clientY);
-    const nodeEl = e.target.closest('[data-node]'), edgeEl = e.target.closest('[data-edge]');
+    const w = toWorld(cx, cy);
+    const nodeEl = target.closest('[data-node]'), edgeEl = target.closest('[data-edge]');
     const items = [];
     if (nodeEl) { select({ kind: 'node', id: nodeEl.dataset.node }); items.push({ id: 'del', label: 'Delete block', icon: '🗑', run: removeSelected }, null); }
     else if (edgeEl) { select({ kind: 'edge', index: +edgeEl.dataset.edge }); items.push({ id: 'del', label: 'Delete arrow', icon: '🗑', run: removeSelected }, null); }
@@ -227,20 +241,23 @@ export function createCanvas(host, opts) {
       if (t === 'start' && script.nodes.some((n) => n.type === 'start')) continue;
       items.push({ id: 'add-' + t, label: BLOCKS[t].label, name: true, icon: BLOCKS[t].icon, run: () => addNode(t, w.x, w.y) });
     }
-    showMenu(e.clientX, e.clientY, items);
-  });
+    showMenu(cx, cy, items);
+  }
 
   // ------------------------------------------------------------------ pointer
   const pointers = new Map();
-  let gesture = null;  // {kind: 'pan'|'move'|'link'|'pinch'|'pal', ...}
+  let gesture = null;  // {kind: 'pan'|'move'|'link'|'pinch'|'pal'|'edge', ...}
+  let pressTimer = 0;
+  const cancelPress = () => { clearTimeout(pressTimer); pressTimer = 0; };
   const temp = () => svg.querySelector('.sc-temp');
 
   root.addEventListener('pointerdown', (e) => {
     if (e.button === 2) return;
-    if (e.target.closest('.sc-tools, .sc-menu, .sc-pal-head, .sc-pal-tip')) return;
+    if (e.target.closest('.sc-tools, .sc-menu, .sc-pal-head, .sc-pal-tip, .sc-banner')) return;
     hideMenu();
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 2) {  // pinch: two fingers zoom and pan
+      cancelPress();
       const [a, b] = [...pointers.values()];
       gesture = { kind: 'pinch', d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
       return;
@@ -249,6 +266,25 @@ export function createCanvas(host, opts) {
     if (pal) { gesture = { kind: 'pal', type: pal.dataset.add, sx: e.clientX, sy: e.clientY, moved: false, ghost: null }; root.setPointerCapture(e.pointerId); return; }
     const out = e.target.closest('[data-out]'), inn = e.target.closest('[data-in]'), nodeEl = e.target.closest('[data-node]'), edgeEl = e.target.closest('[data-edge]');
     root.focus({ preventScroll: true });
+    // a finger from the left edge pulls the palette out (phones have no room for a button bar)
+    if (!o.readOnly && !nodeEl && !e.target.closest('.sc-palette') && e.clientX - root.getBoundingClientRect().left < 24) {
+      gesture = { kind: 'edge', sx: e.clientX, sy: e.clientY, moved: false };
+      root.setPointerCapture(e.pointerId);
+      return;
+    }
+    // touch has no right click: holding a finger still opens the same menu
+    if (e.pointerType !== 'mouse' && !o.readOnly && !out) {
+      const cx = e.clientX, cy = e.clientY, target = e.target;
+      cancelPress();
+      pressTimer = setTimeout(() => {
+        pressTimer = 0;
+        if (!gesture || gesture.moved || pointers.size !== 1) return;
+        gesture = null;
+        longPressAt = Date.now();
+        pressFired = true;
+        openContext(target, cx, cy);
+      }, 550);
+    }
     if (!o.readOnly && out) {
       gesture = { kind: 'link', from: nodeEl.dataset.node, port: out.dataset.out, sx: e.clientX, sy: e.clientY, moved: false };
     } else if (!o.readOnly && pending && (inn || nodeEl)) {  // tap-to-connect: the whole block is the target
@@ -284,8 +320,13 @@ export function createCanvas(host, opts) {
       return;
     }
     const dx = e.clientX - gesture.sx, dy = e.clientY - gesture.sy;
-    if (!gesture.moved && Math.hypot(dx, dy) < 4) return;
+    if (!gesture.moved && Math.hypot(dx, dy) < 6) return;
     gesture.moved = true;
+    cancelPress();
+    if (gesture.kind === 'edge') {
+      if (dx > 40) { togglePalette(true); gesture = null; }
+      return;
+    }
     if (gesture.kind === 'pan') { pan = { x: gesture.ox + dx, y: gesture.oy + dy }; applyView(); }
     else if (gesture.kind === 'move' && !o.readOnly) {
       const n = nodeById(gesture.id);
@@ -310,13 +351,15 @@ export function createCanvas(host, opts) {
     }
   });
   const endPointer = (e) => {
+    cancelPress();
+    if (pressFired) { pressFired = false; swallowUntil = Date.now() + 400; }  // the click of the lifting finger
     if (!pointers.has(e.pointerId)) return;
     pointers.delete(e.pointerId);
     const g = gesture;
     if (!g || (g.kind === 'pinch' && pointers.size)) return;
     gesture = null;
     if (g.kind === 'move' && g.moved) o.onChange(script);
-    if (g.kind === 'pan' && !g.moved && sel) select(null);
+    if ((g.kind === 'pan' || g.kind === 'edge') && !g.moved && sel) select(null);
     if (g.kind === 'link') {
       temp()?.setAttribute('d', '');
       if (!g.moved) { pending = { from: g.from, port: g.port }; render(); return; }  // tap: now tap an input
@@ -335,7 +378,7 @@ export function createCanvas(host, opts) {
     }
   };
   root.addEventListener('pointerup', endPointer);
-  root.addEventListener('pointercancel', (e) => { pointers.delete(e.pointerId); gesture?.ghost?.remove(); gesture = null; temp()?.setAttribute('d', ''); });
+  root.addEventListener('pointercancel', (e) => { cancelPress(); pointers.delete(e.pointerId); gesture?.ghost?.remove(); gesture = null; temp()?.setAttribute('d', ''); });
   root.addEventListener('wheel', (e) => { e.preventDefault(); zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1); }, { passive: false });
   root.addEventListener('keydown', (e) => {
     if (e.target !== root) return;
@@ -352,6 +395,7 @@ export function createCanvas(host, opts) {
     else if (b.dataset.sc === 'tidy') tidy();
     else if (b.dataset.sc === 'palette') togglePalette();
   });
+  root.querySelector('.sc-banner').addEventListener('click', (e) => { if (e.target.closest('[data-sc=cancel-link]')) { pending = null; render(); } });
   const togglePalette = (open) => root.querySelector('.sc-palette')?.classList.toggle('open', open);
   root.querySelector('.sc-pal-head')?.addEventListener('click', (e) => { if (e.target.closest('[data-sc]')) togglePalette(false); });
 
