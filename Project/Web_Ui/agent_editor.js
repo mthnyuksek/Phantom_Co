@@ -78,7 +78,11 @@ export function openAgentModal(agent, tpl) {
       const svc = (S.state.providers.find((p) => p.id === 'opencode')?.services || []).find((v) => v.id === accountById(acc)?.service);
       q('#f-model').placeholder = svc ? svc.model : t('e.g. lmstudio/<model> or ollama/<model>');
       const fill = () => {
-        list.innerHTML = [...(ocModels?.local || []).map((m) => [m.id, m.server]), ...(ocModels?.services || []).map((v) => [v.model, v.label + ' (API key)'])]
+        // Local models, each service's default, then the full list of the account's service (Auto: of every service).
+        const all = ocModels?.services || [], seen = new Set();
+        list.innerHTML = [...(ocModels?.local || []).map((m) => [m.id, m.server]), ...all.map((v) => [v.model, v.label + ' (API key)']),
+          ...all.filter((v) => !svc || v.id === svc.id).flatMap((v) => (v.models || []).map((id) => [id, v.label]))]
+          .filter(([id]) => !seen.has(id) && seen.add(id))
           .map(([id, label]) => `<option value="${esc(id)}">${esc(label)}</option>`).join('');
       };
       if (ocModels) fill();

@@ -245,6 +245,15 @@ def main():
         check("opencode agent with an account", owner.put("/api/agents/" + ob["id"], {"provider": "opencode#" + oa["id"]})[0] == 200)
         os_ = [a for a in owner.get("/api/accounts/status")[1]["accounts"] if a["id"] == oa["id"]][0]["status"]
         check("fake nvidia key not accepted", os_["signed_in"] is False and os_["error"] in ("key_rejected", "unreachable"), os_)
+        # any model of the service runs, also one written without its maker: the short name is completed from NVIDIA's public
+        # list and the run's config names the model, so the request reaches NVIDIA (fake key: 403) instead of a bare UnknownError
+        if shutil.which("opencode"):
+            owner.put("/api/agents/" + ob["id"], {"model": "nvidia/minimax-m3.1-flash"})
+            st, och = owner.post("/api/chats", {"agent_id": ob["id"]})
+            owner.post(f"/api/chats/{och['meta']['id']}/send", {"text": "hi"})
+            v = owner.wait_idle(och["meta"]["id"], 120)
+            texts = v and [m["text"] for m in v["messages"]]
+            check("nvidia model by short name reaches the service", texts and any("refused the API key (403" in t for t in texts), texts)
         owner.delete("/api/accounts/" + oa["id"])
         # other model services: picked in Settings (keys without a telling prefix need it), prefixes checked
         st, og = owner.post("/api/accounts", {"provider": "opencode", "name": "Groq", "kind": "api_key", "service": "groq", "key": "gsk_PhantomTest" + "x" * 24})
@@ -261,6 +270,8 @@ def main():
         check("unknown service refused", owner.post("/api/accounts", {"provider": "opencode", "name": "X", "kind": "api_key", "service": "nope", "key": "sk-PhantomTest" + "x" * 24})[0] == 400)
         st, om = owner.get("/api/opencode/models")
         check("opencode model suggestions", st == 200 and isinstance(om["local"], list) and any(v["id"] == "nvidia" for v in om["services"]), om)
+        nv = [v for v in om["services"] if v["id"] == "nvidia"][0]
+        check("nvidia model list (public)", "nvidia/minimaxai/minimax-m3.1-flash" in nv["models"] and not any("embed" in m for m in nv["models"]), nv["models"][:5])
         oc_state = [p for p in owner.get("/api/state")[1]["providers"] if p["id"] == "opencode"][0]
         check("opencode services in the state", [v["id"] for v in oc_state["services"]][:3] == ["nvidia", "openrouter", "groq"], oc_state)
         # an OpenCode ghost on Auto without a model (and no key in the environment) stops with a clear word

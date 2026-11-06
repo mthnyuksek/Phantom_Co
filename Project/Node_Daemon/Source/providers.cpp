@@ -3,7 +3,11 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <ctime>
+#include <map>
+#include <mutex>
 
 #include "http_client.hpp"
 
@@ -45,12 +49,12 @@ const std::vector<OpenCodeService>& opencode_services() {
     // A new service is one line: OpenCode's provider id (models.dev), its key variable, a tool-calling default model and a
     // URL that answers 401 for a wrong key. Checked 2026-11-06 with OpenCode 1.19.5.
     static const std::vector<OpenCodeService> list = {
-        {"nvidia", "NVIDIA", "nvapi-", "NVIDIA_API_KEY", "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b", ""},
-        {"openrouter", "OpenRouter", "sk-or-", "OPENROUTER_API_KEY", "openrouter/nvidia/nemotron-3.5-lightning:free", "https://openrouter.ai/api/v1/key"},
-        {"groq", "Groq", "gsk_", "GROQ_API_KEY", "groq/openai/gpt-oss-120b", "https://api.groq.com/openai/v1/models"},
-        {"cerebras", "Cerebras", "csk-", "CEREBRAS_API_KEY", "cerebras/gpt-oss-120b", "https://api.cerebras.ai/v1/models"},
-        {"deepseek", "DeepSeek", "", "DEEPSEEK_API_KEY", "deepseek/deepseek-v4-flash", "https://api.deepseek.com/models"},
-        {"mistral", "Mistral", "", "MISTRAL_API_KEY", "mistral/mistral-medium-2508", "https://api.mistral.ai/v1/models"},
+        {"nvidia", "NVIDIA", "nvapi-", "NVIDIA_API_KEY", "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b", "", "https://integrate.api.nvidia.com/v1/models"},
+        {"openrouter", "OpenRouter", "sk-or-", "OPENROUTER_API_KEY", "openrouter/nvidia/nemotron-3.5-lightning:free", "https://openrouter.ai/api/v1/key", "https://openrouter.ai/api/v1/models"},
+        {"groq", "Groq", "gsk_", "GROQ_API_KEY", "groq/openai/gpt-oss-120b", "https://api.groq.com/openai/v1/models", ""},
+        {"cerebras", "Cerebras", "csk-", "CEREBRAS_API_KEY", "cerebras/gpt-oss-120b", "https://api.cerebras.ai/v1/models", ""},
+        {"deepseek", "DeepSeek", "", "DEEPSEEK_API_KEY", "deepseek/deepseek-v4-flash", "https://api.deepseek.com/models", ""},
+        {"mistral", "Mistral", "", "MISTRAL_API_KEY", "mistral/mistral-medium-2508", "https://api.mistral.ai/v1/models", ""},
     };
     return list;
 }
@@ -77,6 +81,65 @@ json opencode_local_models() {
             }
     }
     return out;
+}
+std::vector<std::string> opencode_service_models(const OpenCodeService& s) {
+    if (!*s.models) return {};
+    struct Entry { std::vector<std::string> ids; std::chrono::steady_clock::time_point at; bool ok = false; };
+    static std::mutex mu;
+    static std::map<std::string, Entry> cache;
+    const auto now = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        auto it = cache.find(s.id);  // a list that failed is asked again after a minute
+        if (it != cache.end() && now - it->second.at < (it->second.ok ? std::chrono::minutes(10) : std::chrono::minutes(1))) return it->second.ids;
+    }
+    const std::string url = s.models;
+    const size_t cut = url.find('/', url.find("://") + 3);
+    Entry e;
+    e.at = now;
+    HttpClient http(url.substr(0, cut), 3000, 8000);
+    auto r = http.Get(url.substr(cut));
+    const json j = r && r->status == 200 ? json::parse(r->body, nullptr, false) : json();
+    if (j.is_object() && j.contains("data") && j["data"].is_array()) {
+        e.ok = true;
+        // Models that cannot chat (embeddings, rerankers, guards, images, speech) are left out of the list.
+        static const char* skip[] = {"embed", "rerank", "reward", "guard", "safety", "parse", "clip", "retriever", "detector",
+                                     "calibration", "deplot", "whisper", "tts", "flux", "image"};
+        for (auto& m : j["data"]) {
+            if (!m.is_object() || !m.contains("id") || !m["id"].is_string()) continue;
+            const std::string id = m["id"];
+            std::string low = id;
+            std::transform(low.begin(), low.end(), low.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+            if (std::any_of(std::begin(skip), std::end(skip), [&](const char* w) { return low.find(w) != std::string::npos; })) continue;
+            // OpenRouter says what a model supports: ghosts need tool calls.
+            if (m.contains("supported_parameters") && m["supported_parameters"].is_array()) {
+                const auto& sp = m["supported_parameters"];
+                if (std::find(sp.begin(), sp.end(), json("tools")) == sp.end()) continue;
+            }
+            e.ids.push_back(std::string(s.id) + "/" + id);
+        }
+        std::sort(e.ids.begin(), e.ids.end());
+    }
+    std::lock_guard<std::mutex> lock(mu);
+    cache[s.id] = e;
+    return e.ids;
+}
+std::string opencode_full_model(const std::string& model) {
+    const size_t slash = model.find('/');
+    if (slash == std::string::npos || model.find('/', slash + 1) != std::string::npos) return model;  // has its maker already
+    const OpenCodeService* s = opencode_service(model.substr(0, slash));
+    if (!s) return model;
+    auto lower = [](std::string v) { std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return (char)std::tolower(c); }); return v; };
+    const std::string want = "/" + lower(model.substr(slash + 1));
+    std::string found;
+    for (auto& id : opencode_service_models(*s)) {
+        const std::string l = lower(id);
+        if (l.size() > want.size() && l.compare(l.size() - want.size(), want.size(), want) == 0) {
+            if (!found.empty()) return model;  // two makers have a model of that name: the ghost has to say which one
+            found = id;
+        }
+    }
+    return found.empty() ? model : found;
 }
 const OpenCodeService* opencode_service_for_key(const std::string& key) {
     for (auto& s : opencode_services()) if (*s.prefix && key.rfind(s.prefix, 0) == 0) return &s;
@@ -250,6 +313,14 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
         }
         // A local model server: OpenCode knows the model only when the config lists it (no key is needed).
         json provider = json::object();
+        // A model service: OpenCode refuses a model its own list (models.dev, older in an older OpenCode) does not have yet,
+        // with a bare "UnknownError" and no request. Naming the model in the config lets every model of the service run
+        // (OpenCode lays these fields over what its list knows about the model).
+        for (auto& s : opencode_services()) {
+            const std::string pre = std::string(s.id) + "/";
+            if (rs.model.rfind(pre, 0) != 0 || rs.model.size() == pre.size()) continue;
+            provider[s.id] = {{"models", {{rs.model.substr(pre.size()), {{"tool_call", true}}}}}};
+        }
         for (auto& l : opencode_locals()) {
             const std::string pre = std::string(l.id) + "/";
             if (rs.model.rfind(pre, 0) != 0 || rs.model.size() == pre.size()) continue;
@@ -465,8 +536,12 @@ static std::string opencode_error(const json& e) {
         return "The model service says the quota is used up or the requests come too fast (429). Wait a little and try again, or write another model in the ghost's Model field.";
     if (code == 401 || code == 403)
         return "The model service refused the API key (" + std::to_string(code) + (detail.empty() ? "" : ": " + truncate_utf8(detail, 200)) + ").";
+    if (code == 404)
+        return "The model service does not know this model (404). Check the ghost's Model field: pick a model from its list, "
+               "e.g. nvidia/minimaxai/minimax-m3.1-flash (service/maker/model).";
     if (e.is_object() && e.value("name", "") == "UnknownError")
-        return truncate_utf8(m, 300) + " (Is the ghost's Model field right? OpenCode models look like service/model, e.g. nvidia/nvidia/nemotron-3.5-lightning-30b-a3b.)";
+        return "OpenCode could not start the model (" + truncate_utf8(m, 200) + "). Check the ghost's Model field: OpenCode models look like "
+               "service/maker/model, e.g. nvidia/minimaxai/minimax-m3.1-flash, or lmstudio/<model> for a local server.";
     if (code && !detail.empty()) return "The model service answered " + std::to_string(code) + ": " + truncate_utf8(detail, 300);
     return m.empty() ? "The run failed." : truncate_utf8(m, 400);
 }

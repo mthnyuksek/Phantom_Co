@@ -481,6 +481,8 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
             return;
         }
     }
+    // A model service's model written without its maker ("nvidia/minimax-m3.1-flash") gets it from the service's list.
+    if (spec.provider == "opencode") spec.model = opencode_full_model(spec.model);
 
     if (spec.provider == "demo") {
         o = run_demo(js, ctx, U8(workdir), spec.system_prompt);

@@ -53,8 +53,9 @@ const done = new Set();  // everything this module produced (so the checker belo
 export const t = (en) => translate(en);
 
 // ---- the screen
-const SKIP = 'script,style,textarea,input,pre,code,.bubble,.think,[data-no-i18n]';
-const SKIP_ALL = 'script,style,pre,code,.bubble,.think,[data-no-i18n]';  // not even the attributes
+// Chat text is never translated; the live "is working…" bubble (.typing) is ours, its tool lines carry data-no-i18n.
+const SKIP = 'script,style,textarea,input,pre,code,.bubble:not(.typing),.think,[data-no-i18n]';
+const SKIP_ALL = 'script,style,pre,code,.bubble:not(.typing),.think,[data-no-i18n]';  // not even the attributes
 const FIELDS = 'textarea,input';  // what people typed is left alone, but their placeholder/title is translated
 const ATTRS = ['placeholder', 'title', 'aria-label', 'alt'];
 

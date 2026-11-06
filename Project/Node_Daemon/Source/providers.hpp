@@ -66,10 +66,16 @@ struct OpenCodeService {
     const char* env;         // environment variable OpenCode reads the key from
     const char* model;       // default model
     const char* check;       // key check: GET this URL with "Authorization: Bearer <key>" (401/403 = rejected); "" = NVIDIA's 1-token chat
+    const char* models;      // public model list (OpenAI style, no key needed) for the editor and short names; "" = none
 };
 const OpenCodeService* opencode_service_for_key(const std::string& key);  // nullptr = no service has this key's prefix
 const OpenCodeService* opencode_service(const std::string& id);
 const std::vector<OpenCodeService>& opencode_services();
+// Chat models of a service's public list as "<service>/<model>" (kept 10 minutes; empty when the list cannot be read).
+std::vector<std::string> opencode_service_models(const OpenCodeService& s);
+// "nvidia/minimax-m3.1-flash" -> "nvidia/minimaxai/minimax-m3.1-flash": a model name without its maker is looked up in the
+// service's list (one match only). Anything else comes back unchanged.
+std::string opencode_full_model(const std::string& model);
 
 struct OpenCodeLocal {
     const char* id;          // model prefix and OpenCode provider id: "lmstudio" | "ollama"

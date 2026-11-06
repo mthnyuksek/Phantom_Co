@@ -123,6 +123,7 @@ export const EXACT = {
   'You can read this conversation but not write in it.': 'Bu konuşmayı okuyabilirsin ama yazamazsın.',
   'This conversation is read-only for you.': 'Bu konuşma senin için salt okunur.',
   'The agent is working… you can write again when it is done.': 'Ajan çalışıyor… bitince yine yazabilirsin.',
+  'is working…': 'çalışıyor…', 'is waiting in line…': 'sırada bekliyor…',
   'Enter sends, Shift+Enter adds a line.': 'Enter gönderir, Shift+Enter yeni satır ekler.',
 
   // ---- projects
@@ -551,6 +552,7 @@ export const EXACT = {
 };
 
 export const PATTERNS = [
+  ['New chat with {}', '{0} ile yeni sohbet'],  // the server's default chat title (until the first answer names the chat)
   ['🧩 {} wrote the script "{}". It is a draft in Scripts: check it there and press Run.', '🧩 {0}, "{1}" betiğini yazdı. Betikler’de taslak olarak duruyor: orada kontrol et ve Çalıştır’a bas.'],
   ['🧩 {} wrote the script "{}". It is a draft in Scripts: check it there and press Run. It has {#} problem(s); {} was asked to fix them.', '🧩 {0}, "{1}" betiğini yazdı. Betikler’de taslak olarak duruyor: orada kontrol et ve Çalıştır’a bas. {2} sorunu var; {3} düzeltmesi istendi.'],
   ['⚠ {} wrote a script, but has no Visual scripts skill: it was not saved.', '⚠ {0} bir betik yazdı ama Görsel betikler yeteneği yok: kaydedilmedi.'],

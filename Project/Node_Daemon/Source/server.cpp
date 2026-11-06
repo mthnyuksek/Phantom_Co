@@ -741,7 +741,8 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
     // OpenCode models for the ghost editor: what the local servers (LM Studio, Ollama) offer now, and each service's default.
     add("GET", "/api/opencode/models", kEditor, [&](auto&, auto& res, Ctx&) {
         json services = json::array();
-        for (auto& s : opencode_services()) services.push_back({{"id", s.id}, {"label", s.label}, {"model", s.model}});
+        for (auto& s : opencode_services())  // + the service's public model list (NVIDIA, OpenRouter), when it has one
+            services.push_back({{"id", s.id}, {"label", s.label}, {"model", s.model}, {"models", opencode_service_models(s)}});
         send(res, {{"local", opencode_local_models()}, {"services", services}});
     });
     // Opens the CLI's own sign-in in a console window on this PC (it shows a browser page): only for the person at this PC.
