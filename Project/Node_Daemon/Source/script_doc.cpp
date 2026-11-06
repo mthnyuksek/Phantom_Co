@@ -10,7 +10,7 @@ namespace pc2::script {
 
 namespace {
 
-const std::set<std::string> kNodeTypes = {"start", "prompt", "set", "if", "delay", "end"};
+const std::set<std::string> kNodeTypes = {"start", "prompt", "set", "if", "delay", "do", "end"};
 const std::set<std::string> kReserved = {"and", "or", "not", "true", "false", "abs", "round", "min", "max"};
 
 std::string str(const json& j, const char* key, size_t max, const std::string& fallback = "") {
@@ -46,6 +46,7 @@ json clean_props(const std::string& type, const json& p) {
                 {"text", str(p, "text", 20000)}, {"target", str(p, "target", 32)}};
     if (type == "set") return {{"var", str(p, "var", 32)}, {"expr", str(p, "expr", 4000)}};
     if (type == "if") return {{"expr", str(p, "expr", 4000)}};
+    if (type == "do") return {{"count", str(p, "count", 4000, "3")}, {"var", str(p, "var", 32)}};
     if (type == "delay") {
         std::string mode = str(p, "mode", 8, "for");
         return {{"mode", mode == "until" ? "until" : "for"}, {"expr", str(p, "expr", 4000)}};
@@ -116,6 +117,21 @@ std::optional<json> clean_script(const json& in, json base, std::string& err) {
     }
     if (!base.contains("edges")) base["edges"] = json::array();
     return base;
+}
+
+std::set<std::string> loop_body(const json& s, const std::string& do_id) {
+    std::set<std::string> body;
+    std::vector<std::string> stack;
+    const json edges = s.value("edges", json::array());
+    for (const json& e : edges)
+        if (e.value("from", "") == do_id && e.value("port", "out") == "loop" && body.insert(e.value("to", "")).second) stack.push_back(e.value("to", ""));
+    while (!stack.empty()) {
+        std::string id = stack.back();
+        stack.pop_back();
+        for (const json& e : edges)
+            if (e.value("from", "") == id && e.value("to", "") != do_id && body.insert(e.value("to", "")).second) stack.push_back(e.value("to", ""));
+    }
+    return body;
 }
 
 std::vector<std::string> text_placeholders(const std::string& text) {
@@ -226,6 +242,21 @@ json check_script(const json& s, const ScriptLookup& lookup) {
         } else if (type == "delay") {
             bool until = p.value("mode", "for") == "until";
             check_expr_at(where, p.value("expr", ""), until ? Type::Time : Type::Number, until ? "The time" : "The minutes");
+        } else if (type == "do") {
+            json w = where;
+            w["field"] = "count";
+            std::string src = p.value("count", "");
+            if (src.empty()) add("The number of rounds is empty.", w);
+            else try {
+                Type t = check_expr(parse_expr(src), env);
+                if (t != Type::Number) add(std::string("The number of rounds must give a Number, it gives a ") + type_name(t) + ".", w);
+            } catch (const ScriptError& e) {
+                if (e.pos != std::string::npos) w["pos"] = e.pos;
+                add(e.what(), w);
+            }
+            std::string var = p.value("var", "");
+            if (!var.empty() && writable(var, where, "var") && env[var] != Type::Number)
+                add("The round counter must be a Number variable.", {{"node", id}, {"field", "var"}});
         }
     }
     if (starts == 0) add("The script needs a Start block.");
@@ -242,7 +273,9 @@ json check_script(const json& s, const ScriptLookup& lookup) {
         json where = {{"edge", idx++}};
         if (!type_of.count(from) || !type_of.count(to)) { add("An arrow points to a missing block.", where); continue; }
         const std::string& ft = type_of[from];
-        bool port_ok = ft == "if" ? (port == "true" || port == "false") : (port == "out" && ft != "end");
+        bool port_ok = ft == "if" ? (port == "true" || port == "false")
+                     : ft == "do" ? (port == "loop" || port == "then")
+                     : (port == "out" && ft != "end");
         if (!port_ok) { add("Block '" + from + "' has no output '" + port + "'.", where); continue; }
         if (type_of[to] == "start") { add("Nothing can point to the Start block.", where); continue; }
         if (from == to) { add("A block cannot point to itself.", where); continue; }
@@ -275,6 +308,22 @@ json check_script(const json& s, const ScriptLookup& lookup) {
         }
         for (auto& [id, t] : type_of)
             if (!reach.count(id)) add("This block is not connected to Start, it would never run.", {{"node", id}});
+    }
+
+    // Do N: the loop part is everything reached from the loop output; it is started again every round, so nothing
+    // from outside may lead into it (that block would not know which round it belongs to).
+    if (done == d.size()) {
+        for (auto& [id, t] : type_of) {
+            if (t != "do") continue;
+            std::set<std::string> body = loop_body(s, id);
+            if (body.empty()) { add("Connect the blocks to repeat to the loop output.", {{"node", id}}); continue; }
+            for (const json& e : s.value("edges", json::array())) {
+                std::string from = e.value("from", ""), to = e.value("to", "");
+                if (!body.count(to) || body.count(from)) continue;
+                if (from == id && e.value("port", "out") == "loop") continue;
+                add("This block is inside the loop of '" + id + "', but an arrow from outside the loop leads to it.", {{"node", to}});
+            }
+        }
     }
 
     return {{"errors", errors}, {"prompt_count", prompts}};

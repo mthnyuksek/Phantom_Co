@@ -10,11 +10,12 @@ export const BLOCKS = {
   set: { icon: '🧮', label: 'Set variable', hint: 'Give a variable a new value', outs: ['out'], hasIn: true },
   if: { icon: '🔀', label: 'If', hint: 'Go on by a yes / no question', outs: ['true', 'false'], hasIn: true },
   delay: { icon: '⏳', label: 'Delay', hint: 'Wait some minutes or until a time', outs: ['out'], hasIn: true },
+  do: { icon: '🔁', label: 'Do N', hint: 'Repeat the loop part N times, then go on', outs: ['loop', 'then'], hasIn: true },
   end: { icon: '⏹', label: 'End', hint: 'The run stops here', outs: [], hasIn: true },
 };
-const PALETTE = ['prompt', 'set', 'if', 'delay', 'end', 'start'];
+const PALETTE = ['prompt', 'set', 'if', 'delay', 'do', 'end', 'start'];
 const NODE_W = 210, GRID = 20, MIN_ZOOM = 0.25, MAX_ZOOM = 2;
-const PORT_LABEL = { true: 'yes', false: 'no' };
+const PORT_LABEL = { true: 'yes', false: 'no', loop: 'loop', then: 'then' };
 
 const snap = (v) => Math.round(v / GRID) * GRID;
 const outX = (type, port) => {
@@ -85,7 +86,7 @@ export function createCanvas(host, opts) {
       if (!a || !b) return;
       const d = curve(portOut(a, e.port || 'out'), portIn(b));
       const on = sel?.kind === 'edge' && sel.index === i;
-      const cls = e.port === 'true' ? 'yes' : e.port === 'false' ? 'no' : '';
+      const cls = e.port === 'true' ? 'yes' : e.port === 'false' ? 'no' : e.port === 'loop' ? 'loop' : '';
       const st = edgeStates[i] === 'fired' ? 'lit' : edgeStates[i] === 'skipped' ? 'dim' : '';
       html += `<path class="sc-edge ${cls} ${on ? 'sel' : ''} ${st}" d="${d}"/><path class="sc-hit" data-edge="${i}" d="${d}"/>`;
     });
@@ -121,6 +122,7 @@ export function createCanvas(host, opts) {
     if (type === 'set') return { var: '', expr: '' };
     if (type === 'if') return { expr: '' };
     if (type === 'delay') return { mode: 'for', expr: '30' };
+    if (type === 'do') return { count: '3', var: '' };
     return {};
   }
   function removeSelected() {

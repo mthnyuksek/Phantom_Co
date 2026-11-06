@@ -393,6 +393,81 @@ def run_tests(exe, vault, data, procs, owner, ece, vera):
     ece.post("/api/scripts/agent_draft/run")
     check("running a draft makes it a normal script", ece.get("/api/scripts/agent_draft")[1].get("draft") is False)
 
+    # 7a. Do N: the loop part runs N times, then "then"; End is like return
+    def SET(id, var, expr):
+        return {"id": id, "type": "set", "props": {"var": var, "expr": expr}}
+
+    def DO(id, count, var=""):
+        return {"id": id, "type": "do", "props": {"count": count, "var": var}}
+
+    sc = chain("Rounds", [START, DO("d", "4", "i"), SET("add", "sum", "sum + i"), SET("after", "done_at", "sum * 10"), END],
+               edges=[{"from": "s", "to": "d"}, {"from": "d", "port": "loop", "to": "add"}, {"from": "d", "port": "then", "to": "after"}, {"from": "after", "to": "e"}],
+               vars=[{"name": "i", "type": "Number"}, {"name": "sum", "type": "Number"}, {"name": "done_at", "type": "Number"}])
+    st, r = make_and_run(ece, sc)
+    r = wait_run(ece, r["id"])
+    check("Do N repeats the loop part N times", r and r["status"] == "done" and r["vars"]["sum"]["value"] == 1000, r and (r["status"], r.get("error"), r["vars"]))
+    check("the round counter counts 1..N", r and r["vars"]["i"]["value"] == 400, r and r["vars"])
+    check("then runs once after all rounds", r and r["vars"]["done_at"]["value"] == 10000 and node_state(r, "after") == "done", r and r["vars"])
+    check("rounds noted in the events", r and sum(1 for e in r["events"] if "Round" in e.get("text", "")) == 4)
+
+    sc["name"] = "Zero rounds"
+    sc["nodes"][1] = DO("d", "0", "i")
+    st, r = make_and_run(ece, sc)
+    r = wait_run(ece, r["id"])
+    check("0 rounds: straight to then", r and r["status"] == "done" and r["vars"]["sum"]["value"] == 0 and node_state(r, "add") == "skipped"
+          and node_state(r, "after") == "done", r and (r["status"], r["nodes"]))
+
+    st, r = make_and_run(ece, chain("Prompt rounds", [START, DO("d", "2"), P("p", "quill", "again"), END],
+                                    edges=[{"from": "s", "to": "d"}, {"from": "d", "port": "loop", "to": "p"}, {"from": "d", "port": "then", "to": "e"}]))
+    r = wait_run(ece, r["id"])
+    check("a ghost in a loop works every round", r and r["status"] == "done" and len(r["nodes"]["p"].get("runs", [])) == 2, r and r["nodes"]["p"])
+
+    sc = chain("Return", [START, DO("d", "5", "i"), {"id": "c", "type": "if", "props": {"expr": "i == 2"}}, END, SET("cnt", "c", "c + 1"), SET("after", "reached", "true")],
+               edges=[{"from": "s", "to": "d"}, {"from": "d", "port": "loop", "to": "c"}, {"from": "c", "port": "true", "to": "e"},
+                      {"from": "c", "port": "false", "to": "cnt"}, {"from": "d", "port": "then", "to": "after"}],
+               vars=[{"name": "i", "type": "Number"}, {"name": "c", "type": "Number"}, {"name": "reached", "type": "Bool"}])
+    st, r = make_and_run(ece, sc)
+    r = wait_run(ece, r["id"])
+    check("End inside a loop ends the run like return", r and r["status"] == "done" and r["vars"]["c"]["value"] == 100
+          and r["vars"]["reached"]["value"] is False and node_state(r, "after") != "done", r and (r["status"], r["vars"], r["nodes"]))
+
+    sc = chain("Nested", [START, DO("outer", "2"), DO("inner", "3"), SET("k1", "k", "k + 1"), END],
+               edges=[{"from": "s", "to": "outer"}, {"from": "outer", "port": "loop", "to": "inner"}, {"from": "inner", "port": "loop", "to": "k1"},
+                      {"from": "outer", "port": "then", "to": "e"}],
+               vars=[{"name": "k", "type": "Number"}])
+    st, r = make_and_run(ece, sc)
+    r = wait_run(ece, r["id"])
+    check("loops inside loops", r and r["status"] == "done" and r["vars"]["k"]["value"] == 600, r and (r["status"], r.get("error"), r["vars"]))
+
+    st, r = make_and_run(ece, chain("End stops all", [START, {"id": "w", "type": "delay", "props": {"mode": "for", "expr": "300"}}, END],
+                                    edges=[{"from": "s", "to": "w"}, {"from": "s", "to": "e"}]))
+    r = wait_run(ece, r["id"], timeout=10)
+    check("End stops blocks still working", r and r["status"] == "done" and node_state(r, "w") == "stopped", r and (r["status"], r["nodes"]))
+
+    st, r = make_and_run(ece, chain("Too many", [START, DO("d", "1000"), SET("a", "x", "1"), END],
+                                    edges=[{"from": "s", "to": "d"}, {"from": "d", "port": "loop", "to": "a"}, {"from": "d", "port": "then", "to": "e"}],
+                                    vars=[{"name": "x", "type": "Number"}]))
+    r = wait_run(ece, r["id"])
+    check("more than 100 rounds refused", r and r["status"] == "failed" and "between 0 and 100" in r.get("error", ""), r and r.get("error"))
+
+    def do_problems(name, nodes, edges, want, vars=()):
+        st, r = ece.post("/api/scripts/validate", chain(name, nodes, edges=edges, vars=list(vars)))
+        msgs = errors_of(r) if st == 200 else []
+        check("Do N check: " + name, any(want in m for m in msgs), msgs or r)
+
+    do_problems("loop output unconnected", [START, DO("d", "2"), END], [{"from": "s", "to": "d"}, {"from": "d", "port": "then", "to": "e"}], "loop output")
+    do_problems("arrow into the loop from outside", [START, DO("d", "2"), SET("a", "x", "1"), END],
+                [{"from": "s", "to": "d"}, {"from": "d", "port": "loop", "to": "a"}, {"from": "s", "to": "a"}, {"from": "d", "port": "then", "to": "e"}],
+                "from outside the loop", [{"name": "x", "type": "Number"}])
+    do_problems("count must be a Number", [START, DO("d", "now_time"), SET("a", "x", "1"), END],
+                [{"from": "s", "to": "d"}, {"from": "d", "port": "loop", "to": "a"}, {"from": "d", "port": "then", "to": "e"}],
+                "must give a Number", [{"name": "x", "type": "Number"}])
+    do_problems("counter must be a Number variable", [START, DO("d", "2", "t"), SET("a", "x", "1"), END],
+                [{"from": "s", "to": "d"}, {"from": "d", "port": "loop", "to": "a"}, {"from": "d", "port": "then", "to": "e"}],
+                "round counter", [{"name": "x", "type": "Number"}, {"name": "t", "type": "Time"}])
+    do_problems("Do N has no out port", [START, DO("d", "2"), SET("a", "x", "1"), END],
+                [{"from": "s", "to": "d"}, {"from": "d", "to": "a"}, {"from": "d", "port": "then", "to": "e"}], "no output", [{"name": "x", "type": "Number"}])
+
     # 7b. ghosts write scripts (<script> in their answer): drafts in the asker's name, problems go back to the ghost
     owner.post("/api/agents", {"name": "Scribe", "provider": "demo", "skills": ["visual_scripts"]})
     check("Visual scripts skill installed by default", os.path.exists(os.path.join(vault, "Skills", "visual_scripts.md")))

@@ -31,6 +31,7 @@ function summary(n) {
   if (n.type === 'set') return `<code>${esc(p.var || '?')} = ${esc(p.expr || '?')}</code>`;
   if (n.type === 'if') return `<code>${esc(p.expr || '?')}</code>`;
   if (n.type === 'delay') return p.mode === 'until' ? `<span>until</span> <code>${esc(p.expr || '?')}</code>` : `<code>${esc(p.expr || '?')}</code> <span>min</span>`;
+  if (n.type === 'do') return `<code>${esc(p.count || '?')}</code> <span>times</span>${p.var ? ` <span class="sc-var">→ ${raw(esc(p.var))}</span>` : ''}`;
   return '';
 }
 
@@ -135,7 +136,11 @@ function nodePanel(n) {
   const p = n.props || {};
   let fields = '';
   if (n.type === 'start') fields = '<p class="muted small">The run begins here when someone presses Run.</p>';
-  else if (n.type === 'end') fields = '<p class="muted small">Nothing comes after this block. A run also ends by itself when no block is left.</p>';
+  else if (n.type === 'end') fields = '<p class="muted small">The run is done as soon as it gets here, like return: blocks still working are stopped. A run also ends by itself when no block is left.</p>';
+  else if (n.type === 'do') fields = `
+    <label>How many rounds</label><input type="text" data-pf="count" value="${esc(p.count)}" placeholder="3" ${dis()} data-no-i18n>
+    <label>Round counter (1, 2, 3…)</label><select data-pf="var" ${dis()}>${varOptions(p.var, { none: true })}</select>
+    <p class="muted small">The blocks after "loop" run again every round; when all rounds are done, "then" goes on. An End inside the loop ends the whole run. At most 100 rounds.</p>`;
   else if (n.type === 'prompt') fields = `
     <label>Ghost</label><select data-pf="agent_id" ${dis()}>${agentOptions(p.agent_id)}</select>
     <label>Project</label><select data-pf="project_id" ${dis()}>${projectOptions(p.project_id, '— the script\'s default —')}</select>

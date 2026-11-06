@@ -27,9 +27,10 @@ Blocks (`type`):
 - `set`: `{"var": "score", "expr": "score + 1"}`.
 - `if`: `{"expr": "..."}` must give true/false; arrows leave it with `"port": "true"` or `"port": "false"`.
 - `delay`: `{"mode": "for", "expr": "30"}` (minutes) or `{"mode": "until", "expr": "16:00"}`.
-- `end`: optional; nothing comes after it.
+- `do`: `{"count": "3", "var": "i"}` repeats the blocks after its `"port": "loop"` arrow `count` times (0-100; `var` = optional Number variable that gets 1, 2, 3…), then goes on through `"port": "then"`. Nothing from outside the loop may point into the loop part.
+- `end`: optional; the run is done as soon as it gets here, like return (also inside a loop); blocks still working are stopped.
 
-Arrows go from a block's output to the next block (`port` is `"out"` except for if). One block may lead to several: they run at the same time. A block with several arrows coming in waits for all of them. **No loops**: arrows must never lead back up. Every block must be reachable from start. Place blocks top to bottom (y grows by ~140 per step, side branches at x ±220).
+Arrows go from a block's output to the next block (`port` is `"out"` except for if and do). One block may lead to several: they run at the same time. A block with several arrows coming in waits for all of them. **No loops made of arrows**: arrows must never lead back up; repeat with a `do` block instead. Every block must be reachable from start. Place blocks top to bottom (y grows by ~140 per step, side branches at x ±220).
 
 Types and values (values in the file are texts): `Number` with up to 2 decimals ("56.00", "3"), `Time` "16:00", `Date` "2026-11-16", `Bool` "true"/"false", `Text` (any text). Variable names: letters, digits and _ (not and, or, not, true, false, abs, round, min, max).
 Expressions: + - * / % on Numbers; Time ± Number = minutes, Date ± Number = days, Time - Time and Date - Date give a Number; compare with < <= > >= == != (same types only; Bool only == !=); join with and, or, not; abs(), round(), min(a, b), max(a, b). Texts in quotes: "done". No automatic conversions: `now_time < 16` is wrong, `now_time < 16:00` is right.

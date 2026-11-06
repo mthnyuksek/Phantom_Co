@@ -3,6 +3,7 @@
 // Format: Development/Docs/visual_scripts.md.
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 
 #include "script_expr.hpp"
@@ -27,6 +28,9 @@ struct ScriptLookup {
 // {"errors": [{"message", "node"?, "edge"?, "var"?, "field"?, "pos"?}], "prompt_count": n}
 // A script runs only without errors.
 json check_script(const json& s, const ScriptLookup& lookup);
+
+// Do N: the blocks reached from its loop output (they run again every round).
+std::set<std::string> loop_body(const json& script, const std::string& do_id);
 
 // The {name} placeholders of a prompt text (only names that look like variables).
 std::vector<std::string> text_placeholders(const std::string& text);

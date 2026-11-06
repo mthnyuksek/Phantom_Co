@@ -44,6 +44,8 @@ private:
     void advance(json& st);
     void start_node(json& st, const json& node);
     void complete_node(json& st, const std::string& id, const std::string& port);
+    void start_round(json& st, const json& node);
+    bool finish_rounds(json& st);
     void fail_node(json& st, const std::string& id, const std::string& msg);
     void end_run(json& st, const std::string& status, const std::string& error);
     void finish_prompt(json& st, const json& node);

@@ -88,6 +88,8 @@ bool extract_value(const std::string& text, Type t, Value& out) {
 
 bool active_status(const std::string& s) { return s == "running" || s == "paused"; }
 
+constexpr int64_t kMaxRounds = 100;  // a Do N block repeats at most this often (every round can start ghost runs)
+
 // Built-ins read from Usage: which sign-in and which field. Older readings are refreshed before a block uses them.
 struct UsageField { const char* brain; const char* field; const char* label; };
 const UsageField* usage_field(const std::string& name) {
@@ -394,6 +396,7 @@ void ScriptRunner::advance(json& st) {
             start_node(st, n);
             changed = true;
         }
+        if (active_status(st.value("status", "")) && finish_rounds(st)) changed = true;
     }
     if (!active_status(st.value("status", ""))) return;
     for (auto& [id, ns] : st["nodes"].items()) {
@@ -416,8 +419,22 @@ void ScriptRunner::start_node(json& st, const json& n) {
         } catch (const ScriptError&) { /* reported below */ }
     }
     try {
-        if (type == "start" || type == "end") {
+        if (type == "start") {
             complete_node(st, id, "out");
+        } else if (type == "end") {
+            // like return: the run is done at once, also inside a loop; blocks still working are stopped
+            complete_node(st, id, "out");
+            end_run(st, "done", "");
+        } else if (type == "do") {
+            Expr e = parse_expr(p.value("count", ""));
+            Value v = eval_expr(e, env_for(st, expr_vars(e)));
+            if (v.type != Type::Number || v.i % 100 != 0) throw ScriptError("The number of rounds must be a whole Number.");
+            const int64_t rounds = v.i / 100;  // (not `n`: that is the block)
+            if (rounds < 0 || rounds > kMaxRounds) throw ScriptError("The number of rounds must be between 0 and " + std::to_string(kMaxRounds) + ".");
+            ns["count"] = rounds;
+            ns["round"] = 0;
+            if (rounds == 0) { ns["output"] = "0 rounds"; complete_node(st, id, "then"); }
+            else start_round(st, n);
         } else if (type == "set") {
             Expr e = parse_expr(p.value("expr", ""));
             Value v = eval_expr(e, env_for(st, expr_vars(e)));
@@ -462,6 +479,8 @@ void ScriptRunner::start_node(json& st, const json& n) {
         }
     } catch (const ScriptError& e) {
         fail_node(st, id, e.what());
+    } catch (const std::exception& e) {  // a bug must end the run cleanly, not break the request that started it
+        fail_node(st, id, std::string("Internal error: ") + e.what());
     }
 }
 
@@ -546,15 +565,67 @@ void ScriptRunner::complete_node(json& st, const std::string& id, const std::str
     ns["state"] = "done";
     ns["ended"] = now_iso();
     const json* n = find_node(st, id);
-    bool is_if = n && (*n)["type"] == "if";
+    bool is_if = n && (*n)["type"] == "if", is_do = n && (*n)["type"] == "do";
     for (size_t i = 0; i < script["edges"].size(); ++i) {
         const json& e = script["edges"][i];
         if (e["from"] != id) continue;
-        st["edges"][i] = !is_if || e.value("port", "out") == port ? "fired" : "skipped";
+        if (is_do && e.value("port", "out") == "loop") {  // the rounds are over: the loop arrows stay as they were
+            if (ns.value("count", 0) == 0) st["edges"][i] = "skipped";
+            continue;
+        }
+        st["edges"][i] = (!is_if && !is_do) || e.value("port", "out") == port ? "fired" : "skipped";
     }
     json ev = {{"kind", "node_done"}, {"node", id}};
     if (is_if) ev["text"] = port;
     log(st, ev);
+}
+
+// Do N: one more round. The loop part goes back to "waiting" (its arrows to pending) and the loop arrows fire again.
+void ScriptRunner::start_round(json& st, const json& n) {
+    const std::string id = n["id"];
+    json& ns = st["nodes"][id];
+    int64_t round = ns.value("round", 0) + 1, count = ns.value("count", 0);
+    ns["round"] = round;
+    ns["output"] = "round " + std::to_string(round) + " of " + std::to_string(count);
+    std::string var = n["props"].value("var", "");
+    if (!var.empty() && st["vars"].contains(var)) {
+        st["vars"][var] = value_to_json(Value::number(round * 100));
+        log(st, {{"kind", "var_set"}, {"node", id}, {"var", var}, {"text", std::to_string(round) + ".00"}});
+    }
+    const json& script = st["script"];
+    std::set<std::string> body = loop_body(script, id);
+    for (const std::string& b : body) {
+        json fresh = {{"state", "waiting"}};
+        if (st["nodes"][b].contains("runs")) fresh["runs"] = st["nodes"][b]["runs"];  // every round's ghost runs stay listed
+        st["nodes"][b] = fresh;
+    }
+    for (size_t i = 0; i < script["edges"].size(); ++i) {
+        const json& e = script["edges"][i];
+        std::string from = e.value("from", "");
+        if (from == id && e.value("port", "out") == "loop") st["edges"][i] = "fired";
+        else if (body.count(from)) st["edges"][i] = "pending";
+    }
+    log(st, {{"kind", "note"}, {"node", id}, {"text", "Round " + std::to_string(round) + " of " + std::to_string(count)}});
+}
+
+// A Do N block whose loop part has finished: the next round, or its "then" output.
+bool ScriptRunner::finish_rounds(json& st) {
+    bool changed = false;
+    for (const json& n : st["script"]["nodes"]) {
+        if (n["type"] != "do") continue;
+        json& ns = st["nodes"][n["id"].get<std::string>()];
+        if (ns.value("state", "") != "running" || ns.value("count", 0) == 0) continue;
+        bool over = true;
+        for (const std::string& b : loop_body(st["script"], n["id"])) {
+            std::string s = st["nodes"][b].value("state", "");
+            if (s != "done" && s != "skipped") { over = false; break; }
+        }
+        if (!over) continue;
+        if (ns.value("round", 0) < ns.value("count", 0)) start_round(st, n);
+        else complete_node(st, n["id"], "then");
+        changed = true;
+    }
+    return changed;
 }
 
 void ScriptRunner::fail_node(json& st, const std::string& id, const std::string& msg) {

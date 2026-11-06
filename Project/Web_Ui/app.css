@@ -678,3 +678,6 @@ main#view:has(> .chats-layout) { padding: 0; overflow: hidden; }
   .sc-palette { width: min(260px, 82%); }
 }
 @media (prefers-reduced-motion: reduce) { .sc-body.sheet .sc-panel, .sc-palette { transition: none; } .sc-node.st-running { animation: none; } }
+.sc-edge.loop { stroke: var(--accent); stroke-dasharray: 7 5; }
+.sc-node.k-do { border-top: 3px solid var(--accent2); }
+.sc-edge.loop.lit { stroke: var(--ok); }

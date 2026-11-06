@@ -45,10 +45,12 @@ function summary(n) {
   else if (n.type === 'set') what = `<code>${esc(p.var)} = ${esc(p.expr)}</code>`;
   else if (n.type === 'if') what = `<code>${esc(p.expr)}</code>`;
   else if (n.type === 'delay') what = p.mode === 'until' ? `<span>until</span> <code>${esc(p.expr)}</code>` : `<code>${esc(p.expr)}</code> <span>min</span>`;
+  else if (n.type === 'do') what = `<code>${esc(p.count)}</code> <span>times</span>`;
   let how = '';
   if (ns.state === 'running' && n.type === 'delay' && ns.wake_at) how = `⏳ ${raw(esc(left(ns.wake_at)))}`;
   else if (ns.state === 'running' && n.type === 'prompt') how = '💭 <span>working…</span>';
   else if (ns.state === 'running' && ns.usage_wait) how = '📊 <span>reading the usage limits…</span>';
+  else if (n.type === 'do' && ns.count) how = `🔁 ${raw(`${ns.round || 0} / ${ns.count}`)}`;
   else if (ns.state === 'done' && n.type === 'if') how = `→ <span>${ns.output === 'true' ? 'yes' : 'no'}</span>`;
   else if (ns.state === 'done' && n.type === 'prompt' && ns.output) how = '✓ ' + raw(esc(String(ns.output).slice(0, 50)));
   else if (ns.state === 'failed') how = '✗ <span>' + esc(String(ns.error || '').slice(0, 80)) + '</span>';
