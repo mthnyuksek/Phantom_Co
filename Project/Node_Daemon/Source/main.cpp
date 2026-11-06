@@ -50,6 +50,7 @@ WorkerClient g_worker;
 Config* g_cfg = nullptr;
 Store* g_store = nullptr;
 Runner* g_runner = nullptr;
+ScriptRunner* g_scripts = nullptr;
 std::wstring g_home_url;
 fs::path g_data_dir;
 std::wstring g_extra_args;  // --devtools / --ui-dir, passed on to Vault windows started from the tray
@@ -269,6 +270,11 @@ void quit() {
     if (g_runner && g_runner->any_active()) {
         show_window();
         if (MessageBoxW(g_hwnd, T(L"Ghosts are still working. Quit anyway? Their work stops.", L"Hayaletler hâlâ çalışıyor. Yine de çıkılsın mı? Çalışmaları durur."),
+                        L"Phantom Co.", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return;
+    } else if (g_scripts && g_scripts->any_active()) {  // e.g. a Delay block waiting: nothing runs, but the script is not done
+        show_window();
+        if (MessageBoxW(g_hwnd, T(L"A script is still running (it may be waiting in a Delay block). It goes on when Phantom Co. starts again. Quit anyway?",
+                                  L"Bir betik hâlâ çalışıyor (bir Delay bloğunda bekliyor olabilir). Phantom Co. yeniden açılınca devam eder. Yine de çıkılsın mı?"),
                         L"Phantom Co.", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return;
     }
     g_quitting = true;
@@ -566,6 +572,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         g_cfg = &cfg;
         g_store = &store;
         g_runner = &runner;
+        g_scripts = &scripts;
         {   // lending this PC's AI was switched on before (in the window), or is asked for on the command line
             std::string url = cli_worker_url.empty() ? cfg.worker_url : cli_worker_url, token = cli_worker_token.empty() ? cfg.worker_token : cli_worker_token, err;
             if (!url.empty() && !g_worker.start(url, token, err)) std::cerr << "Lending the AI: " << err << "\n";
@@ -647,6 +654,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         usage.shutdown();
         g_store = nullptr;
         g_runner = nullptr;
+        g_scripts = nullptr;
         if (single) ReleaseMutex(single);
         return code;
     } catch (const std::exception& e) {

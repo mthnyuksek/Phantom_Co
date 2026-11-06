@@ -36,6 +36,7 @@ public:
     std::optional<json> get(const std::string& run_id);  // state + "events"
     std::vector<json> list(const std::string& script_id);
     bool script_active(const std::string& script_id);
+    bool any_active();  // a run is going or paused (the tray's Quit asks first)
 
     void on_job_finished(const Job& job, const std::string& status, const std::string& answer, const std::string& error);
 

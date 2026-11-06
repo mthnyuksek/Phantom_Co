@@ -302,6 +302,14 @@ def run_tests(exe, vault, data, procs, owner, ece, vera):
     check("run after the delay finishes", r and r["status"] == "done" and r["vars"]["n"]["value"] == 100, r and (r["status"], r["vars"]))
     check("delay took its time (20 test minutes = 2 s)", time.time() - t0 >= 2.0)
 
+    # 2b. prompt -> delay -> prompt (the shape a person tried first)
+    st, r = make_and_run(ece, chain("Prompt delay prompt", [START, P("a", "quill", "first"),
+                                                            {"id": "w", "type": "delay", "props": {"mode": "for", "expr": "10"}},
+                                                            P("b", "bolt", "second"), END]))
+    r = wait_run(ece, r["id"])
+    check("prompt after a delay after a prompt runs", r and r["status"] == "done" and node_state(r, "b") == "done"
+          and "second" in r["nodes"]["b"].get("output", ""), r and (r["status"], r["nodes"]))
+
     # 3. no usable value: asked once more, then the run fails
     st, r = make_and_run(ece, chain("No value", [START, P("p", "quill", "nothing here", target="when"), END],
                                     vars=[{"name": "when", "type": "Date"}]))

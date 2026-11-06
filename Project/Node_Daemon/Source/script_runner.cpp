@@ -315,6 +315,11 @@ std::vector<json> ScriptRunner::list(const std::string& script_id) {
     return out;
 }
 
+bool ScriptRunner::any_active() {
+    std::lock_guard<std::mutex> lk(mu_);
+    return !active_.empty();
+}
+
 bool ScriptRunner::script_active(const std::string& script_id) {
     std::lock_guard<std::mutex> lk(mu_);
     for (auto& [id, st] : active_)
