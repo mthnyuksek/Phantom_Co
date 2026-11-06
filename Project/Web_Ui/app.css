@@ -681,3 +681,7 @@ main#view:has(> .chats-layout) { padding: 0; overflow: hidden; }
 .sc-edge.loop { stroke: var(--accent); stroke-dasharray: 7 5; }
 .sc-node.k-do { border-top: 3px solid var(--accent2); }
 .sc-edge.loop.lit { stroke: var(--ok); }
+/* run view: the block's text on two lines, its state on one line, both always visible */
+.sc-node-sum:has(.sc-how) { max-height: none; }
+.sc-what { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sc-how { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

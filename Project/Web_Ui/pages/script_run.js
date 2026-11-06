@@ -54,7 +54,7 @@ function summary(n) {
   else if (ns.state === 'done' && n.type === 'if') how = `→ <span>${ns.output === 'true' ? 'yes' : 'no'}</span>`;
   else if (ns.state === 'done' && n.type === 'prompt' && ns.output) how = '✓ ' + raw(esc(String(ns.output).slice(0, 50)));
   else if (ns.state === 'failed') how = '✗ <span>' + esc(String(ns.error || '').slice(0, 80)) + '</span>';
-  return what + (how ? `<div class="sc-how">${how}</div>` : '');
+  return `<div class="sc-what">${what}</div>` + (how ? `<div class="sc-how">${how}</div>` : '');
 }
 
 function headHTML() {

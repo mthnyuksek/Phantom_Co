@@ -18,6 +18,7 @@ It is a single Windows program with no installer, no account with us and no clou
 - **Delegate work between agents.** A ghost can ask any colleague for help. The colleague's answer goes back to the ghost that asked, which then carries on, so you can give a Planner a big job and let it split the work. You can watch these conversations in Chats > Agents.
 - **Work in projects.** A project is a work folder plus shared notes and a "job" for each ghost in that project. Every ghost working in the project reads them, so they keep a shared memory between runs.
 - **Use tasks and schedules.** A task is a piece of work for a ghost with its own conversation and run history. A task can wake up on its own every N minutes or daily at a set time, and repeated work can start from task templates.
+- **Script multi-agent work visually.** In the Scripts tab you join ghost prompts like code blocks on a canvas: Prompt, Set variable, If, Delay, Do N (repeat) and End. One block can lead to several that run at the same time, and a block waits for all of its inputs. Scripts have typed variables (numbers with two decimals, times, dates, true/false, text) and built-ins such as `now_time` or `claude_left_5h`, so a step can wait for the evening or for enough subscription usage. A ghost can store a value from its answer in a variable, and a ghost with the "Visual scripts" skill can write a whole script for you as a draft. A live view shows every block as it works.
 - **Control what each ghost can do.** Skills are the only way a ghost gets tools such as reading files, writing files, web research or shell commands. A ghost acts with the rights of the person who asked it, so an editor cannot use owner-only skills through an agent.
 - **Connect outside tools (MCP).** Ghosts can use MCP servers: a real browser through Playwright, YouTube uploads, a Telegram bot, or any stdio MCP server you add. A ghost can even write a new server with the "MCP builder" skill. Calls can be set to wait for your **Approve / Decline** in the chat before they run.
 - **Talk to ghosts from Telegram.** Linked people can use `/agents`, `/<ghost> message`, `/new`, and `/yes` / `/no` for approvals. These conversations show up as normal chats in the app.
@@ -31,6 +32,10 @@ The interface is available in English and Turkish, with several light and dark c
 ![A ghost asks to use an MCP tool, the owner approves it in the chat, and the ghost finishes the job](Media/phantom_co_approval.gif)
 
 *An approval in action: the owner asks **Pip** (Social media) to write a post and publish it on the shop's notice board. The `publish_post` tool is set to "Ask me before it acts", so the call waits in the chat as a card showing the exact text. When the owner clicks **Approve**, the call runs and Pip confirms. The notice board here is a small local MCP server written for this demo.*
+
+![A visual script runs: one ghost finds an idea, two others plan and rate it at the same time, and the script goes on because the rating is high enough](Media/phantom_co_scripts.gif)
+
+*A visual script with real Claude Haiku ghosts: **Quill** suggests a weekend project and its answer goes into the `idea` variable. **Bolt** writes a plan and **Mira** rates the idea at the same time. The If block waits for both and checks `score >= 5`, so the script takes the "yes" branch, waits a moment and has Quill write an announcement. A click on a block shows its answer, and the script can be paused, stepped through or stopped.*
 
 ## Brains (AI providers)
 
@@ -75,6 +80,8 @@ flowchart LR
     UI["Window (WebView2)<br/>or a friend's browser"] -->|HTTP API| Server["Embedded server<br/>auth · roles · REST"]
     TG["Telegram bot"] -.-> Server
     Server --> Runner["Runner<br/>queues · lanes · router"]
+    Server --> Scripts["Script runner<br/>blocks · variables · delays"]
+    Scripts -->|prompt blocks| Runner
     Runner --> CLI["claude / codex / gemini / opencode<br/>(child processes)"]
     CLI -.->|MCP| Proxy["MCP proxy<br/>approvals · secrets"]
     Server <--> Vault[("Vault<br/>Markdown + JSONL")]
@@ -104,6 +111,8 @@ sequenceDiagram
 
 Failures are reported back along the same chain, so a chain does not hang when one ghost fails. A hop limit stops runaway chains, and duplicate requests to an agent that is already busy are dropped.
 
+A **visual script** puts you in charge of the order instead: the script runner starts each block when all of its inputs are done, turns prompt blocks into normal runs (a block also waits for the colleagues its ghost asked), reads values from the answers into variables, and follows If, Delay and Do N blocks. Each script run is saved in `Script_Runs` in the Vault after every step.
+
 ### A closer look
 
 | Ghost editor | Run record | MCP settings |
@@ -116,6 +125,7 @@ Failures are reported back along the same chain, so a chain does not hang when o
 - **Provider abstraction.** Claude Code, Codex, Gemini CLI and OpenCode each have their own command line, output parser (events, session id, tokens, cost) and error handling, behind one runner interface. Each provider, account and lent friend's AI gets its own **lane** with its own concurrency limit, and one ghost never runs twice at the same time.
 - **Run lifecycle.** Queued, running, done, failed or stopped, with live events. Every CLI runs inside a Windows Job Object, so Stop ends the whole process tree. Runs have time and turn limits, and failed or interrupted runs can be retried.
 - **Permission model.** Tools come only from skills. Powerful skills (shell commands, Vault folders outside Projects) are forced to owner-only. Account data (password hashes, roles, sessions) is kept outside the Vault, so agents with file tools cannot read or change it.
+- **Script engine.** Scripts are checked before they run (types, ghosts, unreachable blocks, no loops made of arrows) by a small typed expression language. Numbers are fixed-point (a 64-bit integer of hundredths), so `0.1 + 0.2` is exactly `0.30`. Blocks run by dead-path elimination, prompt blocks are normal runs in their own conversations, and the state of every script run is saved after each step, so a run carries on after a restart. Usage built-ins read the limits that Claude Code and Codex report.
 - **MCP proxy with approvals.** Every MCP server is started through `phantom_co.exe` itself, acting as a proxy. The proxy receives secrets for one run only and can hold a tool call until a person approves it in the chat.
 - **Local-first storage.** The Vault is plain files you can read, back up or version yourself. Several Vaults can run side by side as separate program instances, each with its own data folder and port.
 - **No build step for the UI.** Plain ES modules embedded into the exe at build time. C++20 with two single-header libraries ([cpp-httplib](https://github.com/yhirose/cpp-httplib), [nlohmann/json](https://github.com/nlohmann/json)) and the WebView2 SDK.
@@ -146,6 +156,7 @@ Read this before giving ghosts powerful skills or sharing your company.
 - **Gemini CLI** works with an API key only and cannot be lent by friends. Free keys have no quota for Pro models.
 - **OpenCode** cannot be lent by friends. Local models are expected at the default ports (LM Studio 1234, Ollama 11434). Free services have rate limits, and an OpenCode ghost without a model and without an API key account does not start.
 - **Scheduled tasks** only run while the program is open. Only "every N minutes" and "daily" schedules are supported.
+- **Scripts** run only while the program is open (a run that was waiting carries on at the next start), and a person starts them with Run. A Do N block repeats at most 100 times. `claude_left_5h`, `claude_left_week` and `codex_left` come from undocumented output of the Claude Code and Codex CLIs, read only the PC's own sign-in (not API keys or other brains), and may stop working when a CLI changes.
 - **The tunnel address changes** at every start. A fixed address is not supported yet.
 - **The Demo brain** only simulates answers. It is for trying the app, not for real work.
 
@@ -161,7 +172,7 @@ python -X utf8 -I Project\Node_Daemon\Tests\smoke_test.py <full path of phantom_
 
 - The project path must not contain spaces.
 - The web UI is embedded into the exe at build time, so rebuild after changing `Project\Web_Ui`.
-- More tests are in [`Project/Node_Daemon/Tests`](Project/Node_Daemon/Tests) (MCP, Telegram, worker, tunnel). Each one takes the exe path and uses its own temporary Vault. The tunnel test needs the internet (it downloads `cloudflared` and opens a real tunnel). The smoke and MCP tests send nothing to an AI unless you pass `--real claude|codex`.
+- More tests are in [`Project/Node_Daemon/Tests`](Project/Node_Daemon/Tests) (scripts, MCP, Telegram, worker, tunnel). Each one takes the exe path and uses its own temporary Vault. The tunnel test needs the internet (it downloads `cloudflared` and opens a real tunnel). The smoke and MCP tests send nothing to an AI unless you pass `--real claude|codex`.
 - Command-line options: `phantom_co.exe --help`.
 
 Repository layout:
@@ -179,7 +190,7 @@ Repository layout:
 Ideas under consideration, not commitments:
 
 - Lending a friend's AI: sending deletions back, large folders without full mirroring, queueing until the friend is online.
-- Weekly and one-time wake-ups, and usage limits per subscription.
+- Weekly and one-time wake-ups, and scripts that start on a schedule.
 - Token budgets and an overview page with usage per ghost and per person.
 - Chat export.
 - An installer and code signing.
