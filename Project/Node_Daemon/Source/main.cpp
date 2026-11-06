@@ -19,6 +19,7 @@
 #include "mcp.hpp"
 #include "telegram_bridge.hpp"
 #include "runner.hpp"
+#include "script_expr.hpp"
 #include "server.hpp"
 #include "store.hpp"
 #include "tunnel.hpp"
@@ -67,6 +68,32 @@ BOOL WINAPI on_ctrl(DWORD) {
 void fatal(const std::wstring& msg, bool window_mode) {
     if (window_mode) MessageBoxW(nullptr, msg.c_str(), L"Phantom Co.", MB_OK | MB_ICONERROR);
     else std::wcerr << msg << L"\n";
+}
+
+// --script-eval: reads request lines from the stdin pipe, writes one answer line each (no console, like the MCP proxy).
+int script_eval_main() {
+    HANDLE in = GetStdHandle(STD_INPUT_HANDLE), out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (!in || in == INVALID_HANDLE_VALUE || !out || out == INVALID_HANDLE_VALUE) return 2;
+    std::string buf;
+    char chunk[4096];
+    DWORD got = 0;
+    auto answer = [&](std::string line) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) return;
+        std::string a = script::script_eval_line(line) + "\n";
+        DWORD n = 0;
+        WriteFile(out, a.data(), (DWORD)a.size(), &n, nullptr);
+    };
+    while (ReadFile(in, chunk, sizeof chunk, &got, nullptr) && got > 0) {
+        buf.append(chunk, got);
+        size_t nl;
+        while ((nl = buf.find('\n')) != std::string::npos) {
+            answer(buf.substr(0, nl));
+            buf.erase(0, nl + 1);
+        }
+    }
+    answer(buf);
+    return 0;
 }
 
 void usage() {
@@ -447,6 +474,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
             }
             return mcp_proxy_main(name, port, key);
         }
+        // Test hook for script expressions (Tests/script_test.py): JSON lines on stdin -> answers on stdout (pipes).
+        if (av && n >= 2 && std::wstring(av[1]) == L"--script-eval") return script_eval_main();
     }
     // Started from a terminal? Then --help and errors can be printed there.
     if (AttachConsole(ATTACH_PARENT_PROCESS)) {
