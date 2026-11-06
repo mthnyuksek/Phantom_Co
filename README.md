@@ -2,7 +2,7 @@
 
 **Build your own AI company.** A local-first multi-agent workspace for Windows.
 
-You hire AI agents (called "ghosts"), give each one a role, a boss, a personality and a set of skills, and then chat with them, give them tasks and projects, and let them hand work to each other. The agents run on the AI command-line tools already on your PC (**Claude Code**, **Codex** or **Gemini CLI**). Your company is a folder of plain files, and several people can work in it together.
+You hire AI agents (called "ghosts"), give each one a role, a boss, a personality and a set of skills, and then chat with them, give them tasks and projects, and let them hand work to each other. The agents run on the AI command-line tools already on your PC (**Claude Code**, **Codex**, **Gemini CLI** or **OpenCode**, which also brings free NVIDIA models and local models from LM Studio or Ollama). Your company is a folder of plain files, and several people can work in it together.
 
 It is a single Windows program with no installer, no account with us and no cloud service of its own.
 
@@ -23,6 +23,7 @@ It is a single Windows program with no installer, no account with us and no clou
 - **Talk to ghosts from Telegram.** Linked people can use `/agents`, `/<ghost> message`, `/new`, and `/yes` / `/no` for approvals. These conversations show up as normal chats in the app.
 - **Work together.** Owner / editor / viewer roles, invitation links, and private or shared chats. Friends connect over the local network or through an optional Cloudflare tunnel, and the interface also works in a phone browser.
 - **Watch and control runs.** Every run has a live view, a Stop button, token counts and (for Claude Code) cost. A failed or interrupted run can be retried with one click.
+- **Hand files over.** Drag files or whole folders from Windows Explorer onto the Files page (or onto a folder in it) to give them to your ghosts and teammates.
 - **Keep your data readable.** Agents, skills, rules, projects, tasks and conversations are stored as Markdown and JSON files in a folder called the **Vault**.
 
 The interface is available in English and Turkish, with several light and dark colour themes.
@@ -40,17 +41,20 @@ A ghost's "brain" is the command-line tool that runs it. Phantom Co. starts the 
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`) | Installed and signed in, or an Anthropic API key | Tools are limited to what the ghost's skills allow. Cost per run is shown. |
 | [Codex](https://github.com/openai/codex) (`codex`) | Installed and signed in, or an OpenAI API key | Runs read-only or with workspace-write in Codex's own sandbox, depending on the skills. |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini`) | Installed, plus a Gemini API key (Google AI Studio) | API key only: Google no longer lets the CLI use a free Google sign-in. With no model set, a ghost uses `gemini-flash-lite-latest`. |
+| [OpenCode](https://opencode.ai) (`opencode`) | Installed (npm `opencode-ai`), plus an API key of a model service, or a local model server | One brain for other models. API keys: NVIDIA (free key from build.nvidia.com), OpenRouter, Groq, Cerebras, DeepSeek, Mistral; each has a default model. Local models need no account: run LM Studio or Ollama and write `lmstudio/<model>` or `ollama/<model>` as the ghost's model. Your own OpenCode settings stay out of the runs. |
 | Demo | Nothing | Built in. It simulates answers so you can try the app and test hand-overs without an AI subscription. |
 
 In **Settings > Secrets** you can add more subscription accounts or API keys for each brain and choose one per ghost. Each account has its own queue.
 
+Free and small local models are fine for chat and short jobs but weaker than Claude or GPT at long jobs with many tool calls. For file work a local model must support tool calls (LM Studio marks them with a hammer icon).
+
 ## Get started
 
 1. **Download** `phantom_co.exe` from the [latest release](https://github.com/mthnyuksek/Phantom_Co/releases/latest). There is nothing to install: put the file anywhere you like.
-2. **Optional: set up a brain.** Install and sign in to Claude Code and/or Codex, or install Gemini CLI and add a Gemini API key later in Settings > Secrets. You can skip this step and use the Demo brain.
+2. **Optional: set up a brain.** Install and sign in to Claude Code and/or Codex, or install Gemini CLI or OpenCode and add an API key later in Settings > Secrets (OpenCode also works with LM Studio or Ollama on your PC). You can skip this step and use the Demo brain.
 3. **Start it.** Double-click `phantom_co.exe`. The file is not code-signed, so Windows SmartScreen may show "Windows protected your PC". Click **More info**, then **Run anyway**.
 4. **Create the company.** On first start you create the owner account and choose where to keep the Vault (default: `Documents\Phantom_Vault`).
-5. **Hire the guide (optional).** The guide ghost knows the whole program, answers questions and suggests a first team. It needs Claude Code or Codex. You can also skip the tour.
+5. **Hire the guide (optional).** The guide ghost knows the whole program, answers questions and suggests a first team. It needs one of the brains above (not Demo). You can also skip the tour.
 
 ![First start: create the company, hire the guide and ask it which ghosts to hire](Media/phantom_co_first_start.gif)
 
@@ -71,7 +75,7 @@ flowchart LR
     UI["Window (WebView2)<br/>or a friend's browser"] -->|HTTP API| Server["Embedded server<br/>auth · roles · REST"]
     TG["Telegram bot"] -.-> Server
     Server --> Runner["Runner<br/>queues · lanes · router"]
-    Runner --> CLI["claude / codex / gemini<br/>(child processes)"]
+    Runner --> CLI["claude / codex / gemini / opencode<br/>(child processes)"]
     CLI -.->|MCP| Proxy["MCP proxy<br/>approvals · secrets"]
     Server <--> Vault[("Vault<br/>Markdown + JSONL")]
     Runner <--> Vault
@@ -109,7 +113,7 @@ Failures are reported back along the same chain, so a chain does not hang when o
 
 ## Technical highlights
 
-- **Provider abstraction.** Claude Code, Codex and Gemini CLI each have their own command line, output parser (events, session id, tokens, cost) and error handling, behind one runner interface. Each provider, account and lent friend's AI gets its own **lane** with its own concurrency limit, and one ghost never runs twice at the same time.
+- **Provider abstraction.** Claude Code, Codex, Gemini CLI and OpenCode each have their own command line, output parser (events, session id, tokens, cost) and error handling, behind one runner interface. Each provider, account and lent friend's AI gets its own **lane** with its own concurrency limit, and one ghost never runs twice at the same time.
 - **Run lifecycle.** Queued, running, done, failed or stopped, with live events. Every CLI runs inside a Windows Job Object, so Stop ends the whole process tree. Runs have time and turn limits, and failed or interrupted runs can be retried.
 - **Permission model.** Tools come only from skills. Powerful skills (shell commands, Vault folders outside Projects) are forced to owner-only. Account data (password hashes, roles, sessions) is kept outside the Vault, so agents with file tools cannot read or change it.
 - **MCP proxy with approvals.** Every MCP server is started through `phantom_co.exe` itself, acting as a proxy. The proxy receives secrets for one run only and can hold a tool call until a person approves it in the chat.
@@ -124,10 +128,10 @@ Read this before giving ghosts powerful skills or sharing your company.
 - **The Vault** (default `Documents\Phantom_Vault`) holds agents, skills, rules, projects, tasks, conversations and run records as plain, **unencrypted** files.
 - **Accounts, sessions and settings** are stored in `%LOCALAPPDATA%\Phantom_Co`, outside the Vault. Passwords are stored as PBKDF2-SHA256 hashes.
 - **API keys and MCP secrets** are encrypted with Windows DPAPI for your Windows user (`secrets.json` in the data folder). They are shown only as their last 4 characters, can only be entered at the PC that runs Phantom Co., and are passed to a CLI only through the run's environment. A run with a shell skill can read that environment.
-- **CLI sign-ins** stay with the CLI tools themselves. Phantom Co. never copies or sends tokens. Prompts and files you give a ghost go to that brain's provider (Anthropic, OpenAI or Google) under their terms.
+- **CLI sign-ins** stay with the CLI tools themselves. Phantom Co. never copies or sends tokens. Prompts and files you give a ghost go to that brain's provider (Anthropic, OpenAI, Google, or the model service an OpenCode ghost uses) under their terms. With a local model (LM Studio, Ollama) they stay on your PC.
 
 **What agents can do**
-- **Agents act on your PC** with the tools their skills give them. Claude Code's shell tools are **not** limited to a folder: giving a ghost the "Run commands" skill gives it your rights on the PC. Give powerful skills only to ghosts you trust, and check what they do in the Runs tab.
+- **Agents act on your PC** with the tools their skills give them. The shell tools of Claude Code and OpenCode are **not** limited to a folder: giving a ghost the "Run commands" skill gives it your rights on the PC. Give powerful skills only to ghosts you trust, and check what they do in the Runs tab.
 - **MCP servers are programs that run on your PC** with the secrets you give them. Add only servers you trust, and keep "Ask me before it acts" on for anything that sends, posts or deletes. Prompt injection from web pages, files or messages is a real risk for any agent with tools.
 
 **Sharing**
@@ -140,6 +144,7 @@ Read this before giving ghosts powerful skills or sharing your company.
 - **Windows only.** The exe is not code-signed, and there is no installer.
 - **Lending a friend's AI is experimental.** A friend can run the company's ghosts on their own Claude/Codex ("Lend my AI"). Files the AI deletes are not deleted in the company, large folders are slow, work fails while the friend's PC is off, both PCs need the same Phantom Co. version, and MCP never runs on a lent AI.
 - **Gemini CLI** works with an API key only and cannot be lent by friends. Free keys have no quota for Pro models.
+- **OpenCode** cannot be lent by friends. Local models are expected at the default ports (LM Studio 1234, Ollama 11434). Free services have rate limits, and an OpenCode ghost without a model and without an API key account does not start.
 - **Scheduled tasks** only run while the program is open. Only "every N minutes" and "daily" schedules are supported.
 - **The tunnel address changes** at every start. A fixed address is not supported yet.
 - **The Demo brain** only simulates answers. It is for trying the app, not for real work.
