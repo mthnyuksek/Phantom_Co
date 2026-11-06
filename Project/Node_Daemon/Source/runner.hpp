@@ -15,6 +15,7 @@
 #include "prompt.hpp"
 #include "providers.hpp"
 #include "store.hpp"
+#include "usage.hpp"
 #include "worker_hub.hpp"
 
 namespace pc2 {
@@ -75,6 +76,7 @@ public:
     // Work that no person typed (script blocks): no per-person queue limit, no "conversation busy" refusal.
     std::string enqueue_routed(Job job, std::string& error) { return enqueue_internal(std::move(job), error, false); }
     void set_finish_hook(JobFinishHook f) { finish_hook_ = std::move(f); }  // set once at start
+    void set_usage(Usage* u) { usage_ = u; }  // where local Claude/Codex runs leave the subscription usage they saw
 
     bool cancel_run(const std::string& run_id);
     int cancel_conversation(const std::string& conv_id);
@@ -136,6 +138,7 @@ private:
     Accounts* accounts_ = nullptr;
     Mcp* mcp_ = nullptr;
     JobFinishHook finish_hook_;
+    Usage* usage_ = nullptr;
     std::atomic<bool> stopping_{false};
 };
 

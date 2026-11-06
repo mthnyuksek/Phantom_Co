@@ -696,6 +696,25 @@ std::optional<json> Store::run_get(const std::string& id) {
     std::lock_guard<std::recursive_mutex> l(mu_);
     return read_entity(root_ / L"Runs" / P(id + ".md"), kRunF, "result");
 }
+std::map<std::string, long long> Store::tokens_today() {
+    std::map<std::string, long long> out;
+    std::time_t now = std::time(nullptr);
+    std::tm lt = *std::localtime(&now);
+    lt.tm_hour = lt.tm_min = lt.tm_sec = 0;
+    lt.tm_isdst = -1;
+    long long day_start = (long long)std::mktime(&lt);
+    for (auto& r : runs()) {  // newest first; run times are UTC
+        std::string created = r.value("created", "");
+        std::tm ut = {};
+        if (created.size() < 19 || sscanf(created.c_str(), "%d-%d-%dT%d:%d:%d", &ut.tm_year, &ut.tm_mon, &ut.tm_mday, &ut.tm_hour, &ut.tm_min, &ut.tm_sec) != 6) continue;
+        ut.tm_year -= 1900;
+        ut.tm_mon -= 1;
+        if ((long long)_mkgmtime(&ut) < day_start) break;
+        out[r.value("agent_id", "")] += r.value("tokens_in", 0LL) + r.value("tokens_out", 0LL);
+    }
+    return out;
+}
+
 std::vector<json> Store::runs() {
     std::lock_guard<std::recursive_mutex> l(mu_);
     std::vector<json> out;

@@ -567,6 +567,11 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     fs::remove(sysfile, ec);
 
     o.text = parser.result_text;
+    if (usage_) {  // what is left of the subscription limits, for script built-ins (claude_left_5h, codex_left)
+        if (spec.provider == "claude" && !parser.rate_limits.is_null()) usage_->record_claude(js->brain, parser.rate_limits);
+        if (spec.provider == "codex" && !parser.session_id.empty())
+            usage_->record_codex(js->brain, codex_rate_limits(parser.session_id, account.empty() || !accounts_ ? fs::path() : accounts_->home(account)));
+    }
     if (spec.provider == "codex" && spec.can_write && !js->cancel)
         o.text += images_note(collect_codex_images(parser.session_id, started_at, workdir, account.empty() || !accounts_ ? fs::path() : accounts_->home(account)));
     o.session_id = parser.session_id.empty() || account.empty() ? parser.session_id : "#" + account + ":" + parser.session_id;

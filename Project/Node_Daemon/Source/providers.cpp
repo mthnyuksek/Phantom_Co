@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <ctime>
 
 #include "http_client.hpp"
 
@@ -295,9 +296,7 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
 std::vector<std::string> collect_codex_images(const std::string& session_id, fs::file_time_type since, const fs::path& workdir, const fs::path& codex_home) {
     std::vector<std::string> out;
     if (session_id.empty() || session_id.find_first_not_of("abcdefABCDEF0123456789-") != std::string::npos) return out;
-    const std::string home = env(L"CODEX_HOME");
-    const fs::path base = !codex_home.empty() ? codex_home : home.empty() ? P(env(L"USERPROFILE")) / L".codex" : P(home);
-    const fs::path dir = base / L"generated_images" / P(session_id);
+    const fs::path dir = codex_home_dir(codex_home) / L"generated_images" / P(session_id);
     std::error_code ec;
     if (!fs::is_directory(dir, ec)) return out;
     for (auto it = fs::recursive_directory_iterator(dir, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
@@ -309,6 +308,53 @@ std::vector<std::string> collect_codex_images(const std::string& session_id, fs:
         if (fs::copy_file(it->path(), dest, ec)) out.push_back("Generated_Images/" + U8(it->path().filename()));
     }
     return out;
+}
+
+fs::path codex_home_dir(const fs::path& codex_home) {
+    if (!codex_home.empty()) return codex_home;
+    const std::string home = env(L"CODEX_HOME");
+    return home.empty() ? P(env(L"USERPROFILE")) / L".codex" : P(home);
+}
+
+json codex_rate_limits(const std::string& session_id, const fs::path& codex_home) {
+    if (session_id.empty() || session_id.find_first_not_of("abcdefABCDEF0123456789-") != std::string::npos) return nullptr;
+    const fs::path sessions = codex_home_dir(codex_home) / L"sessions";
+    const std::string tail = "-" + session_id + ".jsonl";
+    std::error_code ec;
+    std::time_t now = std::time(nullptr);
+    for (int back = 0; back < 3; ++back) {  // the folders are named after the local day the session started
+        std::time_t t = now - back * 86400;
+        std::tm lt = *std::localtime(&t);
+        char day[16];
+        snprintf(day, sizeof day, "%04d/%02d/%02d", lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday);
+        const fs::path dir = sessions / P(day);
+        if (!fs::is_directory(dir, ec)) continue;
+        for (auto& e : fs::directory_iterator(dir, ec)) {
+            const std::string name = U8(e.path().filename());
+            if (name.size() < tail.size() || name.compare(name.size() - tail.size(), tail.size(), tail) != 0) continue;
+            std::string text;
+            if (!read_file(e.path(), text)) return nullptr;
+            json last = nullptr;
+            size_t pos = 0;
+            while (pos < text.size()) {  // the newest line with rate limits wins
+                size_t end = text.find('\n', pos);
+                if (end == std::string::npos) end = text.size();
+                if (text.find("\"rate_limits\"", pos) < end) {
+                    json j = json::parse(text.substr(pos, end - pos), nullptr, false);
+                    const json* p = nullptr;
+                    if (j.is_object() && j.contains("payload") && j["payload"].is_object()) {
+                        if (j["payload"].contains("rate_limits")) p = &j["payload"]["rate_limits"];
+                        else if (j["payload"].contains("info") && j["payload"]["info"].is_object() && j["payload"]["info"].contains("rate_limits"))
+                            p = &j["payload"]["info"]["rate_limits"];
+                    }
+                    if (p && p->is_object()) last = *p;
+                }
+                pos = end + 1;
+            }
+            return last;
+        }
+    }
+    return nullptr;
 }
 
 std::string images_note(const std::vector<std::string>& images) {
@@ -528,6 +574,7 @@ std::vector<json> LineParser::feed(const std::string& line) {
             }
             if (is_error) ev.push_back({{"kind", "error"}, {"text", result_text.empty() ? "The run reported an error." : result_text}});
         } else if (type == "rate_limit_event") {
+            if (j.contains("rate_limit_info") && j["rate_limit_info"].is_object()) rate_limits = j["rate_limit_info"];
             std::string st = j.value("rate_limit_info", json::object()).value("status", "allowed");
             if (st != "allowed") ev.push_back({{"kind", "status"}, {"text", "Usage limit status: " + st}});
         }

@@ -26,6 +26,8 @@ public:
 
     // Values of built-in variables other than now_time / today (usage, tokens). false = not known.
     void set_builtin(std::function<bool(const std::string& name, script::Value& out)> f);
+    // Subscription usage for claude_left_5h / claude_left_week / codex_left (Auto sign-ins); may be null.
+    void set_usage(Usage* u) { usage_ = u; }
 
     // Starts a run of a checked script. "" + err when it cannot start.
     std::string run(const json& script, const std::string& user_id, std::string& err);
@@ -50,12 +52,14 @@ private:
     void log(const json& st, json ev);
     void save(json& st);
     void tick();
+    bool wait_for_usage(json& st, const json& node, const std::set<std::string>& names);
     long long minute_ms() const;
 
     Store& store_;
     Runner& runner_;
     std::function<std::string(const std::string&)> role_of_;
     std::function<bool(const std::string&, script::Value&)> builtin_;
+    Usage* usage_ = nullptr;
     std::mutex mu_;
     std::map<std::string, json> active_;  // running or paused runs
     std::thread clock_;

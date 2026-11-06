@@ -124,6 +124,7 @@ public:
     void run_save(const json& rec);
     std::optional<json> run_get(const std::string& id);
     std::vector<json> runs();                       // newest first, without result text
+    std::map<std::string, long long> tokens_today();  // agent id -> tokens in + out of the runs created since this PC's local midnight
     fs::path run_events_path(const std::string& id);
     void recover_interrupted();
 

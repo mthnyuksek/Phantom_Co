@@ -1,6 +1,7 @@
 #include "script_runner.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <ctime>
 #include <cwchar>
 
@@ -87,6 +88,19 @@ bool extract_value(const std::string& text, Type t, Value& out) {
 
 bool active_status(const std::string& s) { return s == "running" || s == "paused"; }
 
+// Built-ins read from Usage: which sign-in and which field. Older readings are refreshed before a block uses them.
+struct UsageField { const char* brain; const char* field; const char* label; };
+const UsageField* usage_field(const std::string& name) {
+    static const std::map<std::string, UsageField> m = {
+        {"claude_left_5h", {"claude", "left_5h", "Claude's 5-hour limit"}},
+        {"claude_left_week", {"claude", "left_week", "Claude's weekly limit"}},
+        {"codex_left", {"codex", "left", "Codex's limit"}},
+    };
+    auto it = m.find(name);
+    return it == m.end() ? nullptr : &it->second;
+}
+constexpr long long kUsageMaxAge = 30 * 60;
+
 }  // namespace
 
 ScriptRunner::ScriptRunner(Store& store, Runner& runner, std::function<std::string(const std::string&)> role_of)
@@ -124,7 +138,13 @@ void ScriptRunner::start() {
             log(s, {{"kind", "note"}, {"text", "The program was restarted."}});
             for (const json& n : s["script"]["nodes"]) {
                 json& ns = s["nodes"][n["id"].get<std::string>()];
-                if (ns.value("state", "") != "running" || n["type"] != "prompt") continue;
+                if (ns.value("state", "") != "running") continue;
+                if (n["type"] != "prompt" && n["type"] != "delay") {  // was waiting for a usage reading: try again
+                    ns.erase("usage_wait");
+                    ns["state"] = "ready";
+                    continue;
+                }
+                if (n["type"] != "prompt") continue;
                 if (ns.value("restarted", false)) {
                     fail_node(s, n["id"], "It was interrupted twice by a restart.");
                     break;
@@ -169,9 +189,18 @@ void ScriptRunner::tick() {
         json& st = active_[id];
         bool changed = false;
         for (const json& n : st["script"]["nodes"]) {
-            if (n["type"] != "delay") continue;
+            if (!active_status(st.value("status", ""))) break;
             json& ns = st["nodes"][n["id"].get<std::string>()];
-            if (ns.value("state", "") == "running" && ns.value("wake_at", 0LL) <= now) {
+            if (ns.value("state", "") != "running") continue;
+            if (ns.contains("usage_wait")) {  // a usage reading was being refreshed for this block
+                bool still = false;
+                for (auto& b : ns["usage_wait"]) still = still || (usage_ && usage_->refreshing(b.get<std::string>()));
+                if (still) continue;
+                ns.erase("usage_wait");
+                ns["usage_tried"] = true;
+                start_node(st, n);
+                changed = true;
+            } else if (n["type"] == "delay" && ns.value("wake_at", 0LL) <= now) {
                 complete_node(st, n["id"], "out");
                 changed = true;
             }
@@ -375,7 +404,12 @@ void ScriptRunner::start_node(json& st, const json& n) {
     json& ns = st["nodes"][id];
     ns["state"] = "running";
     ns["started"] = now_iso();
-    log(st, {{"kind", "node_started"}, {"node", id}, {"text", node_title(n)}});
+    if (!ns.value("usage_tried", false)) log(st, {{"kind", "node_started"}, {"node", id}, {"text", node_title(n)}});
+    if (type == "set" || type == "if" || type == "delay") {
+        try {
+            if (wait_for_usage(st, n, expr_vars(parse_expr(p.value("expr", ""))))) return;  // the clock thread starts it again
+        } catch (const ScriptError&) { /* reported below */ }
+    }
     try {
         if (type == "start" || type == "end") {
             complete_node(st, id, "out");
@@ -545,6 +579,25 @@ void ScriptRunner::end_run(json& st, const std::string& status, const std::strin
     log(st, {{"kind", "run_ended"}, {"text", status}, {"error", error}});
 }
 
+// A block that reads a usage value older than 30 min first asks for a fresh reading (one tiny run) and waits for it.
+bool ScriptRunner::wait_for_usage(json& st, const json& n, const std::set<std::string>& names) {
+    json& ns = st["nodes"][n["id"].get<std::string>()];
+    if (!usage_ || ns.value("usage_tried", false)) return false;
+    json waits = json::array();
+    std::set<std::string> seen;
+    for (const std::string& name : names) {
+        const UsageField* f = usage_field(name);
+        if (!f || seen.count(f->brain) || usage_->fresh(f->brain, kUsageMaxAge)) continue;
+        seen.insert(f->brain);
+        usage_->refresh(f->brain);
+        waits.push_back(f->brain);
+    }
+    if (waits.empty()) return false;
+    ns["usage_wait"] = waits;
+    log(st, {{"kind", "note"}, {"node", n["id"]}, {"text", "Reading how much of the usage limit is left (one short run)."}});
+    return true;
+}
+
 ValueEnv ScriptRunner::env_for(const json& st, const std::set<std::string>& names) {
     ValueEnv env;
     for (auto& [name, vj] : st["vars"].items()) {
@@ -555,7 +608,13 @@ ValueEnv ScriptRunner::env_for(const json& st, const std::set<std::string>& name
         if (env.count(name) || !builtin_types().count(name)) continue;
         if (name == "now_time") env[name] = local_time_value();
         else if (name == "today") env[name] = local_date_value();
-        else {
+        else if (const UsageField* f = usage_field(name)) {
+            auto r = usage_ ? usage_->get(f->brain) : std::nullopt;
+            if (!r || !r->contains(f->field) || !(*r)[f->field].is_number())
+                throw ScriptError(std::string(f->label) + " is not known: no run of this PC's " + (std::string(f->brain) == "claude" ? "Claude Code" : "Codex") +
+                                  " sign-in has reported it (API keys and other brains do not).");
+            env[name] = Value::number(static_cast<int64_t>(std::llround((*r)[f->field].get<double>() * 100)));
+        } else {
             Value v;
             if (!builtin_ || !builtin_(name, v)) throw ScriptError("'" + name + "' is not known yet.");
             env[name] = v;

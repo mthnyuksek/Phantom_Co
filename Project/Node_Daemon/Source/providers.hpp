@@ -44,6 +44,11 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error);
 // this session made since `since` into <workdir>\Generated_Images\ and returns their paths relative to the work folder.
 std::vector<std::string> collect_codex_images(const std::string& session_id, fs::file_time_type since, const fs::path& workdir, const fs::path& codex_home = {});
 std::string images_note(const std::vector<std::string>& images);  // "" or a line to add to the answer
+// Codex's home folder: `codex_home` (an account), else the CODEX_HOME variable, else ~\.codex.
+fs::path codex_home_dir(const fs::path& codex_home = {});
+// The last "rate_limits" object Codex wrote into the session file of `session_id` (sessions\YYYY\MM\DD\rollout-*-<id>.jsonl,
+// looked for in the last 3 days), null when not found. Codex's exec --json does not print it.
+json codex_rate_limits(const std::string& session_id, const fs::path& codex_home = {});
 
 // Turns the raw JSON lines of a CLI into the common event format:
 //   {kind: status|message|thinking|tool_use|tool_result|log|error, text, ...}
@@ -88,6 +93,7 @@ public:
     double cost_usd = -1;     // -1 = unknown
     long long tokens_in = 0, tokens_out = 0;
     json usage;
+    json rate_limits;         // Claude: the last rate_limit_info (subscription usage windows), null when none came
 
 private:
     std::vector<json> feed_gemini(const json& j, const std::string& type);

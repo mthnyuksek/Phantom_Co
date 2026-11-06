@@ -358,10 +358,28 @@ def run_tests(exe, vault, data, procs, owner, ece, vera):
                                     vars=[{"name": "x", "type": "Number", "init": "1"}]))
     r = wait_run(ece, r["id"])
     check("division by zero fails the run", r and r["status"] == "failed" and "Division by zero" in r.get("error", ""), r and r.get("error"))
-    st, r = make_and_run(ece, chain("Usage", [START, {"id": "u", "type": "if", "props": {"expr": "claude_left_5h > 50"}}, END],
+    st, r = make_and_run(ece, chain("Usage", [START, {"id": "u", "type": "if", "props": {"expr": "claude_left_5h > 50 and claude_left_5h < 64.01"}},
+                                               {"id": "t", "type": "set", "props": {"var": "tok", "expr": "tokens_today"}}, END],
+                                    edges=[{"from": "s", "to": "u"}, {"from": "u", "port": "true", "to": "t"}, {"from": "t", "to": "e"}],
+                                    vars=[{"name": "tok", "type": "Number"}]))
+    r = wait_run(ece, r["id"])
+    check("claude_left_5h read from the last report", r and r["status"] == "done" and r["nodes"]["u"].get("output") == "true", r and (r["status"], r.get("error")))
+    check("fresh usage is not read again", r and not any("usage limit" in e.get("text", "") for e in r["events"]), r and r["events"])
+    check("tokens_today counts today's runs", r and r["vars"]["tok"]["value"] > 0, r and r["vars"])
+    st, r = make_and_run(ece, chain("Old usage", [START, {"id": "u", "type": "if", "props": {"expr": "codex_left > 98.5"}}, END],
                                     edges=[{"from": "s", "to": "u"}, {"from": "u", "port": "true", "to": "e"}]))
     r = wait_run(ece, r["id"])
-    check("unknown built-in fails cleanly", r and r["status"] == "failed" and "not known" in r.get("error", ""), r and r.get("error"))
+    check("old usage: a fresh reading is tried first", r and any("usage limit" in e.get("text", "") for e in r["events"]), r and r["events"])
+    check("old usage still used when no fresh reading comes", r and r["status"] == "done" and node_state(r, "e") == "done", r and (r["status"], r.get("error")))
+    st, r = make_and_run(ece, chain("Weekly", [START, {"id": "u", "type": "if", "props": {"expr": "claude_left_week > 10"}}, END],
+                                    edges=[{"from": "s", "to": "u"}, {"from": "u", "port": "true", "to": "e"}]))
+    r = wait_run(ece, r["id"])
+    check("usage never reported fails cleanly", r and r["status"] == "failed" and "not known" in r.get("error", ""), r and r.get("error"))
+    st, u = ece.get("/api/usage")
+    check("usage visible to editors", st == 200 and u["usage"]["claude"]["left_5h"] == 64.0 and u["usage"]["claude"]["refreshing"] is False, u)
+    check("viewer cannot see usage", vera.get("/api/usage")[0] == 403)
+    check("only the owner asks for a fresh reading", ece.post("/api/usage/refresh", {"brain": "claude"})[0] == 403
+          and owner.post("/api/usage/refresh", {"brain": "claude"})[0] == 200 and owner.post("/api/usage/refresh", {"brain": "gemini"})[0] == 400)
     st, s = ece.post("/api/scripts", chain("Agent draft", [START, END], draft=True))
     check("draft saved as draft", s.get("draft") is True)
     ece.post("/api/scripts/agent_draft/run")
@@ -388,7 +406,8 @@ def run_tests(exe, vault, data, procs, owner, ece, vera):
 
 
 def start_server(exe, vault, data):
-    env = dict(os.environ, PHANTOM_SCRIPT_MINUTE_MS="100")  # a script minute lasts 0.1 s in the tests
+    # a script minute lasts 0.1 s; no real CLI is started to read usage limits
+    env = dict(os.environ, PHANTOM_SCRIPT_MINUTE_MS="100", PHANTOM_USAGE_PROBE="off")
     proc = subprocess.Popen([exe, "--vault", vault, "--data", data, "--port", str(PORT), "--no-window"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
     for _ in range(60):
@@ -414,6 +433,11 @@ def stop_server(proc, hard=False):
 def server_tests(exe):
     tmp = tempfile.mkdtemp(prefix="pc2_script_")
     vault, data = os.path.join(tmp, "Vault"), os.path.join(tmp, "Data")
+    os.makedirs(data, exist_ok=True)
+    now = int(time.time())
+    with open(os.path.join(data, "usage.json"), "w", encoding="utf-8") as f:  # as if a Claude run had just reported it
+        json.dump({"claude": {"provider": "claude", "at": now, "left_5h": 64.0, "resets_5h": now + 3600},
+                   "codex": {"provider": "codex", "at": now - 7200, "left": 99.0, "window_minutes": 43200}}, f)
     procs = [start_server(exe, vault, data)]
     try:
         owner, ece, vera = Client(), Client(), Client()

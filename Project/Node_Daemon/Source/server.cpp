@@ -450,22 +450,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         }
         json act = runner.agent_activity(), agents = json::array();
         // tokens each agent used today (this PC's calendar day); run times are UTC
-        std::map<std::string, long long> today_tokens;
-        {
-            std::time_t now = std::time(nullptr);
-            std::tm lt = *std::localtime(&now);
-            lt.tm_hour = lt.tm_min = lt.tm_sec = 0;
-            lt.tm_isdst = -1;
-            long long day_start = (long long)std::mktime(&lt);
-            for (auto& r : store.runs()) {  // newest first
-                std::string created = r.value("created", "");
-                std::tm ut = {};
-                if (created.size() < 19 || sscanf(created.c_str(), "%d-%d-%dT%d:%d:%d", &ut.tm_year, &ut.tm_mon, &ut.tm_mday, &ut.tm_hour, &ut.tm_min, &ut.tm_sec) != 6) continue;
-                ut.tm_year -= 1900; ut.tm_mon -= 1;
-                if ((long long)_mkgmtime(&ut) < day_start) break;
-                today_tokens[r.value("agent_id", "")] += r.value("tokens_in", 0LL) + r.value("tokens_out", 0LL);
-            }
-        }
+        std::map<std::string, long long> today_tokens = store.tokens_today();
         for (auto a : store.agents()) {
             a["tokens_today"] = today_tokens.count(a["id"].get<std::string>()) ? today_tokens[a["id"].get<std::string>()] : 0;
             a["activity"] = act.contains(a["id"].get<std::string>()) ? act[a["id"].get<std::string>()] : json(nullptr);
@@ -1568,6 +1553,22 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         std::string err;
         if (!opt.scripts->control(req.matches[1], req.matches[2], err)) return fail(res, 409, err);
         send(res, opt.scripts->get(req.matches[1]).value_or(json()));
+    });
+
+    // What is left of the subscription limits, as the last Claude/Codex runs reported it (script built-ins read the Auto sign-ins).
+    add("GET", "/api/usage", kEditor, [&](auto&, auto& res, Ctx&) {
+        json u = opt.usage ? opt.usage->all() : json::object();
+        for (auto& [brain, r] : u.items()) r["refreshing"] = opt.usage->refreshing(brain);
+        send(res, {{"usage", u}});
+    });
+    add("POST", "/api/usage/refresh", kOwner, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        std::string brain = str(b, "brain", 80, "claude");
+        std::string base = brain.substr(0, brain.find('#'));
+        if (!opt.usage || (base != "claude" && base != "codex")) return fail(res, 400, "Only Claude Code and Codex report their usage.");
+        opt.usage->refresh(brain);  // one short run in the background
+        send(res, {{"ok", true}});
     });
 
     // ================================================================== runs

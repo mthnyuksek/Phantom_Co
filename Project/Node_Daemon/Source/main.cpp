@@ -536,8 +536,10 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         Store store(cfg.vault);
         Auth auth(cfg.file.parent_path() / L"auth.json");
         Accounts accounts(cfg.file.parent_path());  // extra Claude/Codex sign-ins of this copy (Settings > Secrets)
+        Usage usage(cfg.file.parent_path(), &accounts);  // what is left of the Claude/Codex limits (script built-ins)
         Runner runner(store);
         runner.set_accounts(&accounts);
+        runner.set_usage(&usage);
         Mcp mcp(cfg.file.parent_path(), store);  // MCP servers of this copy (Settings > MCP)
         mcp.set_port(cfg.port);
         runner.set_mcp(&mcp);
@@ -547,6 +549,14 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
             return u && !u->value("disabled", false) && auth.exists(id) ? auth.role(id) : std::string();
         });
         runner.set_finish_hook([&scripts](const Job& j, const std::string& st, const std::string& a, const std::string& e) { scripts.on_job_finished(j, st, a, e); });
+        scripts.set_usage(&usage);
+        scripts.set_builtin([&store](const std::string& name, script::Value& out) {
+            if (name != "tokens_today") return false;
+            long long sum = 0;
+            for (auto& [agent, n] : store.tokens_today()) sum += n;
+            out = script::Value::number(sum * 100);
+            return true;
+        });
         scripts.start();
         // Talking to ghosts from Telegram (Settings > MCP > Telegram > listen). Never deleted: a long poll may still be
         // waiting when the program quits; stop() only tells its threads to end.
@@ -569,6 +579,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         opt.tunnel = &tunnel;
         opt.telegram = telegram;
         opt.scripts = &scripts;
+        opt.usage = &usage;
         if (!vault_existed) opt.fresh_vault = cfg.vault;
         std::promise<bool> listening;
         std::atomic<bool> signalled{false};
@@ -633,6 +644,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         g_worker.stop();
         runner.shutdown();
         scripts.shutdown();
+        usage.shutdown();
         g_store = nullptr;
         g_runner = nullptr;
         if (single) ReleaseMutex(single);
