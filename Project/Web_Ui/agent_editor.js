@@ -62,8 +62,10 @@ export function openAgentModal(agent, tpl) {
       modelHint();
       drawPreview();
     };
-    // Gemini ghosts without a model use gemini-flash-lite-latest (the server's default: Pro has no free API quota).
-    const modelHint = () => { q('#f-model').placeholder = draft.provider.split(/[#@]/)[0] === 'gemini' ? 'gemini-flash-lite-latest' : 'provider default'; };
+    // Gemini ghosts without a model use gemini-flash-lite-latest (the server's default: Pro has no free API quota); OpenCode
+    // ghosts the default model of their key's service (models are written service/model).
+    const MODEL_HINT = { gemini: 'gemini-flash-lite-latest', opencode: 'nvidia/nvidia/nemotron-3.5-lightning-30b-a3b' };
+    const modelHint = () => { q('#f-model').placeholder = MODEL_HINT[draft.provider.split(/[#@]/)[0]] || 'provider default'; };
     const picker = bindGhostPicker(q('#f-pick'), draft, drawPreview);
     fill();
     m.addEventListener('input', (e) => {

@@ -19,9 +19,12 @@ Accounts::Accounts(const fs::path& data_dir) : dir_(data_dir) {
     json j = read_json(dir_ / L"accounts.json");
     if (j.contains("accounts") && j["accounts"].is_array())
         for (auto& a : j["accounts"])
-            if (a.is_object() && valid_id(a.value("id", "")) && (a.value("provider", "") == "claude" || a.value("provider", "") == "codex" || a.value("provider", "") == "gemini"))
-                items_.push_back({{"id", a["id"]}, {"provider", a["provider"]}, {"kind", a.value("kind", "") == "api_key" ? "api_key" : "subscription"},
-                                  {"name", a.value("name", "")}, {"created", a.value("created", "")}, {"key_hint", a.value("key_hint", "")}});
+            if (a.is_object() && valid_id(a.value("id", "")) && (a.value("provider", "") == "claude" || a.value("provider", "") == "codex" || a.value("provider", "") == "gemini" || a.value("provider", "") == "opencode")) {
+                json item = {{"id", a["id"]}, {"provider", a["provider"]}, {"kind", a.value("kind", "") == "api_key" ? "api_key" : "subscription"},
+                             {"name", a.value("name", "")}, {"created", a.value("created", "")}, {"key_hint", a.value("key_hint", "")}};
+                if (a.value("provider", "") == "opencode") item["service"] = a.value("service", "");  // OpenCode: the model service of the key
+                items_.push_back(item);
+            }
 }
 
 // ---- API keys: encrypted with DPAPI for this Windows user (another user or PC cannot read them), base64 in secrets.json
@@ -110,6 +113,7 @@ json Accounts::add(const std::string& provider, const std::string& name, const s
     const bool api = kind == "api_key";
     json a = {{"id", id}, {"provider", provider}, {"kind", api ? "api_key" : "subscription"}, {"name", name}, {"created", now_iso()},
               {"key_hint", api && key.size() >= 4 ? "…" + key.substr(key.size() - 4) : ""}};
+    if (provider == "opencode") { auto sv = opencode_service_for_key(key); a["service"] = sv ? sv->id : ""; }
     std::error_code ec;
     fs::create_directories(home(id), ec);
     if (api) store_key(id, key);
@@ -150,6 +154,12 @@ std::vector<std::pair<std::string, std::string>> Accounts::env(const std::string
         if (provider == "claude") return {{"CLAUDE_CONFIG_DIR", h}, {"ANTHROPIC_API_KEY", key}, {"ANTHROPIC_AUTH_TOKEN", ""}};
         if (provider == "codex") return {{"CODEX_HOME", h}, {"CODEX_API_KEY", key}, {"OPENAI_API_KEY", key}};
         if (provider == "gemini") return {{"GEMINI_CLI_HOME", h}, {"GEMINI_API_KEY", key}, {"GOOGLE_API_KEY", ""}, {"GOOGLE_GENAI_USE_VERTEXAI", ""}, {"GOOGLE_GENAI_USE_GCA", ""}};
+        if (provider == "opencode") {
+            // XDG_DATA_HOME = the account folder: OpenCode keeps its sessions (and any sign-in of its own) there.
+            std::vector<std::pair<std::string, std::string>> e = {{"XDG_DATA_HOME", h}};
+            for (auto& s : opencode_services()) e.push_back({s.env, s.id == a->value("service", "") ? key : ""});
+            return e;
+        }
         return {};
     }
     // A key in the PC's environment would win over the account's subscription sign-in: leave it out for account runs.
@@ -157,6 +167,7 @@ std::vector<std::pair<std::string, std::string>> Accounts::env(const std::string
     if (provider == "codex") return {{"CODEX_HOME", h}, {"OPENAI_API_KEY", ""}, {"CODEX_API_KEY", ""}};
     // Gemini keeps everything in <GEMINI_CLI_HOME>\.gemini (settings.json with the chosen sign-in, oauth_creds.json)
     if (provider == "gemini") return {{"GEMINI_CLI_HOME", h}, {"GEMINI_API_KEY", ""}, {"GOOGLE_API_KEY", ""}, {"GOOGLE_GENAI_USE_VERTEXAI", ""}, {"GOOGLE_GENAI_USE_GCA", ""}};
+    if (provider == "opencode") return {{"XDG_DATA_HOME", h}};
     return {};
 }
 
@@ -209,6 +220,22 @@ json Accounts::status(const std::string& provider, const std::string& id) {
         st["plan"] = "api key";
         std::string key = key_of(id);
         if (key.empty()) { st["error"] = "key_unreadable"; return st; }
+        if (provider == "opencode") {
+            // NVIDIA's model list is public (200 for any key): the smallest chat request (1 token) shows whether the key works.
+            const OpenCodeService* sv = opencode_service((*acc).value("service", ""));
+            if (!sv) { st["error"] = "unknown"; return st; }
+            st["plan"] = std::string(sv->label) + " api key";
+            HttpClient http("https://integrate.api.nvidia.com", 8000, 20000);
+            std::string model = sv->model;
+            model = model.substr(model.find('/') + 1);  // "nvidia/nvidia/x" -> "nvidia/x" (OpenCode's service prefix off)
+            auto r = http.Post("/v1/chat/completions", {{"Authorization", "Bearer " + key}},
+                               json{{"model", model}, {"max_tokens", 1}, {"messages", json::array({{{"role", "user"}, {"content", "hi"}}})}}.dump(), "application/json");
+            if (!r) st["error"] = "unreachable";
+            else if (r->status == 200 || r->status == 429) st["signed_in"] = true;  // 429: the key is fine, only busy
+            else if (r->status == 401 || r->status == 403) st["error"] = "key_rejected";
+            else st["error"] = "unreachable";
+            return st;
+        }
         const bool claude = provider == "claude", gemini = provider == "gemini";
         HttpClient http(claude ? "https://api.anthropic.com" : gemini ? "https://generativelanguage.googleapis.com" : "https://api.openai.com", 8000, 12000);
         Headers h = claude ? Headers{{"x-api-key", key}, {"anthropic-version", "2023-06-01"}}
@@ -219,6 +246,17 @@ json Accounts::status(const std::string& provider, const std::string& id) {
         else if (r->status == 200) st["signed_in"] = true;
         else if (r->status == 401 || r->status == 403 || (gemini && r->status == 400)) st["error"] = "key_rejected";  // Google: 400 API_KEY_INVALID
         else st["error"] = "unreachable";
+        return st;
+    }
+    if (provider == "opencode") {
+        // Auto = a model service key in the PC's environment, or OpenCode's own sign-ins (<data>\opencode\auth.json, never read out).
+        if (provider_exe("opencode").empty()) { st["error"] = "not_installed"; return st; }
+        for (auto& s : opencode_services())
+            if (!env_var(Widen(s.env).c_str()).empty()) { st["signed_in"] = true; st["plan"] = std::string(s.label) + " api key"; return st; }
+        std::string xdg = env_var(L"XDG_DATA_HOME");
+        fs::path auth = (xdg.empty() ? P(env_var(L"USERPROFILE")) / L".local" / L"share" : P(xdg)) / L"opencode" / L"auth.json";
+        json a = read_json(auth);
+        if (a.is_object() && !a.empty()) { st["signed_in"] = true; st["plan"] = "opencode sign-in"; }
         return st;
     }
     if (provider == "gemini") {
@@ -293,6 +331,7 @@ json Accounts::status(const std::string& provider, const std::string& id) {
 bool Accounts::open_login(const std::string& provider, const std::string& id, std::string& error) {
     if (auto a = id.empty() ? std::nullopt : get(id); a && (*a)["kind"] == "api_key") { error = "This account uses an API key: there is nothing to sign in."; return false; }
     if (provider == "gemini") { error = kGeminiNoGoogle; return false; }
+    if (provider == "opencode") { error = kOpenCodeKeyOnly; return false; }
     std::string exe = provider_exe(provider);
     if (exe.empty()) { error = provider == "claude" ? "Claude Code CLI was not found on this PC." : provider == "codex" ? "Codex CLI was not found on this PC." : "Gemini CLI was not found on this PC."; return false; }
     fs::path cwd = id.empty() ? dir_ : home(id);

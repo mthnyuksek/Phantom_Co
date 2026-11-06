@@ -627,7 +627,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             size_t at = pv.find('@'), hash = pv.find('#');
             if (at != std::string::npos) { at_user = pv.substr(at + 1); pv = pv.substr(0, at); }
             else if (hash != std::string::npos) { account = pv.substr(hash + 1); pv = pv.substr(0, hash); }
-            if (!provider_known(pv) || (pv == "demo" && (!at_user.empty() || hash != std::string::npos)) || (pv == "gemini" && !at_user.empty())) { err = "Unknown provider."; return false; }
+            if (!provider_known(pv) || (pv == "demo" && (!at_user.empty() || hash != std::string::npos)) || ((pv == "gemini" || pv == "opencode") && !at_user.empty())) { err = "Unknown provider."; return false; }
             if (hash != std::string::npos) {
                 auto a = runner.accounts() ? runner.accounts()->get(account) : std::nullopt;
                 if (!a || (*a)["provider"] != pv) { err = "That account does not exist on this PC."; return false; }
@@ -687,14 +687,16 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         if (!runner.accounts()) return fail(res, 404, "Not available.");
         std::string provider = str(b, "provider", 16), name = str(b, "name", 40), kind = str(b, "kind", 16, "subscription");
         std::string key = str(b, "key", 1000);
-        if (provider != "claude" && provider != "codex" && provider != "gemini") return fail(res, 400, "Pick Claude Code, Codex or Gemini CLI.");
+        if (provider != "claude" && provider != "codex" && provider != "gemini" && provider != "opencode") return fail(res, 400, "Pick Claude Code, Codex, Gemini CLI or OpenCode.");
         if (name.empty()) return fail(res, 400, "Please enter a name.");
         if (kind != "subscription" && kind != "api_key") return fail(res, 400, "Unknown account kind.");
         if (provider == "gemini" && kind == "subscription") return fail(res, 400, kGeminiNoGoogle);
+        if (provider == "opencode" && kind == "subscription") return fail(res, 400, kOpenCodeKeyOnly);
         if (kind == "api_key") {
             // A key typed on another PC would cross the network (plain http on a home network): only at this PC.
             if (!is_this_pc(req)) return fail(res, 403, "API keys can only be entered on the PC that runs Phantom Co.");
             if (!Accounts::valid_key(key)) return fail(res, 400, "That does not look like an API key.");
+            if (provider == "opencode" && !opencode_service_for_key(key)) return fail(res, 400, kOpenCodeKeyOnly);
         }
         send(res, runner.accounts()->add(provider, name, kind, kind == "api_key" ? key : ""), 201);
     });
@@ -709,6 +711,10 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             if ((*a)["kind"] != "api_key") return fail(res, 400, "This account has no API key.");
             if (!is_this_pc(req)) return fail(res, 403, "API keys can only be entered on the PC that runs Phantom Co.");
             if (!Accounts::valid_key(key)) return fail(res, 400, "That does not look like an API key.");
+            if ((*a)["provider"] == "opencode") {  // the new key must belong to the same model service
+                auto sv = opencode_service_for_key(key);
+                if (!sv || (*a).value("service", "") != sv->id) return fail(res, 400, "This key belongs to another model service: add it as a new account.");
+            }
             runner.accounts()->set_key(id, key);
         }
         if (b.contains("name")) {
@@ -741,7 +747,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             auto a = runner.accounts()->get(id);
             if (!a) return fail(res, 404, "Account not found.");
             provider = (*a)["provider"];
-        } else if (provider != "claude" && provider != "codex" && provider != "gemini") return fail(res, 400, "Pick Claude Code, Codex or Gemini CLI.");
+        } else if (provider != "claude" && provider != "codex" && provider != "gemini" && provider != "opencode") return fail(res, 400, "Pick Claude Code, Codex, Gemini CLI or OpenCode.");
         if (!runner.accounts()->open_login(provider, id, err)) return fail(res, 409, err);
         send(res, {{"ok", true}});
     });
@@ -1171,8 +1177,8 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         json b;
         if (!parse_body(req, res, b)) return;
         std::string provider;
-        for (auto& p : detect_providers()) if (provider.empty() && p.available && (p.id == "claude" || p.id == "codex" || p.id == "gemini")) provider = p.id;
-        if (provider.empty()) return fail(res, 409, "The guide needs Claude Code, Codex or Gemini CLI on this PC.");
+        for (auto& p : detect_providers()) if (provider.empty() && p.available && (p.id == "claude" || p.id == "codex" || p.id == "gemini" || p.id == "opencode")) provider = p.id;
+        if (provider.empty()) return fail(res, 409, "The guide needs Claude Code, Codex, Gemini CLI or OpenCode on this PC.");
         if (!store.install_skill_template("app_guide")) return fail(res, 500, "The guide skill is missing from the program.");
         json in = {{"name", "Guide"}, {"role", "Phantom Co. guide"}, {"provider", provider}, {"form", "detective"}, {"color", "#9ff0d4"},
                    {"skills", json::array({"app_guide"})}, {"persona", "You are the friendly guide of this company. Be warm, short and concrete."}}, a;

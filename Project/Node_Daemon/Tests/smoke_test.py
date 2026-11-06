@@ -1,6 +1,6 @@
 """Smoke test for the Phantom Co. Node: starts it on a temporary Vault and data folder and walks through the API.
 
-Usage: python smoke_test.py <path-to-pc2_node.exe> [--real claude|codex]
+Usage: python smoke_test.py <path-to-pc2_node.exe> [--real claude|codex|gemini|opencode]  (opencode: NVIDIA_API_KEY in the environment)
 The default run only uses the built-in "demo" provider (costs nothing).
 """
 import json
@@ -187,7 +187,7 @@ def main():
         check("editor cannot read sign-in states", ece.get("/api/accounts/status")[0] == 403)
         st, ss = owner.get("/api/accounts/status")
         mine = [a for a in ss.get("accounts", []) if a["id"] == acct["id"]]
-        check("sign-in states listed", st == 200 and [a["provider"] for a in ss["auto"]] == ["claude", "codex", "gemini"] and mine and mine[0]["agents"] == ["Acct Bot"], ss)
+        check("sign-in states listed", st == 200 and [a["provider"] for a in ss["auto"]] == ["claude", "codex", "gemini", "opencode"] and mine and mine[0]["agents"] == ["Acct Bot"], ss)
         if mine and mine[0]["status"].get("error") != "not_installed":
             check("new account is not signed in (own folder)", mine[0]["status"]["signed_in"] is False, mine[0]["status"])
         check("sign-in only at this PC", owner.post("/api/accounts/login", {"id": acct["id"]}, headers={"X-Forwarded-For": "1.2.3.4"})[0] == 403)
@@ -230,6 +230,23 @@ def main():
         check("fake gemini key not accepted", gs["signed_in"] is False and gs["error"] in ("key_rejected", "unreachable"), gs)
         owner.delete("/api/accounts/" + ga["id"])
         owner.delete("/api/agents/" + gb["id"])
+        # OpenCode: the brain for other model services (NVIDIA keys for now); API key accounts only, not lent by friends
+        check("opencode is a known brain", "opencode" in [p["id"] for p in owner.get("/api/state")[1]["providers"]])
+        st, ob = owner.post("/api/agents", {"name": "Oc Bot", "provider": "opencode", "model": "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b"})
+        check("opencode agent", st == 201 and ob["provider"] == "opencode", ob)
+        check("opencode from a friend refused", owner.post("/api/agents", {"name": "Z", "provider": "opencode@ece"})[0] == 400)
+        check("opencode subscription refused", owner.post("/api/accounts", {"provider": "opencode", "name": "X", "kind": "subscription"})[0] == 400)
+        check("opencode sign-in window refused", owner.post("/api/accounts/login", {"provider": "opencode"})[0] == 409)
+        st, obad = owner.post("/api/accounts", {"provider": "opencode", "name": "X", "kind": "api_key", "key": "sk-unknownservice" + "x" * 24})
+        check("opencode key of an unknown service refused", st == 400 and "NVIDIA" in obad.get("error", ""), obad)
+        st, oa = owner.post("/api/accounts", {"provider": "opencode", "name": "Nvidia", "kind": "api_key", "key": "nvapi-PhantomTest" + "x" * 24})
+        check("opencode nvidia key account", st == 201 and oa.get("service") == "nvidia" and oa["key_hint"] == "…xxxx", oa)
+        check("opencode key of another service cannot replace", owner.put("/api/accounts/" + oa["id"], {"key": "AIzaPhantomTest" + "x" * 24})[0] == 400)
+        check("opencode agent with an account", owner.put("/api/agents/" + ob["id"], {"provider": "opencode#" + oa["id"]})[0] == 200)
+        os_ = [a for a in owner.get("/api/accounts/status")[1]["accounts"] if a["id"] == oa["id"]][0]["status"]
+        check("fake nvidia key not accepted", os_["signed_in"] is False and os_["error"] in ("key_rejected", "unreachable"), os_)
+        owner.delete("/api/accounts/" + oa["id"])
+        owner.delete("/api/agents/" + ob["id"])
         check("key removed with the account", ka["id"] not in open(os.path.join(data, "secrets.json"), encoding="utf-8").read())
 
         # --------------------------------------------------------------- agents

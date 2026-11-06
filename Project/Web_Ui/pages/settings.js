@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { S, isOwner, refreshState } from '../state.js';
 import { $, esc, guard, toast, copyText, twoStep } from '../ui.js';
 import { mcpCardHTML, bindMcp } from './settings_mcp.js';
+import { t } from '../i18n.js';
 
 let view, net = null, tun = null, tunTimer = null;
 let acc = null, accTimer = null, accUntil = 0;  // sign-in states (Secrets), polled for a while after a sign-in window opened
@@ -33,9 +34,9 @@ function draw() {
       <p class="hint" style="margin-top:0">Everything lives here as plain files: people, ghosts, skills, rules, projects, chats, runs. Pointing to a new empty folder creates a fresh Vault there (old files are not moved).</p>
       <div class="inline"><input type="text" id="s-vault" value="${esc(s.vault_path)}"><button class="btn" data-act="save-vault">Use this folder</button><button class="btn" data-act="open-vault">Open</button></div></div>
     <div class="card" id="s-secrets"><h3>Secrets</h3>
-      <p class="hint" style="margin-top:0">The Claude Code, Codex and Gemini CLI sign-ins your ghosts can use. <b>Auto</b> is the sign-in the command-line tool already has on this PC. Add more accounts (another subscription or an API key), then pick one as a ghost's brain. Sign-ins stay in this PC's settings folder, never in the Vault; API keys are stored encrypted for this Windows user and are typed only on this PC.</p>
+      <p class="hint" style="margin-top:0">The Claude Code, Codex, Gemini CLI and OpenCode sign-ins your ghosts can use. <b>Auto</b> is the sign-in the command-line tool already has on this PC. Add more accounts (another subscription or an API key), then pick one as a ghost's brain. Sign-ins stay in this PC's settings folder, never in the Vault; API keys are stored encrypted for this Windows user and are typed only on this PC.</p>
       <div id="s-acc-list">${secretsHTML()}</div>
-      <div class="inline acc-add"><select id="s-acc-prov"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="gemini">Gemini CLI</option></select>
+      <div class="inline acc-add"><select id="s-acc-prov"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="gemini">Gemini CLI</option><option value="opencode">OpenCode (NVIDIA…)</option></select>
         <select id="s-acc-kind"><option value="subscription">Subscription</option><option value="api_key">API key</option></select>
         <input type="text" id="s-acc-name" maxlength="40" placeholder="Account name, e.g. Work">
         <input type="password" id="s-acc-key" maxlength="400" placeholder="Paste the API key" autocomplete="off" hidden>
@@ -65,7 +66,8 @@ async function loadAbout(check = false) {
   if (about?.update?.checking) setTimeout(() => loadAbout(), 2000);
 }
 
-const PROV = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' };
+const PROV = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', opencode: 'OpenCode' };
+const KEY_ONLY = ['gemini', 'opencode'];  // no subscription sign-in: API keys only
 function keyStatusHTML(a) {
   const st = a.status, hint = a.key_hint ? ` <code class="acc-key">${esc(a.key_hint)}</code>` : '';
   if (!st) return '<span class="chip">Checking…</span>' + hint;
@@ -88,14 +90,14 @@ function secretsHTML() {
   const list = acc ? acc.accounts : (S.state.accounts || []);
   const rows = autos.map((a) => `<div class="acc-row"><div class="acc-main"><div><b>${esc(PROV[a.provider] || a.label)} · Auto</b></div>
       <div class="acc-state">${statusHTML(a.status, a.available)}</div>${usedHTML(a.agents)}</div>
-      <div class="acc-btns">${a.available && a.status && !a.status.signed_in && a.provider !== 'gemini' ? `<button class="btn small" data-act="acc-login" data-provider="${esc(a.provider)}">Sign in</button>` : ''}</div></div>`);
+      <div class="acc-btns">${a.available && a.status && !a.status.signed_in && !KEY_ONLY.includes(a.provider) ? `<button class="btn small" data-act="acc-login" data-provider="${esc(a.provider)}">Sign in</button>` : ''}</div></div>`);
   for (const a of list) {
     const api = a.kind === 'api_key';
-    rows.push(`<div class="acc-row"><div class="acc-main"><div class="acc-title"><b>${esc(PROV[a.provider])} ·</b> <input type="text" class="acc-name" data-id="${esc(a.id)}" maxlength="40" value="${esc(a.name)}" title="Rename">${api ? ' <span class="badge">API key</span>' : ''}</div>
+    rows.push(`<div class="acc-row"><div class="acc-main"><div class="acc-title"><b>${esc(PROV[a.provider])} ·</b> <input type="text" class="acc-name" data-id="${esc(a.id)}" maxlength="40" value="${esc(a.name)}" title="Rename">${api ? ' <span class="badge">API key</span>' : ''}${a.service ? ` <span class="badge">${esc(a.service.toUpperCase())}</span>` : ''}</div>
       <div class="acc-state">${api ? keyStatusHTML(a) : statusHTML(a.status)}</div>${usedHTML(a.agents)}
       <div class="inline acc-keyedit" data-for="${esc(a.id)}" hidden><input type="password" class="acc-newkey" maxlength="400" placeholder="Paste the new API key" autocomplete="off"><button class="btn small" data-act="acc-key-save" data-id="${esc(a.id)}">Save key</button></div></div>
       <div class="acc-btns">${api ? `<button class="btn small" data-act="acc-key" data-id="${esc(a.id)}">Replace key</button>`
-        : a.provider === 'gemini' ? '' : `<button class="btn small" data-act="acc-login" data-id="${esc(a.id)}">${a.status?.signed_in ? 'Sign in again' : 'Sign in'}</button>`}
+        : KEY_ONLY.includes(a.provider) ? '' : `<button class="btn small" data-act="acc-login" data-id="${esc(a.id)}">${a.status?.signed_in ? 'Sign in again' : 'Sign in'}</button>`}
       <button class="btn small danger" data-act="acc-del" data-id="${esc(a.id)}">Remove</button></div></div>`);
   }
   return rows.join('');
@@ -203,11 +205,12 @@ export async function render(v) {
   });
   view.onchange = guard(async (e) => {
     if (e.target.id === 's-acc-kind') { $('#s-acc-key', view).hidden = e.target.value !== 'api_key'; return; }
-    if (e.target.id === 's-acc-prov') {  // Gemini CLI works only with an API key (Google refuses the free Google sign-in)
-      const kind = $('#s-acc-kind', view), gem = e.target.value === 'gemini';
-      kind.querySelector('option[value="subscription"]').disabled = gem;
-      if (gem) kind.value = 'api_key';
+    if (e.target.id === 's-acc-prov') {  // Gemini CLI (Google refuses the free sign-in) and OpenCode work only with an API key
+      const kind = $('#s-acc-kind', view), keyOnly = KEY_ONLY.includes(e.target.value);
+      kind.querySelector('option[value="subscription"]').disabled = keyOnly;
+      if (keyOnly) kind.value = 'api_key';
       $('#s-acc-key', view).hidden = kind.value !== 'api_key';
+      $('#s-acc-key', view).placeholder = t(e.target.value === 'opencode' ? 'Paste the NVIDIA key (nvapi-…)' : 'Paste the API key');
       return;
     }
     if (e.target.classList.contains('acc-name')) {

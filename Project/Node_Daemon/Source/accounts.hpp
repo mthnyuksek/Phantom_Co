@@ -18,6 +18,9 @@ namespace pc2 {
 // Google refuses the free Google sign-in for Gemini CLI since late 2026: Gemini works only with an API key.
 inline constexpr const char* kGeminiNoGoogle =
     "Google no longer lets Gemini CLI use a free Google sign-in. Add a Gemini API key instead (Settings > Secrets, kind \"API key\").";
+// OpenCode accounts are API keys of a model service OpenCode knows; the key's prefix tells which one (NVIDIA: nvapi-).
+inline constexpr const char* kOpenCodeKeyOnly =
+    "OpenCode accounts are API keys of a model service. Supported for now: NVIDIA (build.nvidia.com, keys start with nvapi-).";
 
 class Accounts {
 public:

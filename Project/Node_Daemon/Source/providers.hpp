@@ -8,7 +8,7 @@
 namespace pc2 {
 
 struct ProviderInfo {
-    std::string id;     // "claude" | "codex" | "demo"
+    std::string id;     // "claude" | "codex" | "gemini" | "opencode" | "demo"
     std::string label;
     bool available = false;
     std::string path;
@@ -16,7 +16,7 @@ struct ProviderInfo {
 
 std::vector<ProviderInfo> detect_providers();
 bool provider_known(const std::string& id);
-std::string provider_exe(const std::string& id);  // full path of the claude / codex CLI, "" when not found
+std::string provider_exe(const std::string& id);  // full path of the claude / codex / gemini / opencode CLI, "" when not found
 
 struct RunSpec {
     std::string provider;
@@ -35,7 +35,7 @@ struct RunSpec {
     std::vector<std::string> mcp;          // server names
     std::string mcp_exe, mcp_key;
     int mcp_port = 0;
-    std::string mcp_file;                  // Claude: --mcp-config file; Gemini: system settings file (written by build_command)
+    std::string mcp_file;                  // Claude: --mcp-config file; Gemini: system settings file; OpenCode: the run's whole config (always; written by build_command)
 };
 
 bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error);
@@ -49,6 +49,19 @@ std::string images_note(const std::vector<std::string>& images);  // "" or a lin
 //   {kind: status|message|thinking|tool_use|tool_result|log|error, text, ...}
 // Used for Gemini ghosts without a model: works with a free API key (Pro models have no free quota).
 inline constexpr const char* kGeminiDefaultModel = "gemini-flash-lite-latest";
+
+// OpenCode ("other models"): one CLI for many model services. An API key account's service follows the key's prefix;
+// a ghost without a model uses the service's default model (OpenCode names models "<service>/<model>").
+struct OpenCodeService {
+    const char* id;          // OpenCode's provider id, e.g. "nvidia"
+    const char* label;       // "NVIDIA"
+    const char* prefix;      // key prefix, e.g. "nvapi-"
+    const char* env;         // environment variable OpenCode reads the key from
+    const char* model;       // default model
+};
+const OpenCodeService* opencode_service_for_key(const std::string& key);  // nullptr = a key of no known service
+const OpenCodeService* opencode_service(const std::string& id);
+const std::vector<OpenCodeService>& opencode_services();
 
 class LineParser {
 public:
@@ -66,9 +79,11 @@ public:
 
 private:
     std::vector<json> feed_gemini(const json& j, const std::string& type);
+    std::vector<json> feed_opencode(const json& j, const std::string& type);
     std::string gemini_error(const std::string& raw) const;  // readable error; a used-up quota becomes one clear text
     std::string provider_;
-    std::string pending_;  // Gemini: assistant text since the last tool call
+    std::string pending_;  // Gemini / OpenCode: assistant text since the last tool call
+    bool after_tool_ = false;  // OpenCode: a tool ran since the last text
     std::string model_;    // Gemini: the model named by the init event
     int quota_hits_ = 0;   // Gemini: "Attempt n failed with status 429" lines seen
 };

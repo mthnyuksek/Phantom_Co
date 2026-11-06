@@ -34,18 +34,40 @@ static std::string codex_path() {
 static std::string gemini_path() {
     return find_exe({L"gemini.cmd", L"gemini.exe"}, {env(L"APPDATA") + "\\npm\\gemini.cmd"});
 }
+static std::string opencode_path() {
+    return find_exe({L"opencode.cmd", L"opencode.exe"}, {env(L"APPDATA") + "\\npm\\opencode.cmd"});
+}
+
+const std::vector<OpenCodeService>& opencode_services() {
+    // More services (OpenRouter, Groq...) are one line each once their default model and key check are known.
+    static const std::vector<OpenCodeService> list = {
+        {"nvidia", "NVIDIA", "nvapi-", "NVIDIA_API_KEY", "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b"},
+    };
+    return list;
+}
+const OpenCodeService* opencode_service_for_key(const std::string& key) {
+    for (auto& s : opencode_services()) if (key.rfind(s.prefix, 0) == 0) return &s;
+    return nullptr;
+}
+const OpenCodeService* opencode_service(const std::string& id) {
+    for (auto& s : opencode_services()) if (id == s.id) return &s;
+    return nullptr;
+}
 
 std::vector<ProviderInfo> detect_providers() {
-    std::string c = claude_path(), x = codex_path(), g = gemini_path();
+    std::string c = claude_path(), x = codex_path(), g = gemini_path(), o = opencode_path();
     return {{"claude", "Claude Code", !c.empty(), c},
             {"codex", "Codex", !x.empty(), x},
             {"gemini", "Gemini CLI", !g.empty(), g},
+            {"opencode", "OpenCode", !o.empty(), o},
             {"demo", "Demo (simulated, no subscription used)", true, ""}};
 }
 
-std::string provider_exe(const std::string& id) { return id == "claude" ? claude_path() : id == "codex" ? codex_path() : id == "gemini" ? gemini_path() : ""; }
+std::string provider_exe(const std::string& id) {
+    return id == "claude" ? claude_path() : id == "codex" ? codex_path() : id == "gemini" ? gemini_path() : id == "opencode" ? opencode_path() : "";
+}
 
-bool provider_known(const std::string& id) { return id == "claude" || id == "codex" || id == "gemini" || id == "demo"; }
+bool provider_known(const std::string& id) { return id == "claude" || id == "codex" || id == "gemini" || id == "opencode" || id == "demo"; }
 
 static std::string join(const std::vector<std::string>& v) {
     std::string s;
@@ -163,6 +185,68 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
         if (!rs.system_file.empty()) out.env.push_back({"GEMINI_SYSTEM_MD", rs.system_file});
         return true;
     }
+    if (rs.provider == "opencode") {
+        out.exe = opencode_path();
+        if (out.exe.empty()) {
+            error = "OpenCode was not found on this PC (is `opencode` installed and on PATH?).";
+            return false;
+        }
+        if (rs.mcp_file.empty() || rs.system_file.empty()) { error = "The run has no OpenCode settings file."; return false; }
+        // Lean profile: one agent "phantom" from the run's own config file (our system prompt, a step limit). Everything is
+        // denied first, then the skills' tools are allowed: denying single tools is not enough, "task" would hand the work
+        // to a sub-agent with every tool.
+        json perm = {{"*", "deny"}};
+        for (auto& t : rs.tools) {
+            if (t == "Read") { perm["read"] = "allow"; perm["list"] = "allow"; }
+            else if (t == "Glob") perm["glob"] = "allow";
+            else if (t == "Grep") perm["grep"] = "allow";
+            else if (t == "Write" || t == "Edit" || t == "MultiEdit" || t == "NotebookEdit") perm["edit"] = "allow";
+            else if (t == "Bash") perm["bash"] = "allow";
+            else if (t == "WebFetch") perm["webfetch"] = "allow";
+            else if (t == "WebSearch") perm["websearch"] = "allow";
+        }
+        if (!rs.add_dirs.empty()) {  // folders outside the work folder (the "*" rule above denies them)
+            json ext = {{"*", "deny"}};
+            for (auto& d : rs.add_dirs) {
+                std::string dir = replace_all(d, "/", "\\");
+                while (!dir.empty() && dir.back() == '\\') dir.pop_back();
+                ext[dir] = "allow";
+                ext[dir + "\\*"] = "allow";
+            }
+            perm["external_directory"] = ext;
+        }
+        json mcp = json::object();
+        for (auto& n : rs.mcp) {
+            json cmd = json::array({rs.mcp_exe});
+            for (auto& a : proxy_args(rs, n)) cmd.push_back(a);
+            mcp[n] = {{"type", "local"}, {"command", cmd}, {"enabled", true}, {"timeout", 3600000}};  // a call may wait for a person's approval
+            perm[n + "_*"] = "allow";  // OpenCode names MCP tools "<server>_<tool>"
+        }
+        // {file:...} makes OpenCode read the prompt itself (it is never parsed as part of this JSON).
+        json cfg = {{"$schema", "https://opencode.ai/config.json"}, {"autoupdate", false}, {"share", "disabled"}, {"mcp", mcp},
+                    {"agent", {{"phantom", {{"mode", "primary"}, {"prompt", "{file:" + replace_all(rs.system_file, "\\", "/") + "}"},
+                                            {"steps", rs.max_turns}, {"permission", perm}}}}}};
+        if (!write_file_atomic(P(rs.mcp_file), cfg.dump(2))) { error = "Could not write the OpenCode settings of the run."; return false; }
+        // An empty config folder of our own: the user's global OpenCode config (agents, plugins, MCP servers) stays out.
+        const fs::path cfg_home = P(rs.mcp_file).parent_path() / L"OpenCode_Config";
+        std::error_code ec;
+        fs::create_directories(cfg_home, ec);
+        out.env.push_back({"OPENCODE_CONFIG", rs.mcp_file});
+        out.env.push_back({"XDG_CONFIG_HOME", U8(cfg_home)});
+        out.env.push_back({"OPENCODE_CONFIG_CONTENT", ""});
+        out.env.push_back({"OPENCODE_CONFIG_DIR", ""});
+        out.env.push_back({"OPENCODE_PERMISSION", ""});
+        out.env.push_back({"OPENCODE_DISABLE_PROJECT_CONFIG", "1"});  // no opencode.json of the work folder
+        out.env.push_back({"OPENCODE_DISABLE_CLAUDE_CODE", "1"});     // no CLAUDE.md, no ~/.claude/skills
+        out.env.push_back({"OPENCODE_DISABLE_EXTERNAL_SKILLS", "1"});
+        out.env.push_back({"OPENCODE_DISABLE_AUTOUPDATE", "1"});
+        out.env.push_back({"OPENCODE_DISABLE_LSP_DOWNLOAD", "1"});
+        out.stdin_data = rs.prompt;
+        out.args = {"run", "--pure", "--format", "json", "--agent", "phantom", "--dir", rs.workdir};
+        if (!rs.model.empty()) { out.args.push_back("-m"); out.args.push_back(rs.model); }
+        if (!rs.session_id.empty()) { out.args.push_back("-s"); out.args.push_back(rs.session_id); }
+        return true;
+    }
     error = "Unknown provider: " + rs.provider;
     return false;
 }
@@ -197,7 +281,7 @@ std::string images_note(const std::vector<std::string>& images) {
 
 static std::string tool_summary(const json& input) {
     if (!input.is_object()) return "";
-    for (const char* k : {"command", "file_path", "absolute_path", "path", "dir_path", "pattern", "url", "description", "query", "prompt"})
+    for (const char* k : {"command", "file_path", "filePath", "absolute_path", "path", "dir_path", "pattern", "url", "description", "query", "prompt"})
         if (input.contains(k) && input[k].is_string()) return truncate_utf8(input[k].get<std::string>(), 300);
     return truncate_utf8(dumps(input), 300);
 }
@@ -278,6 +362,72 @@ std::vector<json> LineParser::feed_gemini(const json& j, const std::string& type
     return ev;
 }
 
+// An OpenCode error event: {name, data: {message, statusCode, responseBody}}. Keeps the service's own short reason.
+static std::string opencode_error(const json& e) {
+    const json d = e.is_object() && e.contains("data") && e["data"].is_object() ? e["data"] : json::object();
+    std::string m = d.contains("message") && d["message"].is_string() ? d["message"].get<std::string>() : e.is_object() ? e.value("name", "") : "";
+    const int code = d.contains("statusCode") && d["statusCode"].is_number() ? d["statusCode"].get<int>() : 0;
+    std::string detail;
+    const json body = json::parse(d.contains("responseBody") && d["responseBody"].is_string() ? d["responseBody"].get<std::string>() : "", nullptr, false);
+    if (body.is_object()) {
+        if (body.contains("detail") && body["detail"].is_string()) detail = body["detail"];
+        else if (body.contains("error") && body["error"].is_object() && body["error"].contains("message") && body["error"]["message"].is_string()) detail = body["error"]["message"];
+        else if (body.contains("message") && body["message"].is_string()) detail = body["message"];
+    }
+    if (code == 429)
+        return "The model service says the quota is used up or the requests come too fast (429). Wait a little and try again, or write another model in the ghost's Model field.";
+    if (code == 401 || code == 403)
+        return "The model service refused the API key (" + std::to_string(code) + (detail.empty() ? "" : ": " + truncate_utf8(detail, 200)) + ").";
+    if (e.is_object() && e.value("name", "") == "UnknownError")
+        return truncate_utf8(m, 300) + " (Is the ghost's Model field right? OpenCode models look like service/model, e.g. nvidia/nvidia/nemotron-3.5-lightning-30b-a3b.)";
+    if (code && !detail.empty()) return "The model service answered " + std::to_string(code) + ": " + truncate_utf8(detail, 300);
+    return m.empty() ? "The run failed." : truncate_utf8(m, 400);
+}
+
+// opencode run --format json: step_start, text, reasoning, tool_use (one event when the call has finished), step_finish
+// (tokens, cost), error. Every line carries the sessionID. There is no closing event: the answer is the text after the last tool call.
+std::vector<json> LineParser::feed_opencode(const json& j, const std::string& type) {
+    std::vector<json> ev;
+    const std::string sid = j.value("sessionID", "");
+    if (!sid.empty() && session_id.empty()) {
+        session_id = sid;
+        ev.push_back({{"kind", "status"}, {"text", "Session started"}});
+    }
+    const json part = j.contains("part") && j["part"].is_object() ? j["part"] : json::object();
+    if (type == "text") {
+        const std::string t = part.value("text", "");
+        if (t.empty()) return ev;
+        if (after_tool_) { pending_.clear(); after_tool_ = false; }
+        pending_ += (pending_.empty() ? "" : "\n\n") + t;
+        result_text = pending_;
+        ev.push_back({{"kind", "message"}, {"text", t}});
+    } else if (type == "reasoning") {
+        const std::string t = part.value("text", "");
+        if (!t.empty()) ev.push_back({{"kind", "thinking"}, {"text", truncate_utf8(t, 2000)}});
+    } else if (type == "tool_use") {
+        const json st = part.contains("state") && part["state"].is_object() ? part["state"] : json::object();
+        ev.push_back({{"kind", "tool_use"}, {"name", part.value("tool", "tool")}, {"text", tool_summary(st.value("input", json::object()))}});
+        std::string out = st.contains("output") && st["output"].is_string() ? st["output"].get<std::string>() : "";
+        if (out.empty() && st.contains("error") && st["error"].is_string()) out = st["error"];
+        ev.push_back({{"kind", "tool_result"}, {"is_error", st.value("status", "") == "error"}, {"text", truncate_utf8(out, 1500)}});
+        after_tool_ = true;
+    } else if (type == "step_finish") {
+        if (part.contains("tokens") && part["tokens"].is_object()) {
+            const json t = part["tokens"];
+            const json c = t.contains("cache") && t["cache"].is_object() ? t["cache"] : json::object();
+            tokens_in += t.value("input", 0LL) + c.value("read", 0LL) + c.value("write", 0LL);
+            tokens_out += t.value("output", 0LL) + t.value("reasoning", 0LL);
+            usage = {{"input_tokens", tokens_in}, {"output_tokens", tokens_out}};
+        }
+        if (part.contains("cost") && part["cost"].is_number()) cost_usd = (cost_usd < 0 ? 0 : cost_usd) + part["cost"].get<double>();
+    } else if (type == "error") {
+        is_error = true;
+        result_text = opencode_error(j.value("error", json::object()));
+        ev.push_back({{"kind", "error"}, {"text", result_text}});
+    }
+    return ev;
+}
+
 std::vector<json> LineParser::feed(const std::string& line) {
     std::vector<json> ev;
     json j = json::parse(line, nullptr, false);
@@ -344,6 +494,7 @@ std::vector<json> LineParser::feed(const std::string& line) {
     }
 
     if (provider_ == "gemini") return feed_gemini(j, type);
+    if (provider_ == "opencode") return feed_opencode(j, type);
 
     // codex --json
     if (type == "thread.started") {

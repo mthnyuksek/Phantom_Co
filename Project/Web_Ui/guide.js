@@ -10,7 +10,7 @@ const GUIDE_HELLO = {
   en: "Hi, I'm your guide! I know every corner of Phantom Co. Tell me what you'd like your ghosts to do (write, code, research, plan...) and I'll help you hire the right team, step by step. Or just ask me how anything works.",
   tr: "Merhaba, ben rehberinim! Phantom Co.'nun her köşesini bilirim. Hayaletlerinin ne yapmasını istediğini söyle (yazı, kod, araştırma, planlama...), doğru ekibi adım adım birlikte kuralım. Ya da herhangi bir şeyin nasıl çalıştığını sor.",
 };
-const hasBrain = () => (S.state?.providers || []).some((p) => p.available && (p.id === 'claude' || p.id === 'codex' || p.id === 'gemini'));
+const hasBrain = () => (S.state?.providers || []).some((p) => p.available && (p.id === 'claude' || p.id === 'codex' || p.id === 'gemini' || p.id === 'opencode'));
 export const canHireGuide = () => isOwner() && !(S.state?.agents || []).some((a) => (a.skills || []).includes('app_guide'));
 
 export async function hireGuide() {

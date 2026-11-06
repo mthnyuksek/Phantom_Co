@@ -1,6 +1,6 @@
 """MCP test: Settings > MCP API, secrets, the proxy, and (with --real) a ghost that calls MCP tools and waits for approval.
 
-Usage: python -X utf8 -I mcp_test.py <absolute path of phantom_co.exe> [--real claude|codex]
+Usage: python -X utf8 -I mcp_test.py <absolute path of phantom_co.exe> [--real claude|codex|opencode]
 Without --real nothing is sent to an AI. With --real a small model calls a local echo server (needs Python here) and the
 built-in Telegram server without a token; one call is approved and one declined through the API.
 """

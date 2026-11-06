@@ -164,7 +164,7 @@ function paintShell() {
   const s = S.state;
   $('#brand-name').textContent = s.company.name;
   $('#brand-ghost').innerHTML = ghostSVG({ form: 'classic', color: brandColor(), size: 34 });
-  $('#provider-chips').innerHTML = s.providers.filter((p) => p.id !== 'demo' && (p.id !== 'gemini' || p.available))  // Gemini only when installed: most people do not have it
+  $('#provider-chips').innerHTML = s.providers.filter((p) => p.id !== 'demo' && ((p.id !== 'gemini' && p.id !== 'opencode') || p.available))  // Gemini / OpenCode only when installed: most people do not have them
     .map((p) => `<span class="chip ${p.available ? 'ok' : ''}" title="${p.available ? 'Found on this PC' : 'Not found on this PC'}">${esc(p.label)}</span>`).join('');
   $('#home-btn').hidden = !(bridge && isRemote);
   const m = s.me;
