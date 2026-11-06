@@ -215,7 +215,7 @@ void ScriptRunner::tick() {
 }
 
 // --------------------------------------------------------------------- public
-std::string ScriptRunner::run(const json& script, const std::string& user_id, std::string& err) {
+std::string ScriptRunner::run(const json& script, const std::string& user_id, std::string& err, const std::string& trigger) {
     std::lock_guard<std::mutex> lk(mu_);
     if (stopping_) { err = "The program is closing."; return ""; }
     std::string script_id = script.value("id", "");
@@ -240,13 +240,14 @@ std::string ScriptRunner::run(const json& script, const std::string& user_id, st
         }
         st["vars"][v.value("name", "")] = value_to_json(val);
     }
+    if (!trigger.empty()) st["trigger"] = trigger;
     for (const json& n : script["nodes"]) st["nodes"][n["id"].get<std::string>()] = {{"state", "waiting"}};
     for (size_t i = 0; i < script["edges"].size(); ++i) st["edges"].push_back("pending");
 
     std::string id = st["id"];
     active_[id] = st;
     json& s = active_[id];
-    log(s, {{"kind", "run_started"}, {"text", "Started"}, {"user", user_id}});
+    log(s, {{"kind", "run_started"}, {"text", trigger == "wake" ? "Started by its wake-up" : "Started"}, {"user", user_id}});
     advance(s);
     save(s);
     if (!active_status(s.value("status", ""))) active_.erase(id);
@@ -312,7 +313,7 @@ std::vector<json> ScriptRunner::list(const std::string& script_id) {
         }
         out.push_back({{"id", st.value("id", "")}, {"script_id", st.value("script_id", "")}, {"script_name", st.value("script_name", "")},
                        {"user_id", st.value("user_id", "")}, {"status", st.value("status", "")}, {"created", st.value("created", "")},
-                       {"ended", st.value("ended", "")}, {"error", st.value("error", "")}});
+                       {"ended", st.value("ended", "")}, {"error", st.value("error", "")}, {"trigger", st.value("trigger", "")}});
     }
     return out;
 }

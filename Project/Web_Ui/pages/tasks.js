@@ -7,10 +7,12 @@ import { openRunModal } from './runs.js';
 let view, list = [];
 
 // "Wakes every 30 min" / "Wakes every day at 09:00" / "" when the task has no wake-up
-const wakeText = (t) => !t.wake ? '' : (t.wake_on ? '' : '⏸ ') + (t.wake === 'interval' ? `Wakes every ${t.wake_every} min` : `Wakes every day at ${t.wake_at}`);
+export const wakeText = (t) => !t.wake ? '' : (t.wake_on ? '' : '⏸ ') + (t.wake === 'interval' ? `Wakes every ${t.wake_every} min` : `Wakes every day at ${t.wake_at}`);
 
-function openWakeModal(t, done) {
-  modal(`<h2>Wake-up</h2><p class="sub">The task runs again by itself. It uses the rights of the person who made it and is skipped while it is still running. It only wakes while Phantom Co. is open.</p>
+// Also used by Scripts: opt.url = where the setting is PUT, opt.sub = the explanation under the title.
+export function openWakeModal(t, done, opt = {}) {
+  const sub = opt.sub || 'The task runs again by itself. It uses the rights of the person who made it and is skipped while it is still running. It only wakes while Phantom Co. is open.';
+  modal(`<h2>Wake-up</h2><p class="sub">${esc(sub)}</p>
     <label>Repeat</label><select id="w-kind"><option value="none">Never</option><option value="interval">Every few minutes</option><option value="daily">Every day at a time</option></select>
     <div id="w-int"><label>Every (minutes)</label><input type="number" id="w-every" min="1" max="10080" value="${esc(t.wake_every || 60)}"></div>
     <div id="w-day"><label>Time (this PC's clock)</label><input type="time" id="w-at" value="${esc(t.wake_at || '09:00')}"></div>
@@ -30,7 +32,7 @@ function openWakeModal(t, done) {
       if (e.target.id === 'w-cancel') return closeModal();
       if (e.target.id !== 'w-ok') return;
       const kind = $('#w-kind', m).value;
-      const r = await api('PUT', `/api/tasks/${t.id}/wake`, { wake: kind, every_min: +$('#w-every', m).value, at: $('#w-at', m).value, on: $('#w-on', m).checked });
+      const r = await api('PUT', opt.url || `/api/tasks/${t.id}/wake`, { wake: kind, every_min: +$('#w-every', m).value, at: $('#w-at', m).value, on: $('#w-on', m).checked });
       closeModal(); toast('Wake-up saved'); done(r);
     }));
   });

@@ -393,6 +393,56 @@ def run_tests(exe, vault, data, procs, owner, ece, vera):
     ece.post("/api/scripts/agent_draft/run")
     check("running a draft makes it a normal script", ece.get("/api/scripts/agent_draft")[1].get("draft") is False)
 
+    # 6b. wake-ups: the scheduler (15 s) starts the script with the rights of the person who set the wake-up
+    st, wd = ece.post("/api/scripts", chain("Wake draft", [START, END], draft=True))
+    check("a draft cannot get a wake-up", ece.put("/api/scripts/wake_draft/wake", {"wake": "interval", "every_min": 5})[0] == 409)
+    st, ws = ece.post("/api/scripts", chain("Waker", [START, P("p", "quill", "hi"), END]))
+    check("bad wake-up refused", ece.put("/api/scripts/waker/wake", {"wake": "interval", "every_min": 0})[0] == 400
+          and ece.put("/api/scripts/waker/wake", {"wake": "daily", "at": "25:00"})[0] == 400)
+    check("only the maker sets the wake-up", owner.put("/api/scripts/agent_draft/wake", {"wake": "none"})[0] == 200
+          and vera.put("/api/scripts/waker/wake", {"wake": "none"})[0] == 403)
+    st, w = ece.put("/api/scripts/waker/wake", {"wake": "interval", "every_min": 60})
+    check("wake-up saved", st == 200 and w["wake"] == "interval" and w["wake_every"] == 60 and w["wake_on"] is True and w["wake_by"] == "ece", w)
+    st, w2 = ece.put("/api/scripts/waker", {"name": "Waker", "description": "still wakes"})
+    check("a normal save keeps the wake-up", st == 200 and w2.get("wake") == "interval" and w2.get("wake_by") == "ece", w2)
+    lst = vera.get("/api/scripts")[1]["scripts"]
+    check("list shows the wake-up", any(x["id"] == "waker" and x["wake"] == "interval" and x["wake_on"] for x in lst), lst)
+    fpath = os.path.join(vault, "Scripts", "waker.json")
+    doc = json.load(open(fpath, encoding="utf-8"))
+    doc["wake_last"] = str(int(time.time()) - 3700)  # as if the hour had passed
+    json.dump(doc, open(fpath, "w", encoding="utf-8"))
+    woke = None
+    for _ in range(40):
+        runs = vera.get("/api/script_runs?script=waker")[1]["runs"]
+        if runs:
+            woke = runs[0]
+            break
+        time.sleep(1)
+    check("the wake-up started the script", woke is not None and woke.get("trigger") == "wake" and woke.get("user_id") == "ece", woke)
+    if woke:
+        r = wait_run(vera, woke["id"])
+        check("woken run finished", r and r["status"] == "done", r and r.get("status"))
+    w3 = vera.get("/api/scripts/waker")[1]
+    check("wake time moved on, no error", int(w3.get("wake_last", "0")) > int(time.time()) - 120 and w3.get("wake_error") == "", w3)
+    # a script with problems is skipped and says why
+    doc = json.load(open(fpath, encoding="utf-8"))
+    doc["nodes"] = [n for n in doc["nodes"] if n["type"] != "end"]
+    doc["edges"] = [e for e in doc["edges"] if e["to"] != "end"]
+    doc["nodes"].append({"id": "x", "type": "nope_bad", "x": 0, "y": 0, "props": {}})
+    doc["wake_last"] = str(int(time.time()) - 3700)
+    json.dump(doc, open(fpath, "w", encoding="utf-8"))
+    skipped = None
+    for _ in range(40):
+        w4 = vera.get("/api/scripts/waker")[1]
+        if w4.get("wake_error"):
+            skipped = w4
+            break
+        time.sleep(1)
+    check("broken script skipped with a reason", skipped and "problems" in skipped["wake_error"]
+          and len(vera.get("/api/script_runs?script=waker")[1]["runs"]) == 1, skipped and skipped.get("wake_error"))
+    st, w5 = ece.put("/api/scripts/waker/wake", {"wake": "none"})
+    check("wake-up removed", st == 200 and w5["wake"] == "" and w5["wake_on"] is False, w5)
+
     # 7a. Do N: the loop part runs N times, then "then"; End is like return
     def SET(id, var, expr):
         return {"id": id, "type": "set", "props": {"var": var, "expr": expr}}

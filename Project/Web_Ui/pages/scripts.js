@@ -6,6 +6,7 @@ import { S, me, isOwner, canEdit, agentById, projectById } from '../state.js';
 import { $, esc, guard, toast, twoStep } from '../ui.js';
 import { createCanvas, BLOCKS } from '../script_canvas.js';
 import { renderRun, runPill } from './script_run.js';
+import { openWakeModal, wakeText } from './tasks.js';
 
 const TYPES = ['Number', 'Time', 'Date', 'Bool', 'Text'];
 const TYPE_HINT = { Number: '0.00', Time: '16:00', Date: '2026-11-16', Bool: 'false', Text: 'text' };
@@ -38,7 +39,7 @@ function summary(n) {
 // ---------------------------------------------------------------- list
 const listHTML = () => list.map((s) => `<a class="chat-item ${cur && s.id === cur.id ? 'on' : ''}" href="#/scripts/${esc(s.id)}"><div class="mini big-emoji">🧩</div>
   <div class="ci-body"><div class="ci-title">${esc(s.name)}${s.draft ? ' <span class="badge">draft</span>' : ''}${s.error_count ? ` <span class="badge sc-bad">⚠ ${s.error_count}</span>` : ''}</div>
-  <div class="ci-prev">${s.prompt_count === 1 ? '1 prompt block' : `${s.prompt_count} prompt blocks`}</div></div></a>`).join('')
+  <div class="ci-prev">${s.prompt_count === 1 ? '1 prompt block' : `${s.prompt_count} prompt blocks`}</div>${s.wake ? `<div class="ci-prev">⏰ ${esc(wakeText(s))}${s.wake_error ? ' <span class="badge sc-bad">⚠</span>' : ''}</div>` : ''}</div></a>`).join('')
   || '<div class="empty small">No scripts yet.</div>';
 
 async function loadList() {
@@ -179,6 +180,14 @@ function paintPanel() {
   else { el.innerHTML = scriptPanel(); paintRuns(); }
   paintProblems();
 }
+// the wake-up line under the header and the ⏰ button (✓ on, ⏸ paused); the canvas is left alone
+function paintWake() {
+  const line = $('#sc-wake', view), btn = $('#sc-wake-btn', view);
+  if (!cur || !line) return;
+  line.hidden = !cur.wake;
+  line.innerHTML = cur.wake ? `⏰ ${esc(wakeText(cur))}${cur.wake_error ? ` · <span class="sc-bad-text">${esc(cur.wake_error)}</span>` : ''}` : '';
+  if (btn) btn.textContent = '⏰' + (cur.wake ? (cur.wake_on ? ' ✓' : ' ⏸') : '');
+}
 // the last runs of this script (in the script panel)
 async function paintRuns() {
   if (!cur) return;
@@ -187,7 +196,7 @@ async function paintRuns() {
   const el = $('#sc-runs', view);
   if (!el || !cur || cur.id !== id) return;
   el.innerHTML = runs.length ? runs.slice(0, 10).map((r) => `<a class="sc-run-row" href="#/scripts/${esc(id)}/run/${esc(r.id)}">${runPill(r.status)}
-      <span class="muted small" data-no-i18n>${esc(new Date(r.created).toLocaleString())}</span></a>`).join('')
+      <span class="muted small" data-no-i18n>${esc(new Date(r.created).toLocaleString())}</span>${r.trigger === 'wake' ? ' <span title="Started by its wake-up">⏰</span>' : ''}</a>`).join('')
     : '<p class="muted small">Not run yet.</p>';
 }
 
@@ -210,11 +219,13 @@ function detailHTML() {
       <a class="btn small back-btn" href="#/scripts" aria-label="Back to scripts">←</a>
       <input type="text" id="sc-name" value="${esc(cur.name)}" maxlength="120" ${ro ? 'disabled' : ''}>
       <span id="sc-check"></span><span id="sc-saved" class="sc-saved"></span>
+      ${editable ? '<button class="btn small" data-act="wake" id="sc-wake-btn" title="Wake-up">⏰</button>' : ''}
       ${canEdit() ? '<button class="btn primary small" data-act="run">▶ Run</button>' : ''}
       ${editable ? '<button class="btn small danger" data-act="del">Delete</button>' : ''}
       <button class="btn small sc-sheet-btn" data-act="sheet-script" title="Script settings">⚙</button>
     </div>
     ${cur.draft ? '<div class="sc-draft">📝 A ghost wrote this script. It never runs by itself: check it, then press Run.</div>' : ''}
+    <div class="sc-wake" id="sc-wake" hidden></div>
     <div class="sc-body sheet"><div class="sc-host" id="sc-host"></div>
       <aside class="sc-panel"><div class="sc-sheet-bar"><span class="sc-grab"></span><button class="btn small" data-act="sheet-close" title="Close">✕</button></div><div id="sc-panel"></div></aside></div>`;
 }
@@ -237,6 +248,7 @@ export async function render(v, arg, c) {
   }
   $('#sc-list', view).innerHTML = listHTML();
   $('#sc-detail', view).innerHTML = detailHTML();
+  paintWake();
   if (cur) {
     canvas = createCanvas($('#sc-host', view), {
       script: cur, readOnly: !editable, summary,
@@ -301,6 +313,16 @@ export async function render(v, arg, c) {
       setSheet(true);
     } else if (act === 'remove') {
       canvas.remove();
+    } else if (act === 'wake') {
+      await save();
+      openWakeModal(cur, (r) => {
+        for (const k of ['wake', 'wake_every', 'wake_at', 'wake_on', 'wake_error']) cur[k] = r[k];
+        const item = list.find((x) => x.id === cur.id);
+        if (item) for (const k of ['wake', 'wake_every', 'wake_at', 'wake_on', 'wake_error']) item[k] = r[k];
+        paintWake();
+        $('#sc-list', view).innerHTML = listHTML();
+      }, { url: `/api/scripts/${cur.id}/wake`,
+        sub: "The script runs by itself, with your rights. A run that is still going is not started twice. It only wakes while Phantom Co. is open, and never while the script has problems or is a ghost's draft." });
     } else if (act === 'run') {
       await save();
       if (check.errors.length) { toast('Fix the problems of this script first.', true); return; }

@@ -123,6 +123,13 @@ export const EXACT = {
   'You can read this conversation but not write in it.': 'Bu konuşmayı okuyabilirsin ama yazamazsın.',
   'This conversation is read-only for you.': 'Bu konuşma senin için salt okunur.',
   'The agent is working… you can write again when it is done.': 'Ajan çalışıyor… bitince yine yazabilirsin.',
+  "The script runs by itself, with your rights. A run that is still going is not started twice. It only wakes while Phantom Co. is open, and never while the script has problems or is a ghost's draft.":'Betik kendiliğinden, senin yetkilerinle çalışır. Hâlâ süren bir çalıştırma ikinci kez başlatılmaz. Yalnızca Phantom Co. açıkken uyanır; betikte sorun varken ya da bir hayaletin taslağıyken asla uyanmaz.',
+  'The person who set this wake-up cannot run scripts any more.': 'Bu uyanışı ayarlayan kişi artık betik çalıştıramıyor.',
+  'The script became a draft again: press Run once to let it wake.': 'Betik yeniden taslak oldu: uyanabilmesi için bir kez Çalıştır’a bas.',
+  'The script has problems: fix them first.': 'Betikte sorunlar var: önce onları düzelt.',
+  'It could not start.': 'Başlatılamadı.',
+  "This script is a ghost's draft. Check it and press Run once first.":'Bu betik bir hayaletin taslağı. Önce kontrol et ve bir kez Çalıştır’a bas.',
+  'Only the person who made this script can change its wake-up.': 'Bu betiğin uyanışını yalnızca onu yapan kişi değiştirebilir.',
   'is working…': 'çalışıyor…', 'is waiting in line…': 'sırada bekliyor…',
   'The model service has not answered for a while. Free services have a request limit; it tries again by itself.': 'Model servisi bir süredir cevap vermiyor. Ücretsiz servislerin istek sınırı var; kendiliğinden yeniden deniyor.',
   'No answer from the model service for 20 s. Free services have a request limit; OpenCode waits and tries again by itself.': 'Model servisi 20 sn’dir cevap vermiyor. Ücretsiz servislerin istek sınırı var; OpenCode bekleyip kendiliğinden yeniden deniyor.',
@@ -540,7 +547,7 @@ export const EXACT = {
   // script run view
   'Paused': 'Duraklatıldı', 'Ready to start': 'Başlamaya hazır', 'Skipped': 'Atlandı', 'Waiting': 'Bekliyor',
   'Back to the editor': 'Editöre dön', '⏸ Pause': '⏸ Duraklat', '⏭ Step': '⏭ Adım', '▶ Resume': '▶ Devam', '■ Stop': '■ Durdur',
-  '▶ Run again': '▶ Yeniden çalıştır', 'Run started': 'Çalıştırma başladı', 'started': 'başladı', 'skipped': 'atlandı', 'Run ended': 'Çalıştırma bitti',
+  '▶ Run again': '▶ Yeniden çalıştır', 'Run started': 'Çalıştırma başladı', 'Started by its wake-up': 'Uyanışıyla başladı', 'started': 'başladı', 'skipped': 'atlandı', 'Run ended': 'Çalıştırma bitti',
   'working…': 'çalışıyor…', 'reading the usage limits…': 'kullanım limitleri okunuyor…', 'until': 'şu saate kadar:', 'min': 'dk',
   'no ghost': 'hayalet yok', 'no prompt': 'prompt yok', 'Not run yet.': 'Henüz çalıştırılmadı.',
   'Goes on at': 'Devam saati:', 'Started again after the program was restarted.': 'Program yeniden açıldıktan sonra tekrar başlatıldı.',
@@ -557,6 +564,7 @@ export const EXACT = {
 };
 
 export const PATTERNS = [
+  ['Wake-up skipped ({}Z): {}', 'Uyanış atlandı ({0}Z): {1}'],
   ['♻️ {} from the cache', '♻️ {0} önbellekten'], ['{} tokens · {#}% cached', '{0} token · %{1} önbellek'],
   ['New chat with {}', '{0} ile yeni sohbet'],  // the server's default chat title (until the first answer names the chat)
   ['🧩 {} wrote the script "{}". It is a draft in Scripts: check it there and press Run.', '🧩 {0}, "{1}" betiğini yazdı. Betikler’de taslak olarak duruyor: orada kontrol et ve Çalıştır’a bas.'],

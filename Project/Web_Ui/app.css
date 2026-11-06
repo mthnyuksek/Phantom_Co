@@ -559,6 +559,8 @@ main#view:has(> .chats-layout) { padding: 0; overflow: hidden; }
 .sc-saved.busy { color: var(--warn); }
 .badge.sc-bad { color: var(--bad); border-color: var(--bad-line); background: var(--bad-bg); margin-top: 0; }
 .sc-draft { padding: 8px 16px; background: var(--warn-bg); border-bottom: 1px solid var(--warn-line); font-size: 13px; }
+.sc-wake { padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.sc-wake .sc-bad-text { color: var(--bad); }
 .sc-body { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 350px; min-height: 0; }
 .sc-host { position: relative; min-width: 0; min-height: 0; }
 .sc-panel { border-left: 1px solid var(--line); background: var(--bg2); padding: 14px 16px 40px; overflow: auto; min-height: 0; }

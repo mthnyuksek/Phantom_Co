@@ -1472,6 +1472,8 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             list.push_back({{"id", s.value("id", "")}, {"name", s.value("name", "")}, {"description", s.value("description", "")},
                             {"draft", s.value("draft", false)}, {"created_by", s.value("created_by", "")},
                             {"updated", s.value("updated", "")}, {"prompt_count", chk["prompt_count"]},
+                            {"wake", s.value("wake", "")}, {"wake_every", s.value("wake_every", 0)}, {"wake_at", s.value("wake_at", "")},
+                            {"wake_on", s.value("wake_on", false)}, {"wake_error", s.value("wake_error", "")},
                             {"error_count", chk["errors"].size()}});
         }
         send(res, {{"scripts", list}});
@@ -1506,6 +1508,28 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         std::string err;
         auto s = script::clean_script(b, *cur, err);
         if (!s) return fail(res, 400, err);
+        send(res, script_view(store.save_script(*s)));
+    });
+    // Wake-up: the script runs by itself every N minutes or every day at a time (this PC's clock), with the rights of the
+    // person who set the wake-up. Stored in the script file (wake, wake_every, wake_at, wake_on, wake_last, wake_by,
+    // wake_error); a normal save keeps these fields (clean_script starts from the saved script).
+    add("PUT", "/api/scripts/" + ID + "/wake", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        auto s = store.script(req.matches[1]);
+        if (!s) return fail(res, 404, "Script not found");
+        if (s->value("created_by", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who made this script can change its wake-up.");
+        std::string err;
+        if (!read_wake(b, *s, err)) return fail(res, 400, err);
+        (*s)["wake_error"] = "";
+        if (s->value("wake", "").empty()) { (*s)["wake_on"] = false; (*s)["wake_last"] = ""; (*s)["wake_by"] = ""; }
+        else {
+            // A ghost's draft has not been looked at by a person yet: it never runs by itself.
+            if (s->value("draft", false)) return fail(res, 409, "This script is a ghost's draft. Check it and press Run once first.");
+            (*s)["wake_on"] = b.value("on", true);
+            (*s)["wake_last"] = std::to_string((long long)std::time(nullptr));  // counts from now
+            (*s)["wake_by"] = c.id;
+        }
         send(res, script_view(store.save_script(*s)));
     });
     add("DELETE", "/api/scripts/" + ID, kEditor, [&](auto& req, auto& res, Ctx& c) {
@@ -1896,7 +1920,29 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
                     t["wake_last"] = std::to_string(now);
                     store.save_task(t);
                 }
-            } catch (...) { /* a broken task file must not stop the clock */ }
+                // scripts: started like a press on Run by the person who set the wake-up; one that is still running is
+                // tried again at the next look; a draft or a script with problems is skipped (the reason is kept for the list)
+                if (opt.scripts) {
+                    for (auto s : store.scripts()) {
+                        if (!s.value("wake_on", false) || s.value("wake", "").empty() || !wake_due(s, now)) continue;
+                        const std::string sid = s.value("id", "");
+                        if (opt.scripts->script_active(sid)) continue;
+                        auto u = store.user(s.value("wake_by", ""));
+                        const std::string role = u && !u->value("disabled", false) ? auth.role(u->value("id", "")) : "";
+                        std::string err;
+                        if (role.empty() || role == "viewer") err = "The person who set this wake-up cannot run scripts any more.";
+                        else if (s.value("draft", false)) err = "The script became a draft again: press Run once to let it wake.";
+                        else if (!script::check_script(s, script_lookup)["errors"].empty()) err = "The script has problems: fix them first.";
+                        else if (opt.scripts->run(s, u->value("id", ""), err, "wake").empty() && err.empty()) err = "It could not start.";
+                        if (!err.empty()) err = "Wake-up skipped (" + now_iso().substr(0, 16) + "Z): " + err;
+                        auto fresh = store.script(sid);  // the run may have changed the file (draft flag); keep the newest
+                        if (!fresh) continue;
+                        (*fresh)["wake_last"] = std::to_string(now);
+                        (*fresh)["wake_error"] = err;
+                        store.save_script(*fresh);
+                    }
+                }
+            } catch (...) { /* a broken task or script file must not stop the clock */ }
         }
     });
 

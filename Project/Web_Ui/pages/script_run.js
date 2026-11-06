@@ -74,7 +74,7 @@ function eventLine(e) {
   const t = `<span class="muted" data-no-i18n>${esc(new Date(e.ts).toLocaleTimeString())}</span>`;
   const n = e.node ? `<b data-no-i18n>${esc(nodeName(e.node))}</b>` : '';
   switch (e.kind) {
-    case 'run_started': return `${t} ▶ <span>Run started</span>`;
+    case 'run_started': return `${t} ${e.text === 'Started by its wake-up' ? '⏰ <span>Started by its wake-up</span>' : '▶ <span>Run started</span>'}`;
     case 'node_started': return `${t} ${n} <span>started</span>`;
     case 'node_done': return `${t} ✓ ${n}${e.text ? ` → <span>${e.text === 'true' ? 'yes' : 'no'}</span>` : ''}`;
     case 'node_skipped': return `${t} ↷ ${n} <span>skipped</span>`;

@@ -29,8 +29,8 @@ public:
     // Subscription usage for claude_left_5h / claude_left_week / codex_left (Auto sign-ins); may be null.
     void set_usage(Usage* u) { usage_ = u; }
 
-    // Starts a run of a checked script. "" + err when it cannot start.
-    std::string run(const json& script, const std::string& user_id, std::string& err);
+    // Starts a run of a checked script. "" + err when it cannot start. trigger: "" = a person pressed Run, "wake" = its wake-up.
+    std::string run(const json& script, const std::string& user_id, std::string& err, const std::string& trigger = "");
     // stop | pause | resume | step
     bool control(const std::string& run_id, const std::string& action, std::string& err);
     std::optional<json> get(const std::string& run_id);  // state + "events"
