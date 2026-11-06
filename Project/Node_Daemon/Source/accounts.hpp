@@ -18,9 +18,9 @@ namespace pc2 {
 // Google refuses the free Google sign-in for Gemini CLI since late 2026: Gemini works only with an API key.
 inline constexpr const char* kGeminiNoGoogle =
     "Google no longer lets Gemini CLI use a free Google sign-in. Add a Gemini API key instead (Settings > Secrets, kind \"API key\").";
-// OpenCode accounts are API keys of a model service OpenCode knows; the key's prefix tells which one (NVIDIA: nvapi-).
+// OpenCode accounts are API keys of a model service OpenCode knows (picked in Settings or found from the key's prefix).
 inline constexpr const char* kOpenCodeKeyOnly =
-    "OpenCode accounts are API keys of a model service. Supported for now: NVIDIA (build.nvidia.com, keys start with nvapi-).";
+    "OpenCode accounts are API keys of a model service: NVIDIA, OpenRouter, Groq, Cerebras, DeepSeek or Mistral. Local models (LM Studio, Ollama) need no account: write lmstudio/<model> or ollama/<model> in the ghost's Model field.";
 
 class Accounts {
 public:
@@ -28,7 +28,8 @@ public:
 
     json list();                                   // [{id, provider, kind, name, created, key_hint}] (never the key)
     std::optional<json> get(const std::string& id);
-    json add(const std::string& provider, const std::string& name, const std::string& kind = "subscription", const std::string& key = "");
+    json add(const std::string& provider, const std::string& name, const std::string& kind = "subscription", const std::string& key = "",
+             const std::string& service = "");  // OpenCode: the model service of the key
     bool set_key(const std::string& id, const std::string& key);  // api_key accounts: replace the key
     static bool valid_key(const std::string& key);
     bool rename(const std::string& id, const std::string& name);

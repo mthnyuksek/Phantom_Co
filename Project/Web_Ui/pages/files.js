@@ -1,6 +1,7 @@
 import { api, upload } from '../api.js';
 import { S, isOwner, canEdit } from '../state.js';
 import { $, esc, guard, toast, twoStep, modal, closeModal } from '../ui.js';
+import { t } from '../i18n.js';
 
 let view, scope = 'shared', folder = '';  // folder: where uploads go ('' = top of the scope)
 // Folders start closed; a left click opens/closes one, a right click (long press on a phone) picks it as the
@@ -31,29 +32,60 @@ async function load(ctx) {
   if (reset) reset.hidden = !folder;
 }
 
-const askReplace = (name) => new Promise((resolve) => {
+// 'yes' | 'no', and with more files to come also 'all' (replace the rest too) | 'none' (skip the rest too)
+const askReplace = (name, more) => new Promise((resolve) => {
   modal(`<h2>Replace ${esc(name)}?</h2><p>A file with this name already exists.</p>
-    <div class="row"><button class="btn primary" id="m-yes">Replace</button><button class="btn" id="m-no">Skip</button></div>`, (el) => {
-    el.querySelector('#m-yes').onclick = () => { closeModal(); resolve(true); };
-    el.querySelector('#m-no').onclick = () => { closeModal(); resolve(false); };
+    <div class="row"><button class="btn primary" id="m-yes">Replace</button><button class="btn" id="m-no">Skip</button>
+    ${more ? '<button class="btn" id="m-all">Replace all</button><button class="btn" id="m-none">Skip all</button>' : ''}</div>`, (el) => {
+    for (const [id, answer] of [['m-yes', 'yes'], ['m-no', 'no'], ['m-all', 'all'], ['m-none', 'none']]) {
+      const b = el.querySelector('#' + id);
+      if (b) b.onclick = () => { closeModal(); resolve(answer); };
+    }
   });
 });
 
-async function sendFiles(files, ctx) {
-  for (const f of files) {
-    const path = (folder ? folder + '/' : '') + f.name;
+// items: [{ file, rel }] where rel is the path below the target folder ("a.txt" or "Folder/sub/a.txt" for a dropped folder)
+async function sendFiles(items, ctx, into = folder) {
+  let done = 0, replaceAll = null;  // null = ask, true / false = the answer for the rest
+  for (let i = 0; i < items.length; i++) {
+    const { file, rel } = items[i], path = (into ? into + '/' : '') + rel;
     try {
-      await upload('/api/files/upload?path=' + encodeURIComponent(path) + q(), f);
-      toast('Uploaded ' + f.name);
-      if (folder) openUpTo(folder);
+      await upload('/api/files/upload?path=' + encodeURIComponent(path) + q(), file);
+      done++;
     } catch (e) {
-      if (/already exists/.test(e.message)) {
-        if (await askReplace(f.name)) { await upload('/api/files/upload?overwrite=1&path=' + encodeURIComponent(path) + q(), f); toast('Replaced ' + f.name); }
-      } else toast(f.name + ': ' + e.message, true);
+      if (!/already exists/.test(e.message)) { toast(rel + ': ' + e.message, true); continue; }
+      let answer = replaceAll === null ? await askReplace(rel, i < items.length - 1) : replaceAll ? 'yes' : 'no';
+      if (answer === 'all' || answer === 'none') { replaceAll = answer === 'all'; answer = replaceAll ? 'yes' : 'no'; }
+      if (answer === 'yes') { await upload('/api/files/upload?overwrite=1&path=' + encodeURIComponent(path) + q(), file); done++; }
     }
   }
+  if (into) openUpTo(into);
+  for (const { rel } of items) { const p = parents(rel); if (p.length) openUpTo((into ? into + '/' : '') + p[0]); }  // show a dropped folder open
+  if (done) toast(t(done === 1 && items.length === 1 ? `Copied ${items[0].rel.split('/').pop()}` : `Copied ${done} files`));
   await load(ctx);
 }
+
+// Files and whole folders dropped from Explorer: folders are read entry by entry (webkitGetAsEntry), keeping their paths.
+async function droppedItems(dt) {
+  const entries = [...(dt.items || [])].map((it) => it.kind === 'file' && it.webkitGetAsEntry ? it.webkitGetAsEntry() : null);
+  if (!entries.length || entries.some((e) => !e)) return [...dt.files].map((file) => ({ file, rel: file.name }));
+  const out = [];
+  const walk = async (entry, base) => {
+    if (entry.isFile) { out.push({ file: await new Promise((ok, bad) => entry.file(ok, bad)), rel: base + entry.name }); return; }
+    const reader = entry.createReader();
+    for (;;) {  // readEntries returns at most 100 at a time
+      const batch = await new Promise((ok, bad) => reader.readEntries(ok, bad));
+      if (!batch.length) break;
+      for (const e of batch) await walk(e, base + entry.name + '/');
+    }
+  };
+  for (const e of entries) await walk(e, '');
+  return out;
+}
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+// Files dropped anywhere else in the window must not open in it (the app would navigate away to the file).
+window.addEventListener('dragover', (e) => { if (hasFiles(e) && !e.defaultPrevented) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; } });
+window.addEventListener('drop', (e) => { if (hasFiles(e)) e.preventDefault(); });
 
 export async function render(v, arg, ctx) {
   view = v;
@@ -66,14 +98,36 @@ export async function render(v, arg, ctx) {
     ${editor ? '<button class="btn primary" data-act="upload">⬆ Upload</button><button class="btn" data-act="mkdir">New folder</button>' : ''}
     ${isOwner() ? '<button class="btn" data-act="vault">Open Vault in Explorer</button>' : ''}<input type="file" id="pick" multiple hidden></div>
     ${editor ? '<p style="color:var(--muted);margin:0 0 8px">New files and folders go to <b id="dest">the top level</b> <button class="btn small" data-act="dest-top" id="dest-reset" hidden>× Top level</button> (right click a folder to change it, click a folder to open or close it).</p>' : '<span id="dest" hidden></span>'}
-    <div class="files" id="drop"><div class="tree" id="tree"></div><div class="viewer" id="viewer"><span style="color:var(--muted)">Pick a file to preview it.</span></div></div>`;
+    <div class="files" id="drop"><div class="tree" id="tree"></div><div class="viewer" id="viewer"><span style="color:var(--muted)">Pick a file to preview it.</span></div>
+      ${editor ? '<div class="drop-cover" id="drop-cover" hidden><div>⬇ <span id="drop-text"></span></div></div>' : ''}</div>`;
   await guard(() => load(ctx))();
 
-  const pick = $('#pick', view), drop = $('#drop', view);
-  pick.onchange = guard(async () => { await sendFiles([...pick.files], ctx); pick.value = ''; });
+  const pick = $('#pick', view);
+  pick.onchange = guard(async () => { await sendFiles([...pick.files].map((file) => ({ file, rel: file.name })), ctx); pick.value = ''; });
   if (editor) {
-    drop.ondragover = (e) => { e.preventDefault(); };
-    drop.ondrop = guard(async (e) => { e.preventDefault(); await sendFiles([...e.dataTransfer.files], ctx); });
+    // Drag files or folders from Explorer anywhere onto the page; dropped on a folder row they go into that folder.
+    const cover = $('#drop-cover', view);
+    let depth = 0;
+    const target = (e) => e.target.closest?.('.tree [data-act="toggle"]')?.dataset.path ?? folder;
+    const show = (e) => {
+      const into = target(e);
+      view.querySelectorAll('.tree .f.drop-on').forEach((x) => x.classList.remove('drop-on'));
+      e.target.closest?.('.tree [data-act="toggle"]')?.classList.add('drop-on');
+      $('#drop-text', view).textContent = t('Drop to copy into') + ' ' + (into ? into + '/' : t('the top level'));
+      cover.hidden = false;
+    };
+    const hide = () => { depth = 0; cover.hidden = true; view.querySelectorAll('.tree .f.drop-on').forEach((x) => x.classList.remove('drop-on')); };
+    view.ondragenter = (e) => { if (hasFiles(e)) { depth++; show(e); } };
+    view.ondragleave = (e) => { if (hasFiles(e) && --depth <= 0) hide(); };
+    view.ondragover = (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; show(e); };
+    view.ondrop = guard(async (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      const into = target(e);
+      hide();
+      const items = await droppedItems(e.dataTransfer);
+      if (items.length) await sendFiles(items, ctx, into);
+    });
   }
 
   view.onclick = guard(async (e) => {

@@ -461,6 +461,13 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
             wchar_t buf[8];
             if (spec.model.empty() && GetEnvironmentVariableW(Widen(sv.env).c_str(), buf, 8) > 0) spec.model = sv.model;
         }
+        // Without a model OpenCode picks something of its own that cannot work here ("CLOUDFLARE_GATEWAY_ID missing"...).
+        if (spec.model.empty()) {
+            o.status = "failed";
+            o.error = "This OpenCode ghost has no model. Add an API key account in Settings > Secrets and pick it as the brain, or write a local model (lmstudio/<model> or ollama/<model>) in the ghost's Model field.";
+            finish(o);
+            return;
+        }
     }
 
     if (spec.provider == "demo") {

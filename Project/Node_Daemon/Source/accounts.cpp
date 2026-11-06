@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <set>
 #include <thread>
 
 #include "http_client.hpp"
@@ -102,7 +103,7 @@ std::optional<json> Accounts::get(const std::string& id) {
     return std::nullopt;
 }
 
-json Accounts::add(const std::string& provider, const std::string& name, const std::string& kind, const std::string& key) {
+json Accounts::add(const std::string& provider, const std::string& name, const std::string& kind, const std::string& key, const std::string& service) {
     std::lock_guard<std::mutex> l(mu_);
     std::string id;
     for (int i = 0; i < 100 && (id.empty() || std::any_of(items_.begin(), items_.end(), [&](const json& a) { return a["id"] == id; })); ++i) {
@@ -113,7 +114,7 @@ json Accounts::add(const std::string& provider, const std::string& name, const s
     const bool api = kind == "api_key";
     json a = {{"id", id}, {"provider", provider}, {"kind", api ? "api_key" : "subscription"}, {"name", name}, {"created", now_iso()},
               {"key_hint", api && key.size() >= 4 ? "…" + key.substr(key.size() - 4) : ""}};
-    if (provider == "opencode") { auto sv = opencode_service_for_key(key); a["service"] = sv ? sv->id : ""; }
+    if (provider == "opencode") a["service"] = service;
     std::error_code ec;
     fs::create_directories(home(id), ec);
     if (api) store_key(id, key);
@@ -221,15 +222,23 @@ json Accounts::status(const std::string& provider, const std::string& id) {
         std::string key = key_of(id);
         if (key.empty()) { st["error"] = "key_unreadable"; return st; }
         if (provider == "opencode") {
-            // NVIDIA's model list is public (200 for any key): the smallest chat request (1 token) shows whether the key works.
             const OpenCodeService* sv = opencode_service((*acc).value("service", ""));
             if (!sv) { st["error"] = "unknown"; return st; }
             st["plan"] = std::string(sv->label) + " api key";
-            HttpClient http("https://integrate.api.nvidia.com", 8000, 20000);
-            std::string model = sv->model;
-            model = model.substr(model.find('/') + 1);  // "nvidia/nvidia/x" -> "nvidia/x" (OpenCode's service prefix off)
-            auto r = http.Post("/v1/chat/completions", {{"Authorization", "Bearer " + key}},
-                               json{{"model", model}, {"max_tokens", 1}, {"messages", json::array({{{"role", "user"}, {"content", "hi"}}})}}.dump(), "application/json");
+            std::unique_ptr<HttpResult> r;
+            if (!*sv->check) {
+                // NVIDIA's model list is public (200 for any key): the smallest chat request (1 token) shows whether the key works.
+                HttpClient http("https://integrate.api.nvidia.com", 8000, 20000);
+                std::string model = sv->model;
+                model = model.substr(model.find('/') + 1);  // "nvidia/nvidia/x" -> "nvidia/x" (OpenCode's service prefix off)
+                r = http.Post("/v1/chat/completions", {{"Authorization", "Bearer " + key}},
+                              json{{"model", model}, {"max_tokens", 1}, {"messages", json::array({{{"role", "user"}, {"content", "hi"}}})}}.dump(), "application/json");
+            } else {
+                const std::string url = sv->check;
+                const size_t path = url.find('/', 8);  // after "https://"
+                HttpClient http(url.substr(0, path), 8000, 12000);
+                r = http.Get(url.substr(path), {{"Authorization", "Bearer " + key}});
+            }
             if (!r) st["error"] = "unreachable";
             else if (r->status == 200 || r->status == 429) st["signed_in"] = true;  // 429: the key is fine, only busy
             else if (r->status == 401 || r->status == 403) st["error"] = "key_rejected";
@@ -249,14 +258,22 @@ json Accounts::status(const std::string& provider, const std::string& id) {
         return st;
     }
     if (provider == "opencode") {
-        // Auto = a model service key in the PC's environment, or OpenCode's own sign-ins (<data>\opencode\auth.json, never read out).
+        // Auto = model service keys in the PC's environment, OpenCode's own sign-ins (<data>\opencode\auth.json, never read
+        // out) and the local model servers that are running now.
         if (provider_exe("opencode").empty()) { st["error"] = "not_installed"; return st; }
+        std::string plan;
+        auto add_plan = [&](const std::string& p) { plan += (plan.empty() ? "" : ", ") + p; };
         for (auto& s : opencode_services())
-            if (!env_var(Widen(s.env).c_str()).empty()) { st["signed_in"] = true; st["plan"] = std::string(s.label) + " api key"; return st; }
+            if (!env_var(Widen(s.env).c_str()).empty()) add_plan(std::string(s.label) + " key");
         std::string xdg = env_var(L"XDG_DATA_HOME");
         fs::path auth = (xdg.empty() ? P(env_var(L"USERPROFILE")) / L".local" / L"share" : P(xdg)) / L"opencode" / L"auth.json";
         json a = read_json(auth);
-        if (a.is_object() && !a.empty()) { st["signed_in"] = true; st["plan"] = "opencode sign-in"; }
+        if (a.is_object() && !a.empty()) add_plan("opencode sign-in");
+        std::set<std::string> servers;
+        for (auto& m : opencode_local_models()) servers.insert(m.value("server", ""));
+        for (auto& s : servers) add_plan(s);
+        st["signed_in"] = !plan.empty();
+        st["plan"] = plan;
         return st;
     }
     if (provider == "gemini") {

@@ -50,18 +50,30 @@ std::string images_note(const std::vector<std::string>& images);  // "" or a lin
 // Used for Gemini ghosts without a model: works with a free API key (Pro models have no free quota).
 inline constexpr const char* kGeminiDefaultModel = "gemini-flash-lite-latest";
 
-// OpenCode ("other models"): one CLI for many model services. An API key account's service follows the key's prefix;
-// a ghost without a model uses the service's default model (OpenCode names models "<service>/<model>").
+// OpenCode ("other models"): one CLI for many model services. An API key account names its service (picked in Settings,
+// or found from the key's prefix); a ghost without a model uses the service's default model (OpenCode names models
+// "<service>/<model>"). Local model servers (LM Studio, Ollama) need no account: the ghost's Model field says
+// "lmstudio/<model>" or "ollama/<model>" and the run's config points OpenCode at the server on this PC.
 struct OpenCodeService {
     const char* id;          // OpenCode's provider id, e.g. "nvidia"
     const char* label;       // "NVIDIA"
-    const char* prefix;      // key prefix, e.g. "nvapi-"
+    const char* prefix;      // key prefix, e.g. "nvapi-" ("" = the service's keys have no telling prefix)
     const char* env;         // environment variable OpenCode reads the key from
     const char* model;       // default model
+    const char* check;       // key check: GET this URL with "Authorization: Bearer <key>" (401/403 = rejected); "" = NVIDIA's 1-token chat
 };
-const OpenCodeService* opencode_service_for_key(const std::string& key);  // nullptr = a key of no known service
+const OpenCodeService* opencode_service_for_key(const std::string& key);  // nullptr = no service has this key's prefix
 const OpenCodeService* opencode_service(const std::string& id);
 const std::vector<OpenCodeService>& opencode_services();
+
+struct OpenCodeLocal {
+    const char* id;          // model prefix and OpenCode provider id: "lmstudio" | "ollama"
+    const char* label;       // "LM Studio"
+    const char* host;        // "http://127.0.0.1:1234"
+};
+const std::vector<OpenCodeLocal>& opencode_locals();
+// Models the local servers of this PC offer now ("lmstudio/<id>"...), asked with a short timeout; servers that are off are skipped.
+json opencode_local_models();
 
 class LineParser {
 public:

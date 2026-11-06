@@ -1,6 +1,7 @@
 import { api } from './api.js';
 import { ghostSVG } from './ghosts.js';
-import { S, FORMS, PALETTE, skillById, skillScopeBadge, agentById, brainOptions } from './state.js';
+import { S, FORMS, PALETTE, skillById, skillScopeBadge, agentById, brainOptions, accountById } from './state.js';
+import { t } from './i18n.js';
 import { $, esc, guard, modal, closeModal, toast, twoStep } from './ui.js';
 import { ghostPickerHTML, bindGhostPicker } from './pickers.js';
 
@@ -38,7 +39,7 @@ export function openAgentModal(agent, tpl) {
           <div><label>Role</label><input type="text" id="f-role" maxlength="60"></div></div>
         <div id="f-pick">${ghostPickerHTML()}</div>
         <div class="two"><div><label>Brain (provider)</label><select id="f-provider">${brainOptions(draft.provider).map((p) => `<option value="${esc(p.id)}" ${p.available || p.id === draft.provider ? '' : 'disabled'}>${esc(p.label)}${p.note}</option>`).join('')}</select></div>
-          <div><label>Model (optional)</label><input type="text" id="f-model" placeholder="provider default"></div></div>
+          <div><label>Model (optional)</label><input type="text" id="f-model" placeholder="provider default" list="f-model-list" autocomplete="off"><datalist id="f-model-list"></datalist></div></div>
         <div class="two"><div><label>Reports to</label><select id="f-boss"><option value="">Nobody (top of the company)</option>${bosses.map((b) => `<option value="${esc(b.id)}">${esc(b.name)} — ${esc(b.role)}</option>`).join('')}</select></div>
           <div><label>Time limit per run (minutes)</label><input type="number" id="f-timeout" min="1" max="240"></div></div>
         <label>Skills <span class="hint-inline">what this ghost may do - agents act with the rights of the person asking</span></label>
@@ -64,8 +65,25 @@ export function openAgentModal(agent, tpl) {
     };
     // Gemini ghosts without a model use gemini-flash-lite-latest (the server's default: Pro has no free API quota); OpenCode
     // ghosts the default model of their key's service (models are written service/model).
-    const MODEL_HINT = { gemini: 'gemini-flash-lite-latest', opencode: 'nvidia/nvidia/nemotron-3.5-lightning-30b-a3b' };
-    const modelHint = () => { q('#f-model').placeholder = MODEL_HINT[draft.provider.split(/[#@]/)[0]] || 'provider default'; };
+    // An OpenCode ghost on an API key account uses that service's default; on Auto it needs a model, e.g. a local one: the
+    // list suggests what LM Studio / Ollama offer right now and every service's default.
+    let ocModels = null;
+    const modelHint = () => {
+      const [base, acc] = draft.provider.split('#'), list = q('#f-model-list');
+      if (base !== 'opencode') {
+        q('#f-model').placeholder = base.split('@')[0] === 'gemini' ? 'gemini-flash-lite-latest' : t('provider default');
+        list.innerHTML = '';
+        return;
+      }
+      const svc = (S.state.providers.find((p) => p.id === 'opencode')?.services || []).find((v) => v.id === accountById(acc)?.service);
+      q('#f-model').placeholder = svc ? svc.model : t('e.g. lmstudio/<model> or ollama/<model>');
+      const fill = () => {
+        list.innerHTML = [...(ocModels?.local || []).map((m) => [m.id, m.server]), ...(ocModels?.services || []).map((v) => [v.model, v.label + ' (API key)'])]
+          .map(([id, label]) => `<option value="${esc(id)}">${esc(label)}</option>`).join('');
+      };
+      if (ocModels) fill();
+      else api('GET', '/api/opencode/models').then((r) => { ocModels = r; fill(); }).catch(() => {});
+    };
     const picker = bindGhostPicker(q('#f-pick'), draft, drawPreview);
     fill();
     m.addEventListener('input', (e) => {

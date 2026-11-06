@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+#include "http_client.hpp"
+
 namespace pc2 {
 
 static std::string env(const wchar_t* name) {
@@ -39,14 +41,44 @@ static std::string opencode_path() {
 }
 
 const std::vector<OpenCodeService>& opencode_services() {
-    // More services (OpenRouter, Groq...) are one line each once their default model and key check are known.
+    // A new service is one line: OpenCode's provider id (models.dev), its key variable, a tool-calling default model and a
+    // URL that answers 401 for a wrong key. Checked 2026-11-06 with OpenCode 1.19.5.
     static const std::vector<OpenCodeService> list = {
-        {"nvidia", "NVIDIA", "nvapi-", "NVIDIA_API_KEY", "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b"},
+        {"nvidia", "NVIDIA", "nvapi-", "NVIDIA_API_KEY", "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b", ""},
+        {"openrouter", "OpenRouter", "sk-or-", "OPENROUTER_API_KEY", "openrouter/nvidia/nemotron-3.5-lightning:free", "https://openrouter.ai/api/v1/key"},
+        {"groq", "Groq", "gsk_", "GROQ_API_KEY", "groq/openai/gpt-oss-120b", "https://api.groq.com/openai/v1/models"},
+        {"cerebras", "Cerebras", "csk-", "CEREBRAS_API_KEY", "cerebras/gpt-oss-120b", "https://api.cerebras.ai/v1/models"},
+        {"deepseek", "DeepSeek", "", "DEEPSEEK_API_KEY", "deepseek/deepseek-v4-flash", "https://api.deepseek.com/models"},
+        {"mistral", "Mistral", "", "MISTRAL_API_KEY", "mistral/mistral-medium-2508", "https://api.mistral.ai/v1/models"},
     };
     return list;
 }
+const std::vector<OpenCodeLocal>& opencode_locals() {
+    static const std::vector<OpenCodeLocal> list = {
+        {"lmstudio", "LM Studio", "http://127.0.0.1:1234"},
+        {"ollama", "Ollama", "http://127.0.0.1:11434"},
+    };
+    return list;
+}
+json opencode_local_models() {
+    json out = json::array();
+    for (auto& l : opencode_locals()) {
+        HttpClient http(l.host, 700, 2000);  // a server that is off fails at once; one that is busy gets two seconds
+        auto r = http.Get("/v1/models");
+        if (!r || r->status != 200) continue;
+        json j = json::parse(r->body, nullptr, false);
+        if (!j.is_object() || !j.contains("data") || !j["data"].is_array()) continue;
+        for (auto& m : j["data"])
+            if (m.is_object() && m.contains("id") && m["id"].is_string()) {
+                const std::string id = m["id"];
+                if (id.find("embed") != std::string::npos) continue;  // embedding models cannot chat
+                out.push_back({{"id", std::string(l.id) + "/" + id}, {"server", l.label}});
+            }
+    }
+    return out;
+}
 const OpenCodeService* opencode_service_for_key(const std::string& key) {
-    for (auto& s : opencode_services()) if (key.rfind(s.prefix, 0) == 0) return &s;
+    for (auto& s : opencode_services()) if (*s.prefix && key.rfind(s.prefix, 0) == 0) return &s;
     return nullptr;
 }
 const OpenCodeService* opencode_service(const std::string& id) {
@@ -215,6 +247,15 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
             }
             perm["external_directory"] = ext;
         }
+        // A local model server: OpenCode knows the model only when the config lists it (no key is needed).
+        json provider = json::object();
+        for (auto& l : opencode_locals()) {
+            const std::string pre = std::string(l.id) + "/";
+            if (rs.model.rfind(pre, 0) != 0 || rs.model.size() == pre.size()) continue;
+            const std::string m = rs.model.substr(pre.size());
+            provider[l.id] = {{"npm", "@ai-sdk/openai-compatible"}, {"name", l.label}, {"options", {{"baseURL", std::string(l.host) + "/v1"}}},
+                              {"models", {{m, {{"name", m}, {"tool_call", true}}}}}};
+        }
         json mcp = json::object();
         for (auto& n : rs.mcp) {
             json cmd = json::array({rs.mcp_exe});
@@ -223,7 +264,7 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
             perm[n + "_*"] = "allow";  // OpenCode names MCP tools "<server>_<tool>"
         }
         // {file:...} makes OpenCode read the prompt itself (it is never parsed as part of this JSON).
-        json cfg = {{"$schema", "https://opencode.ai/config.json"}, {"autoupdate", false}, {"share", "disabled"}, {"mcp", mcp},
+        json cfg = {{"$schema", "https://opencode.ai/config.json"}, {"autoupdate", false}, {"share", "disabled"}, {"mcp", mcp}, {"provider", provider},
                     {"agent", {{"phantom", {{"mode", "primary"}, {"prompt", "{file:" + replace_all(rs.system_file, "\\", "/") + "}"},
                                             {"steps", rs.max_turns}, {"permission", perm}}}}}};
         if (!write_file_atomic(P(rs.mcp_file), cfg.dump(2))) { error = "Could not write the OpenCode settings of the run."; return false; }

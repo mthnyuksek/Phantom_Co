@@ -438,7 +438,14 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
     add("GET", "/api/state", kViewer, [&](auto&, auto& res, Ctx& c) {
         bool editor = role_rank(c.role) >= kEditor, owner = c.role == "owner";
         json providers = json::array();
-        for (auto& p : detect_providers()) providers.push_back({{"id", p.id}, {"label", p.label}, {"available", p.available}});
+        for (auto& p : detect_providers()) {
+            json pj = {{"id", p.id}, {"label", p.label}, {"available", p.available}};
+            if (p.id == "opencode") {  // the model services an OpenCode API key account can belong to
+                pj["services"] = json::array();
+                for (auto& s : opencode_services()) pj["services"].push_back({{"id", s.id}, {"label", s.label}, {"prefix", s.prefix}, {"model", s.model}});
+            }
+            providers.push_back(pj);
+        }
         json act = runner.agent_activity(), agents = json::array();
         // tokens each agent used today (this PC's calendar day); run times are UTC
         std::map<std::string, long long> today_tokens;
@@ -487,7 +494,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         {   // extra sign-ins of this PC: names only (the agent editor offers "claude#<id>"); Settings > Secrets shows more to the owner
             json acc = json::array();
             if (runner.accounts())
-                for (auto& a : runner.accounts()->list()) acc.push_back({{"id", a["id"]}, {"provider", a["provider"]}, {"name", a["name"]}, {"kind", a.value("kind", "subscription")}});
+                for (auto& a : runner.accounts()->list()) acc.push_back({{"id", a["id"]}, {"provider", a["provider"]}, {"name", a["name"]}, {"kind", a.value("kind", "subscription")}, {"service", a.value("service", "")}});
             st["accounts"] = acc;
         }
         {   // friends who lend their Claude/Codex (the agent editor offers "claude@<user>")
@@ -686,7 +693,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         if (!parse_body(req, res, b)) return;
         if (!runner.accounts()) return fail(res, 404, "Not available.");
         std::string provider = str(b, "provider", 16), name = str(b, "name", 40), kind = str(b, "kind", 16, "subscription");
-        std::string key = str(b, "key", 1000);
+        std::string key = str(b, "key", 1000), service = str(b, "service", 24);
         if (provider != "claude" && provider != "codex" && provider != "gemini" && provider != "opencode") return fail(res, 400, "Pick Claude Code, Codex, Gemini CLI or OpenCode.");
         if (name.empty()) return fail(res, 400, "Please enter a name.");
         if (kind != "subscription" && kind != "api_key") return fail(res, 400, "Unknown account kind.");
@@ -696,9 +703,16 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             // A key typed on another PC would cross the network (plain http on a home network): only at this PC.
             if (!is_this_pc(req)) return fail(res, 403, "API keys can only be entered on the PC that runs Phantom Co.");
             if (!Accounts::valid_key(key)) return fail(res, 400, "That does not look like an API key.");
-            if (provider == "opencode" && !opencode_service_for_key(key)) return fail(res, 400, kOpenCodeKeyOnly);
+            if (provider == "opencode") {
+                // The service is picked in Settings; without one, the key's prefix tells it.
+                const OpenCodeService* sv = service.empty() ? opencode_service_for_key(key) : opencode_service(service);
+                if (!sv) return fail(res, 400, kOpenCodeKeyOnly);
+                if (*sv->prefix && key.rfind(sv->prefix, 0) != 0) return fail(res, 400, "That does not look like a key of this service.");
+                if (auto other = opencode_service_for_key(key); other && other != sv) return fail(res, 400, "That does not look like a key of this service.");
+                service = sv->id;
+            }
         }
-        send(res, runner.accounts()->add(provider, name, kind, kind == "api_key" ? key : ""), 201);
+        send(res, runner.accounts()->add(provider, name, kind, kind == "api_key" ? key : "", provider == "opencode" ? service : ""), 201);
     });
     add("PUT", "/api/accounts/" + ID, kOwner, [&](auto& req, auto& res, Ctx&) {
         json b;
@@ -712,8 +726,9 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             if (!is_this_pc(req)) return fail(res, 403, "API keys can only be entered on the PC that runs Phantom Co.");
             if (!Accounts::valid_key(key)) return fail(res, 400, "That does not look like an API key.");
             if ((*a)["provider"] == "opencode") {  // the new key must belong to the same model service
-                auto sv = opencode_service_for_key(key);
-                if (!sv || (*a).value("service", "") != sv->id) return fail(res, 400, "This key belongs to another model service: add it as a new account.");
+                auto mine = opencode_service((*a).value("service", "")), other = opencode_service_for_key(key);
+                if (!mine || (other && other != mine) || (*mine->prefix && !other))
+                    return fail(res, 400, "This key belongs to another model service: add it as a new account.");
             }
             runner.accounts()->set_key(id, key);
         }
@@ -735,6 +750,12 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             if (ag.value("provider", "") == brain) { ag["provider"] = base; store.save_agent(ag); moved.push_back(ag.value("name", "")); }
         runner.accounts()->remove(id);
         send(res, {{"ok", true}, {"moved", moved}});
+    });
+    // OpenCode models for the ghost editor: what the local servers (LM Studio, Ollama) offer now, and each service's default.
+    add("GET", "/api/opencode/models", kEditor, [&](auto&, auto& res, Ctx&) {
+        json services = json::array();
+        for (auto& s : opencode_services()) services.push_back({{"id", s.id}, {"label", s.label}, {"model", s.model}});
+        send(res, {{"local", opencode_local_models()}, {"services", services}});
     });
     // Opens the CLI's own sign-in in a console window on this PC (it shows a browser page): only for the person at this PC.
     add("POST", "/api/accounts/login", kOwner, [&](auto& req, auto& res, Ctx&) {

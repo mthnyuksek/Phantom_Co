@@ -36,7 +36,9 @@ function draw() {
     <div class="card" id="s-secrets"><h3>Secrets</h3>
       <p class="hint" style="margin-top:0">The Claude Code, Codex, Gemini CLI and OpenCode sign-ins your ghosts can use. <b>Auto</b> is the sign-in the command-line tool already has on this PC. Add more accounts (another subscription or an API key), then pick one as a ghost's brain. Sign-ins stay in this PC's settings folder, never in the Vault; API keys are stored encrypted for this Windows user and are typed only on this PC.</p>
       <div id="s-acc-list">${secretsHTML()}</div>
-      <div class="inline acc-add"><select id="s-acc-prov"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="gemini">Gemini CLI</option><option value="opencode">OpenCode (NVIDIA…)</option></select>
+      <div class="inline acc-add"><p class="acc-add-title">Add another sign-in or API key</p>
+        <select id="s-acc-prov"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="gemini">Gemini CLI</option><option value="opencode">OpenCode (NVIDIA, OpenRouter, Groq…)</option></select>
+        <select id="s-acc-service" hidden>${ocServices().map((v) => `<option value="${esc(v.id)}">${esc(v.label)}</option>`).join('')}</select>
         <select id="s-acc-kind"><option value="subscription">Subscription</option><option value="api_key">API key</option></select>
         <input type="text" id="s-acc-name" maxlength="40" placeholder="Account name, e.g. Work">
         <input type="password" id="s-acc-key" maxlength="400" placeholder="Paste the API key" autocomplete="off" hidden>
@@ -68,6 +70,13 @@ async function loadAbout(check = false) {
 
 const PROV = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', opencode: 'OpenCode' };
 const KEY_ONLY = ['gemini', 'opencode'];  // no subscription sign-in: API keys only
+// The model services an OpenCode key can belong to (from the server: id, label, key prefix, default model).
+const ocServices = () => S.state.providers.find((p) => p.id === 'opencode')?.services || [];
+const keyPlaceholder = () => {
+  if ($('#s-acc-prov', view).value !== 'opencode') return t('Paste the API key');
+  const sv = ocServices().find((v) => v.id === $('#s-acc-service', view).value);
+  return t('Paste the {} key').replace('{}', sv?.label || '') + (sv?.prefix ? ` (${sv.prefix}…)` : '');
+};
 function keyStatusHTML(a) {
   const st = a.status, hint = a.key_hint ? ` <code class="acc-key">${esc(a.key_hint)}</code>` : '';
   if (!st) return '<span class="chip">Checking…</span>' + hint;
@@ -169,7 +178,8 @@ export async function render(v) {
       const name = $('#s-acc-name', view).value.trim(), kind = $('#s-acc-kind', view).value, key = $('#s-acc-key', view).value.trim();
       if (!name) return toast('Please enter a name.');
       if (kind === 'api_key' && !key) return toast('Paste the API key.');
-      const a = await api('POST', '/api/accounts', { provider: $('#s-acc-prov', view).value, name, kind, key: kind === 'api_key' ? key : undefined });
+      const provider = $('#s-acc-prov', view).value;
+      const a = await api('POST', '/api/accounts', { provider, name, kind, key: kind === 'api_key' ? key : undefined, service: provider === 'opencode' ? $('#s-acc-service', view).value : undefined });
       $('#s-acc-name', view).value = '';
       $('#s-acc-key', view).value = '';
       await refreshState();
@@ -210,7 +220,12 @@ export async function render(v) {
       kind.querySelector('option[value="subscription"]').disabled = keyOnly;
       if (keyOnly) kind.value = 'api_key';
       $('#s-acc-key', view).hidden = kind.value !== 'api_key';
-      $('#s-acc-key', view).placeholder = t(e.target.value === 'opencode' ? 'Paste the NVIDIA key (nvapi-…)' : 'Paste the API key');
+      $('#s-acc-service', view).hidden = e.target.value !== 'opencode';
+      $('#s-acc-key', view).placeholder = keyPlaceholder();
+      return;
+    }
+    if (e.target.id === 's-acc-service') {
+      $('#s-acc-key', view).placeholder = keyPlaceholder();
       return;
     }
     if (e.target.classList.contains('acc-name')) {

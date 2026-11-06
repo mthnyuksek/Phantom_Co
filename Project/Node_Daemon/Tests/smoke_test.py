@@ -246,6 +246,30 @@ def main():
         os_ = [a for a in owner.get("/api/accounts/status")[1]["accounts"] if a["id"] == oa["id"]][0]["status"]
         check("fake nvidia key not accepted", os_["signed_in"] is False and os_["error"] in ("key_rejected", "unreachable"), os_)
         owner.delete("/api/accounts/" + oa["id"])
+        # other model services: picked in Settings (keys without a telling prefix need it), prefixes checked
+        st, og = owner.post("/api/accounts", {"provider": "opencode", "name": "Groq", "kind": "api_key", "service": "groq", "key": "gsk_PhantomTest" + "x" * 24})
+        check("opencode groq key account", st == 201 and og.get("service") == "groq", og)
+        check("service of an account in the state", any(a.get("service") == "groq" for a in owner.get("/api/state")[1]["accounts"]))
+        check("groq account refuses an nvidia key", owner.put("/api/accounts/" + og["id"], {"key": "nvapi-PhantomTest" + "x" * 24})[0] == 400)
+        gs2 = [a for a in owner.get("/api/accounts/status")[1]["accounts"] if a["id"] == og["id"]][0]["status"]
+        check("fake groq key not accepted", gs2["signed_in"] is False and gs2["error"] in ("key_rejected", "unreachable"), gs2)
+        owner.delete("/api/accounts/" + og["id"])
+        st, od = owner.post("/api/accounts", {"provider": "opencode", "name": "Ds", "kind": "api_key", "service": "deepseek", "key": "sk-PhantomTest" + "x" * 24})
+        check("opencode deepseek key (no prefix) account", st == 201 and od.get("service") == "deepseek", od)
+        owner.delete("/api/accounts/" + od["id"])
+        check("key that does not fit the service refused", owner.post("/api/accounts", {"provider": "opencode", "name": "X", "kind": "api_key", "service": "groq", "key": "nvapi-PhantomTest" + "x" * 24})[0] == 400)
+        check("unknown service refused", owner.post("/api/accounts", {"provider": "opencode", "name": "X", "kind": "api_key", "service": "nope", "key": "sk-PhantomTest" + "x" * 24})[0] == 400)
+        st, om = owner.get("/api/opencode/models")
+        check("opencode model suggestions", st == 200 and isinstance(om["local"], list) and any(v["id"] == "nvidia" for v in om["services"]), om)
+        oc_state = [p for p in owner.get("/api/state")[1]["providers"] if p["id"] == "opencode"][0]
+        check("opencode services in the state", [v["id"] for v in oc_state["services"]][:3] == ["nvidia", "openrouter", "groq"], oc_state)
+        # an OpenCode ghost on Auto without a model (and no key in the environment) stops with a clear word
+        if not os.environ.get("NVIDIA_API_KEY"):
+            owner.put("/api/agents/" + ob["id"], {"provider": "opencode", "model": ""})
+            st, och = owner.post("/api/chats", {"agent_id": ob["id"]})
+            owner.post(f"/api/chats/{och['meta']['id']}/send", {"text": "hi"})
+            v = owner.wait_idle(och["meta"]["id"], 30)
+            check("opencode without a model explained", v is not None and any("has no model" in m["text"] for m in v["messages"]), v and [m["text"][:120] for m in v["messages"]])
         owner.delete("/api/agents/" + ob["id"])
         check("key removed with the account", ka["id"] not in open(os.path.join(data, "secrets.json"), encoding="utf-8").read())
 
@@ -552,4 +576,5 @@ def main():
     sys.exit(1 if failures else 0)
 
 
-main()
+if __name__ == "__main__":
+    main()
