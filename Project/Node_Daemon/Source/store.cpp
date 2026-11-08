@@ -93,6 +93,7 @@ static const std::vector<Field> kAgentF = {
     {"provider", "provider", 'S', "claude"}, {"model", "model", 'S', ""},   {"form", "form", 'S', "classic"},
     {"color", "color", 'S', "#b69cff"}, {"enabled", "enabled", 'B', "true"}, {"timeout_min", "timeout_min", 'I', "30"},
     {"thinking", "thinking", 'S', ""},  // OpenCode reasoning effort: "" | low | medium | high
+    {"memory", "memory", 'B', "false"},  // keeps notes between chats (Memory/<agent>/<user>.md)
     {"skill", "skills", 'L', ""},       {"created", "created", 'S', ""}};
 static const std::vector<Field> kSkillF = {
     {"name", "name", 'S', ""}, {"description", "description", 'S', ""}, {"tools", "tools", 'C', ""},
@@ -227,7 +228,7 @@ void init_vault(const fs::path& root) {
         fresh = true;
     }
 
-    for (const wchar_t* d : {L"Company", L"Users", L"Agents", L"Skills", L"Rules", L"Projects", L"Tasks", L"Task_Templates", L"Scripts", L"Script_Runs", L"Conversations", L"Runs", L"Shared_Files"})
+    for (const wchar_t* d : {L"Company", L"Users", L"Agents", L"Skills", L"Rules", L"Projects", L"Tasks", L"Task_Templates", L"Scripts", L"Script_Runs", L"Conversations", L"Runs", L"Shared_Files", L"Memory"})
         fs::create_directories(root / d, ec);
 
     for (size_t i = 0; i < kEmbeddedCount; ++i) {  // starting files from the template; existing files are kept
@@ -662,6 +663,113 @@ std::vector<json> Store::conv_list() {
     }
     std::sort(out.begin(), out.end(), [](const json& a, const json& b) { return a.value("updated", "") > b.value("updated", ""); });
     return out;
+}
+
+std::vector<std::string> Store::conv_ids() {
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    std::vector<std::string> out;
+    std::error_code ec;
+    for (auto& e : fs::directory_iterator(root_ / L"Conversations", ec))
+        if (e.path().extension() == L".jsonl") out.push_back(U8(e.path().stem()));
+    return out;
+}
+
+// ----------------------------------------------------------------- budgets
+json Store::budgets() {
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    json b = read_json(root_ / L"Company" / L"budgets.json");
+    return b.is_object() ? b : json::object();
+}
+void Store::save_budgets(const json& b) {
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    write_json(root_ / L"Company" / L"budgets.json", b);
+}
+
+// ------------------------------------------------------------------ memory
+static std::string memory_clean(const std::string& in) {
+    std::string out;
+    for (char c : in) {
+        const bool space = c == '\n' || c == '\r' || c == '\t' || c == ' ';
+        if (space && (out.empty() || out.back() == ' ')) continue;
+        out += space ? ' ' : c;
+    }
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return truncate_utf8(out, kMaxMemoryText);
+}
+
+std::vector<std::string> Store::memory(const std::string& agent_id, const std::string& user_id) {
+    std::vector<std::string> out;
+    if (!valid_id(agent_id) || !valid_id(user_id)) return out;
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    std::string text;
+    if (!read_file(root_ / L"Memory" / P(agent_id) / P(user_id + ".md"), text)) return out;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t e = text.find('\n', pos);
+        if (e == std::string::npos) e = text.size();
+        std::string line = text.substr(pos, e - pos);
+        pos = e + 1;
+        if (line.rfind("- ", 0) == 0) line.erase(0, 2);
+        line = memory_clean(line);
+        if (!line.empty()) out.push_back(line);
+    }
+    return out;
+}
+
+void Store::memory_write(const std::string& agent_id, const std::string& user_id, const std::vector<std::string>& notes) {
+    const fs::path dir = root_ / L"Memory" / P(agent_id);
+    std::error_code ec;
+    if (notes.empty()) { fs::remove(dir / P(user_id + ".md"), ec); return; }
+    fs::create_directories(dir, ec);
+    std::string text;
+    for (auto& n : notes) text += "- " + n + "\n";
+    write_file_atomic(dir / P(user_id + ".md"), text);
+}
+
+bool Store::memory_add(const std::string& agent_id, const std::string& user_id, const std::string& text) {
+    if (!valid_id(agent_id) || !valid_id(user_id)) return false;
+    const std::string note = memory_clean(text);
+    if (note.empty()) return false;
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    auto notes = memory(agent_id, user_id);
+    if (std::find(notes.begin(), notes.end(), note) != notes.end()) return false;
+    notes.push_back(note);
+    while (notes.size() > kMaxMemory) notes.erase(notes.begin());
+    memory_write(agent_id, user_id, notes);
+    return true;
+}
+
+std::string Store::memory_remove(const std::string& agent_id, const std::string& user_id, size_t number) {
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    auto notes = memory(agent_id, user_id);
+    if (number < 1 || number > notes.size()) return "";
+    std::string gone = notes[number - 1];
+    notes.erase(notes.begin() + (long)(number - 1));
+    memory_write(agent_id, user_id, notes);
+    return gone;
+}
+
+void Store::memory_clear(const std::string& agent_id, const std::string& user_id) {
+    if (!valid_id(agent_id) || !valid_id(user_id)) return;
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    memory_write(agent_id, user_id, {});
+}
+
+void Store::memory_forget_agent(const std::string& agent_id) {
+    if (!valid_id(agent_id)) return;
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    std::error_code ec;
+    fs::remove_all(root_ / L"Memory" / P(agent_id), ec);
+}
+
+void Store::memory_forget_user(const std::string& user_id) {
+    if (!valid_id(user_id)) return;
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    std::error_code ec;
+    for (auto& e : fs::directory_iterator(root_ / L"Memory", ec)) {
+        std::error_code e2;
+        fs::remove(e.path() / P(user_id + ".md"), e2);
+    }
 }
 
 bool Store::conv_delete(const std::string& id) {

@@ -20,6 +20,9 @@ struct Config {
     bool check_updates = true;  // ask GitHub for a newer release (Settings > About)
 };
 
+constexpr size_t kMaxMemory = 40;        // notes per ghost and person (all of them go into every prompt)
+constexpr size_t kMaxMemoryText = 300;   // bytes per note
+
 fs::path default_vault_path();  // <Documents>\Phantom_Vault  (visible on purpose)
 fs::path config_dir();          // %LOCALAPPDATA%\Phantom_Co
 fs::path config_file_path();
@@ -118,7 +121,22 @@ public:
     void set_append_hook(std::function<void(const std::string&, const json&)> f) { append_hook_ = std::move(f); }
     std::optional<json> conv_load(const std::string& id);  // {meta, messages, sessions}
     std::vector<json> conv_list();
+    std::vector<std::string> conv_ids();
     bool conv_delete(const std::string& id);
+
+    // Spending limits: Company/budgets.json, see budget.hpp
+    json budgets();
+    void save_budgets(const json& b);
+
+    // What a ghost remembers about working with one person: Memory/<agent id>/<user id>.md, one "- note" per line.
+    // Per person on purpose: a note from a private chat must not reach somebody else's chat.
+    std::vector<std::string> memory(const std::string& agent_id, const std::string& user_id);
+    // false = empty or already known. The oldest note goes when there are more than kMaxMemory.
+    bool memory_add(const std::string& agent_id, const std::string& user_id, const std::string& text);
+    std::string memory_remove(const std::string& agent_id, const std::string& user_id, size_t number);  // 1 = first; the removed text, "" = none
+    void memory_clear(const std::string& agent_id, const std::string& user_id);
+    void memory_forget_agent(const std::string& agent_id);
+    void memory_forget_user(const std::string& user_id);
 
     // Runs: Runs/<id>.md (record) + Runs/<id>.jsonl (event log)
     void run_save(const json& rec);
@@ -133,6 +151,7 @@ private:
     std::string unique_id(const fs::path& dir, const std::string& name, bool folder, const char* ext = ".md");
     void load_run_index();
     void* lock_ = nullptr;  // open handle of <Vault>\.phantom_lock: one Phantom Co. window per Vault
+    void memory_write(const std::string& agent_id, const std::string& user_id, const std::vector<std::string>& notes);  // caller holds mu_
 
     mutable std::recursive_mutex mu_;
     fs::path root_;

@@ -19,11 +19,13 @@
 #include <regex>
 #include <set>
 
+#include "budget.hpp"
 #include "embedded.hpp"
 #include "httplib.h"
 #include "mcp_builtin.hpp"
 #include "prompt.hpp"
 #include "script_doc.hpp"
+#include "search.hpp"
 #include "update_check.hpp"
 #include "version.hpp"
 
@@ -433,6 +435,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         if (auth.role(id) == "owner" && auth.owner_count() <= 1) return fail(res, 409, "There must be at least one owner.");
         auth.remove_user(id);
         store.remove_user(id);
+        store.memory_forget_user(id);
         send(res, {{"ok", true}});
     });
 
@@ -477,6 +480,8 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             }
             st["approvals"] = mine;
         }
+        if (opt.notifier) st["unread"] = opt.notifier->unread(c.id, owner);  // the bell
+        st["asks"] = opt.scripts ? opt.scripts->pending_asks(c.id, owner) : json::array();  // Ask blocks of scripts waiting for this person
         if (opt.telegram) st["telegram"] = opt.telegram->link_info(c.id);  // Profile > Telegram
         {   // extra sign-ins of this PC: names only (the agent editor offers "claude#<id>"); Settings > Secrets shows more to the owner
             json acc = json::array();
@@ -610,6 +615,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         out["reports_to"] = str(in, "reports_to", 64, base.value("reports_to", ""));
         out["enabled"] = in.contains("enabled") && in["enabled"].is_boolean() ? in["enabled"].get<bool>() : base.value("enabled", true);
         out["timeout_min"] = in.contains("timeout_min") && in["timeout_min"].is_number_integer() ? std::clamp(in["timeout_min"].get<int>(), 1, 240) : base.value("timeout_min", 30);
+        out["memory"] = in.contains("memory") && in["memory"].is_boolean() ? in["memory"].get<bool>() : base.value("memory", false);
         out["thinking"] = str(in, "thinking", 8, base.value("thinking", ""));
         if (out["thinking"] != "" && out["thinking"] != "low" && out["thinking"] != "medium" && out["thinking"] != "high") out["thinking"] = "";
         out["skills"] = base.value("skills", json::array());
@@ -964,8 +970,29 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         std::string id = req.matches[1];
         if (runner.agent_activity().contains(id)) return fail(res, 409, "This ghost is busy. Stop its work first.");
         if (!store.remove_agent(id)) return fail(res, 404, "Agent not found");
+        store.memory_forget_agent(id);
         for (auto o : store.agents()) if (o.value("reports_to", "") == id) { o["reports_to"] = ""; store.save_agent(o); }
         send(res, {{"ok", true}});
+    });
+    // ---- a ghost's notes about the person who asks: everybody sees and changes only their own
+    add("GET", "/api/agents/" + ID + "/memory", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        if (!store.agent(req.matches[1])) return fail(res, 404, "Agent not found");
+        send(res, {{"notes", store.memory(req.matches[1], c.id)}, {"max", kMaxMemory}});
+    });
+    add("POST", "/api/agents/" + ID + "/memory", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        if (!store.agent(req.matches[1])) return fail(res, 404, "Agent not found");
+        if (!store.memory_add(req.matches[1], c.id, str(b, "text", 2000))) return fail(res, 400, "Write a new note first.");
+        send(res, {{"notes", store.memory(req.matches[1], c.id)}, {"max", kMaxMemory}}, 201);
+    });
+    add("DELETE", "/api/agents/" + ID + "/memory/([0-9]{1,3})", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        if (store.memory_remove(req.matches[1], c.id, (size_t)atoi(req.matches[2].str().c_str())).empty()) return fail(res, 404, "Note not found");
+        send(res, {{"notes", store.memory(req.matches[1], c.id)}, {"max", kMaxMemory}});
+    });
+    add("DELETE", "/api/agents/" + ID + "/memory", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        store.memory_clear(req.matches[1], c.id);
+        send(res, {{"notes", json::array()}, {"max", kMaxMemory}});
     });
 
     // ================================================================ skills
@@ -1206,6 +1233,34 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         json v = chat_view(req.matches[1], c);
         if (v.is_null()) return fail(res, 404, "Chat not found");
         send(res, v);
+    });
+    // The conversation as one Markdown file (anybody who can read it may take it along).
+    add("GET", "/api/chats/" + ID + "/export", kViewer, [&](auto& req, auto& res, Ctx& c) {
+        auto cv = store.conv_load(req.matches[1]);
+        if (!cv || !visible((*cv)["meta"], c)) return fail(res, 404, "Chat not found");
+        const std::string title = (*cv)["meta"].value("title", "Chat");
+        std::string out = "# " + title + "\n\n_Exported from Phantom Co. on " + now_iso() + "_\n\n";
+        for (const json& m : (*cv)["messages"]) {
+            const std::string from = m.value("from", "system"), text = m.value("text", ""), ts = m.value("ts", "");
+            if (from.rfind("agent:", 0) == 0 || from.rfind("user:", 0) == 0) {
+                const bool agent = from[0] == 'a';
+                const std::string id = from.substr(agent ? 6 : 5);
+                auto who = agent ? store.agent(id) : store.user(id);
+                out += "**" + (who ? who->value("name", id) : id) + "** · " + ts + "\n\n" + text + "\n\n";
+            } else if (!text.empty()) {
+                out += "> " + replace_all(text, "\n", "\n> ") + "\n\n";
+            }
+        }
+        std::string name = slugify(title, 40);
+        if (name.empty()) name = "chat";
+        res.set_header("Content-Disposition", "attachment; filename=\"" + name + ".md\"");
+        res.set_header("X-Content-Type-Options", "nosniff");
+        res.set_content(out, "text/markdown; charset=utf-8");
+    });
+    add("GET", "/api/search", kViewer, [&](auto& req, auto& res, Ctx& c) {
+        const std::string q = truncate_utf8(req.get_param_value("q"), 200);
+        if (q.size() < 2) return send(res, {{"results", json::array()}, {"truncated", false}});
+        send(res, search_vault(store, q, 100, [&](const json& meta) { return visible(meta, c); }));
     });
     add("POST", "/api/chats/" + ID + "/send", kEditor, [&](auto& req, auto& res, Ctx& c) {
         json b;
@@ -1582,6 +1637,87 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         send(res, opt.scripts->get(req.matches[1]).value_or(json()));
     });
 
+    // An Ask block: the person who started the run (or the owner) answers it.
+    add("POST", "/api/script_runs/" + ID + "/answer", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        if (!opt.scripts) return fail(res, 404, "Run not found");
+        std::string err;
+        if (!opt.scripts->answer_ask(req.matches[1], str(b, "node", 32), c.id, c.role == "owner", c.name, b.value("approved", false), str(b, "value", 2000), err)) return fail(res, 409, err);
+        send(res, opt.scripts->get(req.matches[1]).value_or(json()));
+    });
+
+    // ================================================== overview and budgets
+    // The owner sees the whole company, everybody else their own runs.
+    add("GET", "/api/overview", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        const int days = req.has_param("days") ? atoi(req.get_param_value("days").c_str()) : 30;
+        send(res, usage_overview(store, days, c.role == "owner" ? "" : c.id));
+    });
+    add("PUT", "/api/budgets", kOwner, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        json clean = clean_budgets(b, store);
+        store.save_budgets(clean);
+        send(res, clean);
+    });
+
+    // ========================================================= notifications
+    add("GET", "/api/notifications", kViewer, [&](auto&, auto& res, Ctx& c) {
+        if (!opt.notifier) return send(res, {{"items", json::array()}, {"unread", 0}});
+        send(res, opt.notifier->list(c.id, c.role == "owner"));
+    });
+    add("POST", "/api/notifications/read", kViewer, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        if (opt.notifier) opt.notifier->mark_read(c.id, c.role == "owner", str(b, "id", 64));
+        send(res, {{"ok", true}});
+    });
+    add("GET", "/api/notifications/settings", kOwner, [&](auto&, auto& res, Ctx&) {
+        if (!opt.notifier) return fail(res, 404, "Not available.");
+        send(res, opt.notifier->settings());
+    });
+    add("PUT", "/api/notifications/settings", kOwner, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        if (!opt.notifier) return fail(res, 404, "Not available.");
+        send(res, opt.notifier->set_settings(b));
+    });
+
+    // ================================================================ backup
+    add("GET", "/api/backup", kOwner, [&](auto&, auto& res, Ctx&) {
+        if (!opt.backup) return fail(res, 404, "Not available.");
+        send(res, opt.backup->status());
+    });
+    add("POST", "/api/backup", kOwner, [&](auto& req, auto& res, Ctx&) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        if (!opt.backup) return fail(res, 404, "Not available.");
+        std::string err;
+        if (!opt.backup->start(store.root(), b.value("include_files", false), err)) return fail(res, 409, err);
+        send(res, opt.backup->status(), 202);
+    });
+    add("GET", "/api/backup/download", kOwner, [&](auto& req, auto& res, Ctx&) {
+        const fs::path p = opt.backup ? opt.backup->file(req.get_param_value("name")) : fs::path();
+        std::error_code ec;
+        const auto size = p.empty() ? 0 : fs::file_size(p, ec);
+        if (p.empty() || ec) return fail(res, 404, "Backup not found");
+        auto in = std::make_shared<std::ifstream>(p, std::ios::binary);
+        res.set_header("Content-Disposition", "attachment; filename=\"" + req.get_param_value("name") + "\"");
+        res.set_header("X-Content-Type-Options", "nosniff");
+        res.set_content_provider((size_t)size, "application/zip", [in](size_t offset, size_t length, httplib::DataSink& sink) {
+            std::vector<char> buf(std::min<size_t>(length, 1 << 20));
+            in->clear();
+            in->seekg((std::streamoff)offset);
+            in->read(buf.data(), (std::streamsize)buf.size());
+            const auto got = in->gcount();
+            return got > 0 && sink.write(buf.data(), (size_t)got);
+        });
+    });
+    add("DELETE", "/api/backup", kOwner, [&](auto& req, auto& res, Ctx&) {
+        if (!opt.backup || !opt.backup->remove(req.get_param_value("name"))) return fail(res, 404, "Backup not found");
+        send(res, opt.backup->status());
+    });
+
     // What is left of the subscription limits, as the last Claude/Codex runs reported it (script built-ins read the Auto sign-ins).
     add("GET", "/api/usage", kEditor, [&](auto&, auto& res, Ctx&) {
         json u = opt.usage ? opt.usage->all() : json::object();
@@ -1916,7 +2052,11 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
                         start_job((*cv)["meta"], conv, c, "Scheduled wake-up: please run this task again.", false, err);
                         if (!err.empty()) err = "it could not start (" + err + ")";
                     }
-                    if (!err.empty()) store.conv_append(conv, {{"t", "msg"}, {"from", "system"}, {"text", "⚠ Wake-up skipped: " + err}});
+                    if (!err.empty()) {
+                        store.conv_append(conv, {{"t", "msg"}, {"from", "system"}, {"text", "⚠ Wake-up skipped: " + err}});
+                        if (opt.notifier) opt.notifier->post({"failed", t.value("created_by", ""), "Wake-up skipped: " + t.value("title", ""), err,
+                                                              "Uyandırma atlandı: " + t.value("title", ""), err, "#/tasks/" + t.value("id", ""), "wake:task:" + t.value("id", "")});
+                    }
                     t["wake_last"] = std::to_string(now);
                     store.save_task(t);
                 }
@@ -1934,6 +2074,8 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
                         else if (s.value("draft", false)) err = "The script became a draft again: press Run once to let it wake.";
                         else if (!script::check_script(s, script_lookup)["errors"].empty()) err = "The script has problems: fix them first.";
                         else if (opt.scripts->run(s, u->value("id", ""), err, "wake").empty() && err.empty()) err = "It could not start.";
+                        if (!err.empty() && opt.notifier) opt.notifier->post({"failed", s.value("wake_by", ""), "Wake-up skipped: " + s.value("name", ""), err,
+                                                                              "Uyandırma atlandı: " + s.value("name", ""), err, "#/scripts/" + sid, "wake:script:" + sid});
                         if (!err.empty()) err = "Wake-up skipped (" + now_iso().substr(0, 16) + "Z): " + err;
                         auto fresh = store.script(sid);  // the run may have changed the file (draft flag); keep the newest
                         if (!fresh) continue;

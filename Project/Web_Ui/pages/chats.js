@@ -35,6 +35,8 @@ function listHTML() {
   }).join('') || '<div class="empty small">No chats here.</div>';
 }
 
+const exportBtn = (m) => `<a class="btn small" href="/api/chats/${esc(m.id)}/export" download title="Save this conversation as a Markdown file">⬇ Export</a>`;
+
 function paintList() { const el = $('#chat-list', view); if (el) el.innerHTML = listHTML(); }
 
 function paintHeader(d) {
@@ -44,7 +46,7 @@ function paintHeader(d) {
   const back = '<a class="btn small back-btn" href="#/chats" aria-label="Back to chats">←</a>';  // shown on phones only
   if (m.kind === 'agents') {
     const [x, y] = (m.participants || []).map(agentById);
-    el.innerHTML = `${back}<div class="grow"><h2>${esc(m.title)}</h2><div class="meta">${esc(x?.name || '?')} ↔ ${esc(y?.name || '?')} · agents talking to each other${m.user_id ? ' for ' + esc(userById(m.user_id)?.name || 'someone') : ''}</div></div>`;
+    el.innerHTML = `${back}<div class="grow"><h2>${esc(m.title)}</h2><div class="meta">${esc(x?.name || '?')} ↔ ${esc(y?.name || '?')} · agents talking to each other${m.user_id ? ' for ' + esc(userById(m.user_id)?.name || 'someone') : ''}</div></div>${exportBtn(m)}`;
     return;
   }
   const a = agentById(m.agent_id), p = projectById(m.project_id), u = userById(m.user_id);
@@ -54,7 +56,7 @@ function paintHeader(d) {
     ${canEdit() && own ? `<select id="ch-project" title="Project"><option value="">No project</option>${S.state.projects.map((x) => `<option value="${esc(x.id)}" ${x.id === m.project_id ? 'selected' : ''}>📁 ${esc(x.name)}</option>`).join('')}</select>
       ${m.kind === 'user' ? `<label class="check share"><input type="checkbox" id="ch-share" ${m.shared ? 'checked' : ''}> Share with team</label>` : ''}
       <button class="btn small" data-act="reset" title="Make the agent forget this talk">New session</button>
-      <button class="btn small danger" data-act="del">Delete</button>` : (p ? `<span class="chip ok">📁 ${esc(p.name)}</span>` : '')}`;
+      ${exportBtn(m)}<button class="btn small danger" data-act="del">Delete</button>` : (p ? `<span class="chip ok">📁 ${esc(p.name)}</span>` : '') + exportBtn(m)}`;
 }
 
 async function open(id) {

@@ -185,6 +185,62 @@ def main():
             with lock:
                 check("sent to the chat the ghost named", any(m["chat"] == "777" and m["text"] == "pumpkin pie" for m in sent))
 
+        # notices and the questions of Ask blocks
+        def ask_run(name, props):
+            s = {"name": name, "vars": [{"name": "n", "type": "Number", "init": "0"}],
+                 "nodes": [{"id": "s", "type": "start"}, {"id": "a", "type": "ask", "props": props}, {"id": "p", "type": "prompt", "props": {"agent_id": a["id"], "text": "go {n}"}}],
+                 "edges": [{"from": "s", "to": "a"}, {"from": "a", "port": "approved", "to": "p"}]}
+            sid = o.call("POST", "/api/scripts", s)[1]["id"]
+            return o.call("POST", f"/api/scripts/{sid}/run", {})[1]["id"]
+
+        def run_status(rid):
+            t0 = time.time()
+            while time.time() - t0 < 20:
+                r = o.call("GET", "/api/script_runs/" + rid)[1]
+                if r.get("status") != "running":
+                    return r
+                time.sleep(0.1)
+            return r
+
+        n = len(sent); rid = ask_run("Tg approve", {"question": "Ship it?"})
+        note = reply_after(n, lambda t: t.startswith("🔔"))
+        check("a script's question reaches Telegram", note and "Ship it?" in note and "/yes" in note, note)
+        n = len(sent); say("/yes")
+        check("/yes answers a script's question", reply_after(n, lambda t: "Approved" in t) is not None)
+        check("the script goes on after /yes", run_status(rid).get("status") == "done")
+
+        n = len(sent); rid = ask_run("Tg reject", {"question": "Really?"})
+        reply_after(n, lambda t: t.startswith("🔔"))
+        n = len(sent); say("/no")
+        check("/no rejects a script's question", reply_after(n, lambda t: "Rejected" in t) is not None)
+        r = run_status(rid)
+        check("the rejected run ends", r.get("status") == "done" and r["nodes"]["p"]["state"] == "skipped", r.get("nodes"))
+
+        n = len(sent); rid = ask_run("Tg value", {"question": "How many?", "mode": "value", "var": "n"})
+        reply_after(n, lambda t: t.startswith("🔔"))
+        n = len(sent); say("/yes")
+        check("/yes is not enough when a value is wanted", reply_after(n, lambda t: "/answer" in t) is not None)
+        n = len(sent); say("/answer lots")
+        check("a wrong value is refused", reply_after(n, lambda t: "not a number" in t) is not None)
+        n = len(sent); say("/answer 3,5")
+        check("/answer gives the value", reply_after(n, lambda t: "Got it" in t) is not None)
+        r = run_status(rid)
+        check("the value is in the variable", r.get("status") == "done" and r["vars"]["n"]["value"] == 350, r.get("vars"))
+        n = len(sent); say("/answer 1")
+        check("/answer with nothing waiting", reply_after(n, lambda t: "No script is waiting" in t) is not None)
+
+        n = len(sent)
+        s = {"name": "Tg fail", "nodes": [{"id": "s", "type": "start"}, {"id": "p", "type": "prompt", "props": {"agent_id": a["id"], "text": "demo:fail"}}], "edges": [{"from": "s", "to": "p"}]}
+        sid = o.call("POST", "/api/scripts", s)[1]["id"]
+        o.call("POST", f"/api/scripts/{sid}/run", {})
+        check("a failed script is told on Telegram", reply_after(n, lambda t: t.startswith("🔔 Script failed: Tg fail")) is not None)
+        o.call("PUT", "/api/notifications/settings", {"telegram": False})
+        n = len(sent)
+        o.call("POST", f"/api/scripts/{sid}/run", {})
+        time.sleep(1.5)
+        with lock:
+            check("the Telegram switch stops notices", not any(m["text"].startswith("🔔") for m in sent[n:]), sent[n:])
+
         n = len(sent); say("/unlink")
         check("/unlink", reply_after(n, lambda t: "Disconnected" in t) is not None)
         check("profile no longer linked", o.call("GET", "/api/state")[1]["telegram"]["linked"] == [])

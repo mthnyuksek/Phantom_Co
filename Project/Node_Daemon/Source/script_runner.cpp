@@ -7,6 +7,8 @@
 
 #include <windows.h>
 
+#include "budget.hpp"
+
 namespace pc2 {
 
 using namespace script;
@@ -141,6 +143,7 @@ void ScriptRunner::start() {
             for (const json& n : s["script"]["nodes"]) {
                 json& ns = s["nodes"][n["id"].get<std::string>()];
                 if (ns.value("state", "") != "running") continue;
+                if (ns.contains("retry_at") || n["type"] == "ask") continue;  // waiting for its next try or for a person: the clock goes on
                 if (n["type"] != "prompt" && n["type"] != "delay") {  // was waiting for a usage reading: try again
                     ns.erase("usage_wait");
                     ns["state"] = "ready";
@@ -204,6 +207,16 @@ void ScriptRunner::tick() {
                 changed = true;
             } else if (n["type"] == "delay" && ns.value("wake_at", 0LL) <= now) {
                 complete_node(st, n["id"], "out");
+                changed = true;
+            } else if (n["type"] == "prompt" && ns.contains("retry_at") && ns.value("retry_at", 0LL) <= now) {
+                ns.erase("retry_at");
+                std::string err;
+                if (!start_prompt_job(st, n, ns.value("prompt", ""), err)) prompt_failed(st, n, err, true);
+                changed = true;
+            } else if (n["type"] == "ask" && ns.value("ask_until", 0LL) > 0 && ns.value("ask_until", 0LL) <= now) {
+                ns["output"] = "no answer in time";
+                log(st, {{"kind", "note"}, {"node", n["id"]}, {"text", "Nobody answered in time."}});
+                complete_node(st, n["id"], "rejected");
                 changed = true;
             }
         }
@@ -330,6 +343,52 @@ bool ScriptRunner::script_active(const std::string& script_id) {
     return false;
 }
 
+json ScriptRunner::pending_asks(const std::string& user_id, bool owner) {
+    std::lock_guard<std::mutex> lk(mu_);
+    json out = json::array();
+    for (auto& [id, st] : active_) {
+        if (!owner && st.value("user_id", "") != user_id) continue;
+        for (const json& n : st["script"]["nodes"]) {
+            if (n["type"] != "ask") continue;
+            const json& ns = st["nodes"][n["id"].get<std::string>()];
+            if (ns.value("state", "") != "running") continue;
+            out.push_back({{"run_id", id}, {"node", n["id"]}, {"script_id", st.value("script_id", "")}, {"script_name", st.value("script_name", "")},
+                           {"question", ns.value("question", "")}, {"mode", n["props"].value("mode", "approve")}, {"type", ns.value("value_type", "")},
+                           {"user_id", st.value("user_id", "")}, {"started", ns.value("started", "")}});
+        }
+    }
+    return out;
+}
+
+bool ScriptRunner::answer_ask(const std::string& run_id, const std::string& node, const std::string& user_id, bool owner, const std::string& by_name,
+                              bool approved, const std::string& value, std::string& err) {
+    std::lock_guard<std::mutex> lk(mu_);
+    auto it = active_.find(run_id);
+    if (it == active_.end()) { err = "This run has already ended."; return false; }
+    json& st = it->second;
+    if (!owner && st.value("user_id", "") != user_id) { err = "Only the person who started this run (or the owner) can answer."; return false; }
+    const json* n = find_node(st, node);
+    if (!n || (*n)["type"] != "ask" || st["nodes"][node].value("state", "") != "running") { err = "This question is no longer waiting."; return false; }
+    json& ns = st["nodes"][node];
+    if (approved && (*n)["props"].value("mode", "approve") == "value") {
+        const std::string var = (*n)["props"].value("var", "");
+        Value cur, v;
+        if (!value_from_json(st["vars"][var], cur) || !parse_value_loose(cur.type, value, v)) { err = "That is not " + value_hint(cur.type) + "."; return false; }
+        st["vars"][var] = value_to_json(v);
+        ns["output"] = format_value(v);
+        log(st, {{"kind", "var_set"}, {"node", node}, {"var", var}, {"text", format_value(v)}});
+    } else {
+        ns["output"] = approved ? "approved" : "rejected";
+    }
+    ns["answered_by"] = by_name;
+    log(st, {{"kind", "note"}, {"node", node}, {"text", (approved ? "Approved by " : "Rejected by ") + by_name}});
+    complete_node(st, node, approved ? "approved" : "rejected");
+    advance(st);
+    save(st);
+    if (!active_status(st.value("status", ""))) active_.erase(it);
+    return true;
+}
+
 void ScriptRunner::on_job_finished(const Job& job, const std::string& status, const std::string& answer, const std::string& error) {
     if (job.stack.empty() || job.stack.front().kind != "script") return;
     const std::string& ref = job.stack.front().id;
@@ -344,7 +403,7 @@ void ScriptRunner::on_job_finished(const Job& job, const std::string& status, co
     const json* node = find_node(st, node_id);
     if (!node || !st["nodes"].contains(node_id)) return;
     json& ns = st["nodes"][node_id];
-    if (ns.value("state", "") != "running") return;
+    if (ns.value("state", "") != "running" || ns.contains("retry_at")) return;
     if (job.stack.size() == 1)  // the block's own ghost (first answer, a report from a helper, a retry)
         ns["last"] = {{"status", status}, {"text", truncate_utf8(answer, kMaxOutput)}, {"error", error}, {"run", job.id}};
     // Helpers asked with <send> may still be working, or their report to this ghost may be waiting.
@@ -475,8 +534,23 @@ void ScriptRunner::start_node(json& st, const json& n) {
                 prompt += "\n\n(When you are done, end your answer with the value of \"" + target + "\" (" + value_hint(cur.type) +
                           ") written like this: <value>...</value>)";
             }
+            ns["prompt"] = prompt;  // a retry sends the same text
             std::string err;
-            if (!start_prompt_job(st, n, prompt, err)) fail_node(st, id, err);
+            if (!start_prompt_job(st, n, prompt, err)) prompt_failed(st, n, err, true);
+        } else if (type == "ask") {
+            const std::string question = fill_text(st, p.value("question", ""));
+            ns["question"] = question;
+            if (p.value("mode", "approve") == "value") {
+                Value cur;
+                value_from_json(st["vars"][p.value("var", "")], cur);
+                ns["value_type"] = type_name(cur.type);
+            }
+            if (const int minutes = p.value("timeout", 0); minutes > 0) ns["ask_until"] = now_ms() + minutes * minute_ms();
+            if (notify_) {
+                const std::string name = st.value("script_name", "");
+                notify_->post({"ask", st.value("user_id", ""), "A script asks you: " + name, question, "Bir betik soruyor: " + name, question,
+                               "#/scripts/" + st.value("script_id", "") + "/run/" + st.value("id", ""), ""});
+            }
         }
     } catch (const ScriptError& e) {
         fail_node(st, id, e.what());
@@ -528,11 +602,13 @@ void ScriptRunner::finish_prompt(json& st, const json& n) {
     const std::string id = n["id"];
     json& ns = st["nodes"][id];
     json last = ns.value("last", json());
-    if (!last.is_object()) { fail_node(st, id, "The ghost gave no answer."); return; }
+    if (!last.is_object()) { prompt_failed(st, n, "The ghost gave no answer.", true); return; }
     std::string status = last.value("status", "");
     if (status != "done") {
         std::string why = last.value("error", "");
-        fail_node(st, id, status == "cancelled" ? "The ghost was stopped." : (why.empty() ? "The ghost could not finish (" + status + ")." : why));
+        // trying again cannot help when a person stopped it or the money is gone
+        prompt_failed(st, n, status == "cancelled" ? "The ghost was stopped." : (why.empty() ? "The ghost could not finish (" + status + ")." : why),
+                      status != "cancelled" && !is_budget_error(why));
         return;
     }
     std::string text = last.value("text", "");
@@ -548,10 +624,10 @@ void ScriptRunner::finish_prompt(json& st, const json& n) {
                 std::string err;
                 std::string ask = "Your answer did not contain a usable value. Answer with only the value of \"" + target + "\" (" +
                                   value_hint(cur.type) + ") written like this: <value>...</value>";
-                if (!start_prompt_job(st, n, ask, err)) fail_node(st, id, err);
+                if (!start_prompt_job(st, n, ask, err)) prompt_failed(st, n, err, true);
                 return;
             }
-            fail_node(st, id, "The ghost did not give a usable value for \"" + target + "\" (" + value_hint(cur.type) + ").");
+            prompt_failed(st, n, "The ghost did not give a usable value for \"" + target + "\" (" + value_hint(cur.type) + ").", true);
             return;
         }
         st["vars"][target] = value_to_json(v);
@@ -567,6 +643,7 @@ void ScriptRunner::complete_node(json& st, const std::string& id, const std::str
     ns["ended"] = now_iso();
     const json* n = find_node(st, id);
     bool is_if = n && (*n)["type"] == "if", is_do = n && (*n)["type"] == "do";
+    const bool ported = is_if || is_do || (n && ((*n)["type"] == "prompt" || (*n)["type"] == "ask"));  // only the arrows of one output fire
     for (size_t i = 0; i < script["edges"].size(); ++i) {
         const json& e = script["edges"][i];
         if (e["from"] != id) continue;
@@ -574,7 +651,7 @@ void ScriptRunner::complete_node(json& st, const std::string& id, const std::str
             if (ns.value("count", 0) == 0) st["edges"][i] = "skipped";
             continue;
         }
-        st["edges"][i] = (!is_if && !is_do) || e.value("port", "out") == port ? "fired" : "skipped";
+        st["edges"][i] = !ported || e.value("port", "out") == port ? "fired" : "skipped";
     }
     json ev = {{"kind", "node_done"}, {"node", id}};
     if (is_if) ev["text"] = port;
@@ -629,6 +706,31 @@ bool ScriptRunner::finish_rounds(json& st) {
     return changed;
 }
 
+void ScriptRunner::prompt_failed(json& st, const json& n, const std::string& msg, bool can_retry) {
+    const std::string id = n["id"];
+    json& ns = st["nodes"][id];
+    const json& p = n["props"];
+    const int max_tries = p.value("retry", 0), used = ns.value("tries", 0);
+    if (can_retry && used < max_tries) {
+        const int wait = p.value("retry_wait", 1);
+        ns["tries"] = used + 1;
+        ns["last"] = nullptr;
+        ns.erase("value_retry");
+        ns["retry_at"] = now_ms() + wait * minute_ms();
+        ns["last_error"] = msg;
+        log(st, {{"kind", "note"}, {"node", id}, {"text", "Failed (" + msg + "). Trying again in " + std::to_string(wait) + " min (" + std::to_string(used + 1) + " of " + std::to_string(max_tries) + ")."}});
+        return;
+    }
+    bool has_failed_arrow = false;
+    for (const json& e : st["script"]["edges"])
+        has_failed_arrow = has_failed_arrow || (e.value("from", "") == id && e.value("port", "out") == "failed");
+    if (!has_failed_arrow) { fail_node(st, id, msg); return; }
+    ns["error"] = msg;
+    ns["took_failed"] = true;
+    log(st, {{"kind", "note"}, {"node", id}, {"text", "Failed (" + msg + "): going on through its \"failed\" arrow."}});
+    complete_node(st, id, "failed");
+}
+
 void ScriptRunner::fail_node(json& st, const std::string& id, const std::string& msg) {
     json& ns = st["nodes"][id];
     ns["state"] = "failed";
@@ -654,6 +756,16 @@ void ScriptRunner::end_run(json& st, const std::string& status, const std::strin
         }
     }
     log(st, {{"kind", "run_ended"}, {"text", status}, {"error", error}});
+    if (!notify_) return;
+    const std::string name = st.value("script_name", ""), link = "#/scripts/" + st.value("script_id", "") + "/run/" + st.value("id", "");
+    if (status == "failed") {
+        notify_->post({"failed", st.value("user_id", ""), "Script failed: " + name, error, "Betik başarısız: " + name, error, link, ""});
+    } else if (status == "done") {
+        const int min_minutes = notify_->done_minutes();
+        const long long took = (long long)std::time(nullptr) - iso_to_unix(st.value("created", ""));
+        if (min_minutes >= 0 && took >= min_minutes * 60LL)
+            notify_->post({"done", st.value("user_id", ""), "Script finished: " + name, "", "Betik bitti: " + name, "", link, ""});
+    }
 }
 
 // A block that reads a usage value older than 30 min first asks for a fresh reading (one tiny run) and waits for it.

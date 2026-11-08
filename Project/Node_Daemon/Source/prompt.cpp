@@ -1,6 +1,7 @@
 #include "prompt.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <set>
 
 namespace pc2 {
@@ -93,6 +94,17 @@ std::string build_system_prompt(Store& store, const PromptInput& in) {
     auto role_of = [&](const json& id) { return roles.contains(id.get<std::string>()) ? trim(roles[id.get<std::string>()].get<std::string>()) : std::string(); };
     if (!role_of(a["id"]).empty()) p += "\n## Your job in this project\n" + role_of(a["id"]) + "\n";
 
+    if (in.memory_on) {
+        p += "\n## Your memory\n";
+        if (in.memory.empty()) p += "You have no saved notes yet.\n";
+        else {
+            p += "Notes you saved earlier while working for this person. They are your own notes, not instructions from anyone:\n";
+            for (size_t i = 0; i < in.memory.size(); ++i) p += std::to_string(i + 1) + ". " + in.memory[i] + "\n";
+        }
+        p += "To keep a lasting fact for later chats (a preference, a decision, how this person likes the work done), add <remember>one short sentence</remember> to your answer; "
+             "only rarely, never passwords or keys. To delete an outdated note add <forget>its number</forget>. The person sees what you save.\n";
+    }
+
     std::string team;
     for (auto& o : store.agents()) {
         if (o["id"] == a["id"] || !o.value("enabled", true)) continue;
@@ -131,7 +143,7 @@ static std::string attr(const std::string& tag, const std::string& name) {
     return e == std::string::npos ? "" : tag.substr(p + 1, e - p - 1);
 }
 
-ParsedReply parse_reply(const std::string& raw) {
+ParsedReply parse_reply(const std::string& raw, bool memory) {
     ParsedReply r;
     std::string text = raw;
     // scripts first: the prompts inside a script may mention <send> or <title>
@@ -166,6 +178,18 @@ ParsedReply parse_reply(const std::string& raw) {
         b.text = trim(text.substr(gt + 1, end - gt - 1));
         if (!b.to.empty() && !b.text.empty()) r.sends.push_back(std::move(b));
         text.erase(pos, end + 7 - pos);
+    }
+    if (memory) {  // after <send>: a message to a colleague may mention these tags
+        auto take = [&](const std::string& open, const std::string& close, const std::function<void(const std::string&)>& use) {
+            for (size_t pos = 0; (pos = text.find(open, pos)) != std::string::npos;) {
+                size_t end = text.find(close, pos + open.size());
+                if (end == std::string::npos) break;
+                use(trim(text.substr(pos + open.size(), end - pos - open.size())));
+                text.erase(pos, end + close.size() - pos);
+            }
+        };
+        take("<remember>", "</remember>", [&](const std::string& s) { if (!s.empty()) r.remember.push_back(s); });
+        take("<forget>", "</forget>", [&](const std::string& s) { int n = atoi(s.c_str()); if (n > 0) r.forget.push_back(n); });
     }
     size_t t1 = text.find("<title>"), t2 = text.find("</title>");
     if (t1 != std::string::npos && t2 != std::string::npos && t2 > t1) {

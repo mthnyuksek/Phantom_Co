@@ -28,6 +28,7 @@ public:
     void set_builtin(std::function<bool(const std::string& name, script::Value& out)> f);
     // Subscription usage for claude_left_5h / claude_left_week / codex_left (Auto sign-ins); may be null.
     void set_usage(Usage* u) { usage_ = u; }
+    void set_notifier(Notifier* n) { notify_ = n; }  // a run failed, finished after a long time, or an Ask block waits
 
     // Starts a run of a checked script. "" + err when it cannot start. trigger: "" = a person pressed Run, "wake" = its wake-up.
     std::string run(const json& script, const std::string& user_id, std::string& err, const std::string& trigger = "");
@@ -38,6 +39,12 @@ public:
     bool script_active(const std::string& script_id);
     bool any_active();  // a run is going or paused (the tray's Quit asks first)
 
+    // Ask blocks that wait for this person (the one who started the run; an owner sees all of them).
+    json pending_asks(const std::string& user_id, bool owner);  // [{run_id, node, script_id, script_name, question, mode, type, user_id}]
+    // approved + mode value: `value` is checked against the variable's type.
+    bool answer_ask(const std::string& run_id, const std::string& node, const std::string& user_id, bool owner, const std::string& by_name,
+                    bool approved, const std::string& value, std::string& err);
+
     void on_job_finished(const Job& job, const std::string& status, const std::string& answer, const std::string& error);
 
 private:
@@ -47,6 +54,7 @@ private:
     void start_round(json& st, const json& node);
     bool finish_rounds(json& st);
     void fail_node(json& st, const std::string& id, const std::string& msg);
+    void prompt_failed(json& st, const json& node, const std::string& msg, bool can_retry);  // tries again, takes the failed arrow, or fails the run
     void end_run(json& st, const std::string& status, const std::string& error);
     void finish_prompt(json& st, const json& node);
     bool start_prompt_job(json& st, const json& node, const std::string& prompt, std::string& err);
@@ -63,6 +71,7 @@ private:
     std::function<std::string(const std::string&)> role_of_;
     std::function<bool(const std::string&, script::Value&)> builtin_;
     Usage* usage_ = nullptr;
+    Notifier* notify_ = nullptr;
     std::mutex mu_;
     std::map<std::string, json> active_;  // running or paused runs
     std::thread clock_;

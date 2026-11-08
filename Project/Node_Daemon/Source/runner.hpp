@@ -11,6 +11,7 @@
 
 #include "accounts.hpp"
 #include "mcp.hpp"
+#include "notify.hpp"
 #include "process.hpp"
 #include "prompt.hpp"
 #include "providers.hpp"
@@ -61,6 +62,7 @@ struct JobState {
     Process* proc = nullptr;
     std::string answer, answer_error;  // set by route(): the answer without <send>/<title>, or why it failed
     bool can_script = false;           // the agent has the Visual scripts skill in this run (its <script> blocks are saved)
+    bool can_remember = false;         // the ghost keeps notes and this run saw them (its <remember> / <forget> blocks are applied)
 };
 
 // Called after every job has finished (no Runner lock held): status = done | failed | cancelled | timeout.
@@ -79,6 +81,7 @@ public:
     std::string enqueue_routed(Job job, std::string& error) { return enqueue_internal(std::move(job), error, false); }
     void set_finish_hook(JobFinishHook f) { finish_hook_ = std::move(f); }  // set once at start
     void set_usage(Usage* u) { usage_ = u; }  // where local Claude/Codex runs leave the subscription usage they saw
+    void set_notifier(Notifier* n) { notifier_ = n; }  // tells people that a budget ran out
 
     bool cancel_run(const std::string& run_id);
     int cancel_conversation(const std::string& conv_id);
@@ -131,6 +134,8 @@ private:
     bool has_pending_request(const std::string& sender, const std::string& target);
     void emit(JobState& js, json ev);
     void say(const std::string& conv, const std::string& text);  // system line in a conversation
+    bool over_budget(const Job& job, std::string& error);        // a limit of Overview is used up: tells the owners once per period
+    void apply_memory(const std::shared_ptr<JobState>& js, const ParsedReply& pr);
 
     Store& store_;
     std::mutex reg_mu_;
@@ -142,6 +147,7 @@ private:
     Mcp* mcp_ = nullptr;
     JobFinishHook finish_hook_;
     Usage* usage_ = nullptr;
+    Notifier* notifier_ = nullptr;
     std::atomic<bool> stopping_{false};
 };
 

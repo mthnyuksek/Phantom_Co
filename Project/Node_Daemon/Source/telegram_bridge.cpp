@@ -69,7 +69,7 @@ bool TelegramBridge::config(std::string& token) {
 
 std::vector<std::pair<std::string, json>> TelegramBridge::commands() {
     static const std::set<std::string> reserved = {"start", "help", "agents", "phantoms", "ghosts", "hayaletler", "new", "yeni",
-                                                    "yes", "no", "evet", "hayir", "link", "unlink"};
+                                                    "yes", "no", "evet", "hayir", "link", "unlink", "answer", "cevap"};
     std::vector<std::pair<std::string, json>> out;
     std::set<std::string> used = reserved;
     for (auto& a : store_.agents()) {
@@ -151,8 +151,8 @@ void TelegramBridge::reply(const std::string& chat, const std::string& text) {
 }
 
 static std::string help_text(bool tr) {
-    return T(tr, "Commands:\n/agents — list the ghosts\n/<ghost> message — talk to a ghost (it becomes the current one: plain messages go to it)\n/new — the current ghost forgets the chat\n/yes, /no — answer a ghost's approval request",
-             "Komutlar:\n/agents — hayaletleri listeler\n/<hayalet> mesaj — bir hayaletle konuş (o artık geçerli hayalet olur: düz mesajlar ona gider)\n/new — geçerli hayalet sohbeti unutur\n/yes, /no — bir hayaletin onay isteğini yanıtla");
+    return T(tr, "Commands:\n/agents — list the ghosts\n/<ghost> message — talk to a ghost (it becomes the current one: plain messages go to it)\n/new — the current ghost forgets the chat\n/yes, /no — answer an approval request or a script's question\n/answer value — give the value a script asks for",
+             "Komutlar:\n/agents — hayaletleri listeler\n/<hayalet> mesaj — bir hayaletle konuş (o artık geçerli hayalet olur: düz mesajlar ona gider)\n/new — geçerli hayalet sohbeti unutur\n/yes, /no — bir onay isteğini ya da betik sorusunu yanıtla\n/answer değer — betiğin istediği değeri ver");
 }
 
 void TelegramBridge::handle(const json& m, const std::string& token) {
@@ -260,7 +260,27 @@ void TelegramBridge::handle(const json& m, const std::string& token) {
                     if (!mcp_.decide(p["id"], uid, user->value("name", ""), owner, cmd == "yes" || cmd == "evet", err)) reply(chat, err);
                     return;  // the answer line in the chat goes to Telegram by itself
                 }
+        // no ghost approval is waiting: the newest question of a script
+        json asks = asks_list_ ? asks_list_(uid, owner) : json::array();
+        if (!asks.empty()) {
+            const json ask = asks.back();
+            const bool approved = cmd == "yes" || cmd == "evet";
+            if (approved && ask.value("mode", "") == "value") return reply(chat, T(tr, "This question needs a value: /answer <value>", "Bu soru bir değer istiyor: /answer <değer>"));
+            std::string err;
+            if (!asks_answer_(ask, uid, owner, user->value("name", ""), approved, "", err)) return reply(chat, err);
+            return reply(chat, approved ? T(tr, "✓ Approved. The script goes on.", "✓ Onaylandı. Betik devam ediyor.") : T(tr, "✗ Rejected.", "✗ Reddedildi."));
+        }
         return reply(chat, T(tr, "Nothing is waiting for your answer.", "Yanıtını bekleyen bir şey yok."));
+    }
+    if (cmd == "answer" || cmd == "cevap") {
+        json asks = asks_list_ ? asks_list_(uid, owner) : json::array();
+        json ask;
+        for (auto& a : asks) if (a.value("mode", "") == "value") ask = a;  // the newest one that wants a value
+        if (ask.is_null()) return reply(chat, T(tr, "No script is waiting for a value.", "Değer bekleyen bir betik yok."));
+        if (rest.empty()) return reply(chat, T(tr, "Write the value after the command: /answer <value>", "Değeri komuttan sonra yaz: /answer <değer>"));
+        std::string err;
+        if (!asks_answer_(ask, uid, owner, user->value("name", ""), true, rest, err)) return reply(chat, err);
+        return reply(chat, T(tr, "✓ Got it. The script goes on.", "✓ Aldım. Betik devam ediyor."));
     }
 
     if (cmd == "new" || cmd == "yeni") {
@@ -415,6 +435,28 @@ void TelegramBridge::unlink(const std::string& user_id) {
     std::lock_guard<std::mutex> l(mu_);
     for (auto it = state_["links"].begin(); it != state_["links"].end();) it = it->value("user", "") == user_id ? state_["links"].erase(it) : std::next(it);
     save();
+}
+
+void TelegramBridge::send_to_user(const std::string& user_id, const std::string& en, const std::string& tr) {
+    std::vector<std::pair<std::string, bool>> chats;
+    std::string token;
+    {
+        std::lock_guard<std::mutex> l(mu_);
+        token = token_now_;
+        for (auto& [tg, v] : state_["links"].items())
+            if (v.value("user", "") == user_id) chats.push_back({tg, v.value("tr", false)});  // a person's private chat has the id of the person
+    }
+    if (token.empty()) return;
+    for (auto& [chat, is_tr] : chats) {
+        std::string err;
+        builtin::telegram_send(token, chat, is_tr ? tr : en, err);
+    }
+}
+
+void TelegramBridge::set_asks(std::function<json(const std::string&, bool)> list,
+                              std::function<bool(const json&, const std::string&, bool, const std::string&, bool, const std::string&, std::string&)> answer) {
+    asks_list_ = std::move(list);
+    asks_answer_ = std::move(answer);
 }
 
 json TelegramBridge::inbox() {

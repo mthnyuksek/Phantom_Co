@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 # The one place of the version number: it goes into version.hpp (program, About, worker check) and the exe's file info.
-project(phantom_co VERSION 1.4.0 LANGUAGES CXX RC)
+project(phantom_co VERSION 1.5.0 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -43,6 +43,10 @@ add_executable(phantom_co WIN32
   Source/script_doc.cpp
   Source/script_runner.cpp
   Source/usage.cpp
+  Source/notify.cpp
+  Source/budget.cpp
+  Source/search.cpp
+  Source/backup.cpp
   Source/runner.cpp
   Source/worker_hub.cpp
   Source/worker.cpp

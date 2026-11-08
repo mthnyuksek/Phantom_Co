@@ -10,7 +10,7 @@ namespace pc2::script {
 
 namespace {
 
-const std::set<std::string> kNodeTypes = {"start", "prompt", "set", "if", "delay", "do", "end"};
+const std::set<std::string> kNodeTypes = {"start", "prompt", "set", "if", "delay", "do", "ask", "end"};
 const std::set<std::string> kReserved = {"and", "or", "not", "true", "false", "abs", "round", "min", "max"};
 
 std::string str(const json& j, const char* key, size_t max, const std::string& fallback = "") {
@@ -40,10 +40,32 @@ int coord(const json& n, const char* key) {
     return static_cast<int>(std::lround(std::clamp(v, -100000.0, 100000.0)));
 }
 
+// A whole number from a block's properties: the editor sends texts, ghosts may write numbers.
+int int_prop(const json& p, const char* key, int lo, int hi, int fallback) {
+    if (!p.is_object() || !p.contains(key)) return fallback;
+    const json& v = p[key];
+    double d = 0;
+    if (v.is_number()) d = v.get<double>();
+    else if (v.is_string() && !v.get<std::string>().empty()) {
+        char* end = nullptr;
+        const std::string s = v.get<std::string>();
+        d = strtod(s.c_str(), &end);
+        if (end == s.c_str() || *end) return fallback;
+    } else return fallback;
+    if (!std::isfinite(d)) return fallback;
+    return static_cast<int>(std::clamp(d, static_cast<double>(lo), static_cast<double>(hi)));
+}
+
 json clean_props(const std::string& type, const json& p) {
     if (type == "prompt")
         return {{"agent_id", str(p, "agent_id", 64)}, {"project_id", str(p, "project_id", 64)},
-                {"text", str(p, "text", 20000)}, {"target", str(p, "target", 32)}};
+                {"text", str(p, "text", 20000)}, {"target", str(p, "target", 32)},
+                {"retry", int_prop(p, "retry", 0, 5, 0)}, {"retry_wait", int_prop(p, "retry_wait", 0, 1440, 1)}};
+    if (type == "ask") {
+        std::string mode = str(p, "mode", 8, "approve");
+        return {{"question", str(p, "question", 4000)}, {"mode", mode == "value" ? "value" : "approve"}, {"var", str(p, "var", 32)},
+                {"timeout", int_prop(p, "timeout", 0, 10080, 0)}};
+    }
     if (type == "set") return {{"var", str(p, "var", 32)}, {"expr", str(p, "expr", 4000)}};
     if (type == "if") return {{"expr", str(p, "expr", 4000)}};
     if (type == "do") return {{"count", str(p, "count", 4000, "3")}, {"var", str(p, "var", 32)}};
@@ -242,6 +264,12 @@ json check_script(const json& s, const ScriptLookup& lookup) {
         } else if (type == "delay") {
             bool until = p.value("mode", "for") == "until";
             check_expr_at(where, p.value("expr", ""), until ? Type::Time : Type::Number, until ? "The time" : "The minutes");
+        } else if (type == "ask") {
+            std::string question = p.value("question", "");
+            if (question.empty()) add("The question is empty.", {{"node", id}, {"field", "question"}});
+            for (const std::string& name : text_placeholders(question))
+                if (!env.count(name)) add("Unknown variable in the question: {" + name + "}", {{"node", id}, {"field", "question"}});
+            if (p.value("mode", "approve") == "value") writable(p.value("var", ""), where, "var");
         } else if (type == "do") {
             json w = where;
             w["field"] = "count";
@@ -275,6 +303,8 @@ json check_script(const json& s, const ScriptLookup& lookup) {
         const std::string& ft = type_of[from];
         bool port_ok = ft == "if" ? (port == "true" || port == "false")
                      : ft == "do" ? (port == "loop" || port == "then")
+                     : ft == "ask" ? (port == "approved" || port == "rejected")
+                     : ft == "prompt" ? (port == "out" || port == "failed")
                      : (port == "out" && ft != "end");
         if (!port_ok) { add("Block '" + from + "' has no output '" + port + "'.", where); continue; }
         if (type_of[to] == "start") { add("Nothing can point to the Start block.", where); continue; }

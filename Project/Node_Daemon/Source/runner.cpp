@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 
+#include "budget.hpp"
 #include "script_doc.hpp"
 
 namespace pc2 {
@@ -97,6 +98,7 @@ std::string Runner::enqueue_internal(Job job, std::string& error, bool user_star
     if (!agent) { error = "This agent no longer exists."; return ""; }
     if (!agent->value("enabled", true)) { error = "This agent is switched off."; return ""; }
     if (job.stack.empty()) { error = "Internal error: empty reply stack."; return ""; }
+    if (user_started && over_budget(job, error)) return "";  // said at once; other work is stopped by execute(), which also tells the asker
     const std::string provider = agent->value("provider", "claude");
     Lane* lane = lane_for(provider);
     if (!lane && provider.find('#') != std::string::npos) { error = "The account this ghost used was removed. Pick another brain for it."; return ""; }
@@ -209,6 +211,14 @@ void Runner::worker_loop(Lane& lane) {
             try { finish_hook_(js->job, final_status, js->answer, js->answer_error); } catch (const std::exception&) {}
         }
     }
+}
+
+bool Runner::over_budget(const Job& job, std::string& error) {
+    BudgetVerdict v = budget_check(store_, job.agent_id, job.user_id);
+    if (!v.blocked) return false;
+    error = v.text;
+    if (notifier_) notifier_->post({"budget", "", "Budget reached", v.text, "Bütçe doldu", v.text_tr, "#/overview", v.key});
+    return true;
 }
 
 // -------------------------------------------------------------- live state
@@ -388,6 +398,7 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     auto agent = store_.agent(job.agent_id);
     if (js->cancel) { o.status = "cancelled"; finish(o); return; }
     if (!agent) { o.status = "failed"; o.error = "The agent no longer exists."; finish(o); return; }
+    if (over_budget(job, o.error)) { o.status = "failed"; finish(o); return; }  // queued before the limit ran out, or a hand-over, a report, a script block
 
     rec["status"] = "running";
     rec["started"] = now_iso();
@@ -430,6 +441,12 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     pin.workdir = remote ? "@@WORKDIR@@" : U8(workdir);  // a friend's PC fills in its own folder
     pin.workdir_label = project.is_object() ? "the folder of project \"" + project.value("name", "") + "\"" : "the shared files folder";
     pin.project = project;
+    // Not on a friend's PC: the notes are about a person of this company and have no business in somebody else's CLI.
+    if (agent->value("memory", false) && !remote && !job.user_id.empty()) {
+        js->can_remember = true;
+        pin.memory_on = true;
+        pin.memory = store_.memory(job.agent_id, job.user_id);
+    }
 
     RunSpec spec;
     spec.provider = base_provider;
@@ -723,6 +740,11 @@ Here is the script.
 ```
 </script>)";
     }
+    // demo:remember:<text up to the line end> / demo:forget:<number>: the memory tags of a ghost with memory
+    if (job.kind != "report") {
+        if (size_t s = p.find("demo:remember:"); s != std::string::npos) text += "\n<remember>" + p.substr(s + 14, p.find('\n', s) == std::string::npos ? std::string::npos : p.find('\n', s) - s - 14) + "</remember>";
+        if (size_t s = p.find("demo:forget:"); s != std::string::npos) text += "\n<forget>" + std::to_string(atoi(p.c_str() + s + 12)) + "</forget>";
+    }
     for (const char* kw : {"demo:send:", "demo:tell:"}) {  // tell = information only (reply="no")
         size_t s = p.find(kw);
         if (s == std::string::npos || job.kind == "report") continue;
@@ -867,6 +889,20 @@ void Runner::handle_script(const std::shared_ptr<JobState>& js, const ScriptBloc
     if (enqueue_internal(rj, err, false).empty()) say(conv, "⚠ Could not hand the problems back to " + sender_name + ": " + err);
 }
 
+// The notes a ghost changed: shown as a system line, so nothing is saved behind the person's back.
+void Runner::apply_memory(const std::shared_ptr<JobState>& js, const ParsedReply& pr) {
+    const Job& job = js->job;
+    std::vector<int> numbers = pr.forget;
+    std::sort(numbers.begin(), numbers.end(), std::greater<int>());  // from the back: the numbers the ghost saw stay right
+    numbers.erase(std::unique(numbers.begin(), numbers.end()), numbers.end());
+    for (int n : numbers) {
+        const std::string gone = store_.memory_remove(job.agent_id, job.user_id, (size_t)n);
+        if (!gone.empty()) say(job.conv(), "🧠 Forgot: " + gone);
+    }
+    for (auto& fact : pr.remember)
+        if (store_.memory_add(job.agent_id, job.user_id, fact)) say(job.conv(), "🧠 Remembered: " + truncate_utf8(fact, kMaxMemoryText));
+}
+
 void Runner::route(const std::shared_ptr<JobState>& js, const Outcome& o) {
     const Job& job = js->job;
     const std::string name = agent_name(store_, job.agent_id);
@@ -879,7 +915,7 @@ void Runner::route(const std::shared_ptr<JobState>& js, const Outcome& o) {
     ParsedReply pr;
     std::string text, failure;
     if (o.status == "done") {
-        pr = parse_reply(o.text);
+        pr = parse_reply(o.text, js->can_remember);
         text = pr.text;
         js->answer = text;
     } else {
@@ -891,6 +927,7 @@ void Runner::route(const std::shared_ptr<JobState>& js, const Outcome& o) {
         if (!text.empty()) store_.conv_append(conv, {{"t", "msg"}, {"from", "agent:" + job.agent_id}, {"text", text}, {"run", job.id}});
         if (o.max_turns) say(conv, "⏸ " + name + " reached the step limit. Write \"continue\" to go on.");
         if (job.name_chat && !pr.title.empty()) store_.conv_append(conv, {{"t", "title"}, {"title", pr.title}});
+        apply_memory(js, pr);
         for (auto& b : pr.scripts) handle_script(js, b, name);
         for (auto& b : pr.sends) handle_send(js, b, name);
     }

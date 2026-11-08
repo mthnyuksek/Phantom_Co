@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { S, isOwner, refreshState } from '../state.js';
 import { $, esc, guard, toast, copyText, twoStep } from '../ui.js';
 import { mcpCardHTML, bindMcp } from './settings_mcp.js';
+import { careCardsHTML, bindCare } from './settings_backup.js';
 import { t } from '../i18n.js';
 
 let view, net = null, tun = null, tunTimer = null;
@@ -44,6 +45,7 @@ function draw() {
         <input type="password" id="s-acc-key" maxlength="400" placeholder="Paste the API key" autocomplete="off" hidden>
         <button class="btn" data-act="acc-add">Add account</button></div></div>
     ${mcpCardHTML()}
+    ${careCardsHTML()}
     <div class="card" id="s-about"><h3>About</h3>${aboutHTML()}</div>`;
 }
 
@@ -156,6 +158,7 @@ export async function render(v) {
   acc = null;
   draw();
   bindMcp(view);
+  bindCare(view).catch((e) => toast(e.message, true));
   loadAccounts();
   loadAbout();
   if (tun && (tun.state === 'installing' || tun.state === 'starting')) tunTimer = setTimeout(pollTunnel, 1000);

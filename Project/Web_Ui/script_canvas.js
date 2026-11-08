@@ -6,16 +6,17 @@ import { esc } from './ui.js';
 
 export const BLOCKS = {
   start: { icon: '▶', label: 'Start', hint: 'Where the run begins', outs: ['out'], hasIn: false },
-  prompt: { icon: '💬', label: 'Prompt', hint: 'A ghost does a job', outs: ['out'], hasIn: true },
+  prompt: { icon: '💬', label: 'Prompt', hint: 'A ghost does a job', outs: ['out', 'failed'], hasIn: true },
+  ask: { icon: '❓', label: 'Ask', hint: 'Wait for a person: approve, reject or give a value', outs: ['approved', 'rejected'], hasIn: true },
   set: { icon: '🧮', label: 'Set variable', hint: 'Give a variable a new value', outs: ['out'], hasIn: true },
   if: { icon: '🔀', label: 'If', hint: 'Go on by a yes / no question', outs: ['true', 'false'], hasIn: true },
   delay: { icon: '⏳', label: 'Delay', hint: 'Wait some minutes or until a time', outs: ['out'], hasIn: true },
   do: { icon: '🔁', label: 'Do N', hint: 'Repeat the loop part N times, then go on', outs: ['loop', 'then'], hasIn: true },
   end: { icon: '⏹', label: 'End', hint: 'The run stops here', outs: [], hasIn: true },
 };
-const PALETTE = ['prompt', 'set', 'if', 'delay', 'do', 'end', 'start'];
+const PALETTE = ['prompt', 'ask', 'set', 'if', 'delay', 'do', 'end', 'start'];
 const NODE_W = 210, GRID = 20, MIN_ZOOM = 0.25, MAX_ZOOM = 2;
-const PORT_LABEL = { true: 'yes', false: 'no', loop: 'loop', then: 'then' };
+const PORT_LABEL = { true: 'yes', false: 'no', loop: 'loop', then: 'then', failed: 'failed', approved: 'approved', rejected: 'rejected' };
 
 const snap = (v) => Math.round(v / GRID) * GRID;
 const outX = (type, port) => {
@@ -86,7 +87,7 @@ export function createCanvas(host, opts) {
       if (!a || !b) return;
       const d = curve(portOut(a, e.port || 'out'), portIn(b));
       const on = sel?.kind === 'edge' && sel.index === i;
-      const cls = e.port === 'true' ? 'yes' : e.port === 'false' ? 'no' : e.port === 'loop' ? 'loop' : '';
+      const cls = e.port === 'true' || e.port === 'approved' ? 'yes' : e.port === 'false' || e.port === 'rejected' || e.port === 'failed' ? 'no' : e.port === 'loop' ? 'loop' : '';
       const st = edgeStates[i] === 'fired' ? 'lit' : edgeStates[i] === 'skipped' ? 'dim' : '';
       html += `<path class="sc-edge ${cls} ${on ? 'sel' : ''} ${st}" d="${d}"/><path class="sc-hit" data-edge="${i}" d="${d}"/>`;
     });
@@ -118,7 +119,8 @@ export function createCanvas(host, opts) {
     o.onSelect(sel);
   }
   function defaultProps(type) {
-    if (type === 'prompt') return { agent_id: '', project_id: '', text: '', target: '' };
+    if (type === 'prompt') return { agent_id: '', project_id: '', text: '', target: '', retry: 0, retry_wait: 1 };
+    if (type === 'ask') return { question: '', mode: 'approve', var: '', timeout: 0 };
     if (type === 'set') return { var: '', expr: '' };
     if (type === 'if') return { expr: '' };
     if (type === 'delay') return { mode: 'for', expr: '30' };

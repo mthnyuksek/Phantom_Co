@@ -151,7 +151,8 @@ async function renderTask(id, ctx) {
       <div><h1>${esc(t.title)}</h1><div class="meta">${esc(a ? a.name + ' · ' + a.role : 'removed ghost')}${p ? ' · 📁 <a href="#/projects/' + esc(p.id) + '">' + esc(p.name) + '</a>' : ''}${u ? ' · by ' + esc(u.name) : ''} · ${esc(ago(t.created))}</div>${t.wake ? `<div class="meta">⏰ ${esc(wakeText(t))}</div>` : ''}</div>
       ${pill(t.status)}<div class="spacer"></div>
       ${canEdit() ? `<button class="btn" data-act="as-tpl">Save as template</button> <button class="btn" data-act="wake">⏰ Wake-up</button> ${active ? '<button class="btn" data-act="stop">Stop</button>' : '<button class="btn primary" data-act="rerun">Run again</button>'}
-      <button class="btn danger" data-act="del" ${active ? 'disabled' : ''}>Delete</button>` : ''}`;
+      <button class="btn danger" data-act="del" ${active ? 'disabled' : ''}>Delete</button>` : ''}
+      ${t.conversation_id ? `<a class="btn" href="/api/chats/${esc(t.conversation_id)}/export" download title="Save this conversation as a Markdown file">⬇ Export</a>` : ''}`;
     $('#runs', view).innerHTML = d.runs.length ? `<div class="table">${d.runs.slice().reverse().map((r) => {
       const ag = agentById(r.agent_id);
       return `<div class="row run-row" data-act="run" data-id="${esc(r.id)}"><div class="mini">${agentGhost(ag, { size: 34 })}</div>

@@ -46,9 +46,14 @@ function summary(n) {
   else if (n.type === 'if') what = `<code>${esc(p.expr)}</code>`;
   else if (n.type === 'delay') what = p.mode === 'until' ? `<span>until</span> <code>${esc(p.expr)}</code>` : `<code>${esc(p.expr)}</code> <span>min</span>`;
   else if (n.type === 'do') what = `<code>${esc(p.count)}</code> <span>times</span>`;
+  else if (n.type === 'ask') what = raw(esc(String(ns.question || p.question || '').slice(0, 70)));
   let how = '';
   if (ns.state === 'running' && n.type === 'delay' && ns.wake_at) how = `⏳ ${raw(esc(left(ns.wake_at)))}`;
+  else if (ns.state === 'running' && n.type === 'prompt' && ns.retry_at) how = `↻ ${raw(esc(left(ns.retry_at)))}`;
   else if (ns.state === 'running' && n.type === 'prompt') how = '💭 <span>working…</span>';
+  else if (ns.state === 'running' && n.type === 'ask') how = '❓ <span>waiting for an answer…</span>';
+  else if (ns.state === 'done' && n.type === 'ask') how = '→ ' + raw(esc(String(ns.output || '')));
+  else if (ns.state === 'done' && ns.took_failed) how = '⚠ <span>failed, went on</span>';
   else if (ns.state === 'running' && ns.usage_wait) how = '📊 <span>reading the usage limits…</span>';
   else if (n.type === 'do' && ns.count) how = `🔁 ${raw(`${ns.round || 0} / ${ns.count}`)}`;
   else if (ns.state === 'done' && n.type === 'if') how = `→ <span>${ns.output === 'true' ? 'yes' : 'no'}</span>`;
@@ -85,6 +90,18 @@ function eventLine(e) {
   }
 }
 
+// An Ask block that is waiting: the question and what its asker can do (the text box stays: the panel is only redrawn when this changes)
+function askHTML(n, ns) {
+  if (n.type !== 'ask' || !ns.question) return '';
+  const waiting = ns.state === 'running' && live(run.status);
+  const value = n.props.mode === 'value';
+  return `<div class="sc-ask"><div class="sc-ask-q" data-no-i18n>${esc(ns.question)}</div>
+    ${waiting && ns.ask_until ? `<p class="muted small">Goes on without an answer at <b data-no-i18n>${esc(clock(ns.ask_until))}</b></p>` : ''}
+    ${waiting && canControl() ? `${value ? `<input type="text" id="sr-ask-value" placeholder="${esc(ns.value_type || '')}" autocomplete="off" data-no-i18n>` : ''}
+      <div class="sc-ask-btns"><button class="btn small primary" data-act="ask-yes">${value ? 'Send' : 'Approve'}</button><button class="btn small danger" data-act="ask-no">Reject</button></div>`
+    : waiting ? '<p class="muted small">Waiting for the person who started this run.</p>' : ''}</div>`;
+}
+
 function panelHTML() {
   if (sel?.kind === 'node') {
     const n = nodeOf(sel.id), ns = run.nodes[sel.id] || {};
@@ -93,8 +110,12 @@ function panelHTML() {
     const runs = ns.runs || [];
     return `<h3><span>${b.icon}</span> <span data-no-i18n>${esc(n.label || b.label)}</span></h3>
       <p><span class="pill ${ns.state === 'done' ? 'done' : ns.state === 'failed' ? 'failed' : ns.state === 'running' ? 'running' : 'idle'}">${esc(NODE_TEXT[ns.state] || ns.state)}</span>
-        ${ns.started ? `<span class="muted small" data-no-i18n> ${esc(duration(ns.started, ns.ended || null))}</span>` : ''}</p>
+        ${ns.started && !(n.type === 'ask' && ns.state === 'running') ? `<span class="muted small" data-no-i18n> ${esc(duration(ns.started, ns.ended || null))}</span>` : ''}</p>
+      ${askHTML(n, ns)}
       ${n.type === 'delay' && ns.state === 'running' && ns.wake_at ? `<p class="small">Goes on at <b data-no-i18n>${esc(clock(ns.wake_at))}</b></p>` : ''}
+      ${ns.retry_at && ns.state === 'running' ? `<p class="small">Tries again at <b data-no-i18n>${esc(clock(ns.retry_at))}</b> <span class="muted" data-no-i18n>(${ns.tries} / ${n.props.retry})</span></p>` : ''}
+      ${ns.last_error && ns.state === 'running' ? `<div class="errbox">⚠️ ${esc(ns.last_error)}</div>` : ''}
+      ${ns.answered_by ? `<p class="muted small">Answered by <span data-no-i18n>${esc(ns.answered_by)}</span></p>` : ''}
       ${ns.restarted ? '<p class="muted small">Started again after the program was restarted.</p>' : ''}
       ${ns.error ? `<div class="errbox">⚠️ ${esc(ns.error)}</div>` : ''}
       ${ns.output && n.type === 'prompt' ? `<label>Answer</label><div class="sc-output bubble">${md(ns.output)}</div>` : ns.output ? `<label>Result</label><p data-no-i18n><code>${esc(ns.output)}</code></p>` : ''}
@@ -120,6 +141,16 @@ function paint() {
 
 // `my` is this page's own context: after "Run again" the module's `ctx` already belongs to the next page,
 // and a loop that looked at it would keep painting the old run over the new one.
+// A question that starts waiting opens by itself, once: nobody has to look for the block.
+let askedNodes = new Set();
+function openWaitingAsk() {
+  if (!canControl() || (sel && nodeOf(sel.id)?.type === 'ask' && run.nodes[sel.id]?.state === 'running')) return;  // not away from a question being answered
+  const n = run.script.nodes.find((x) => x.type === 'ask' && run.nodes[x.id]?.state === 'running' && !askedNodes.has(x.id));
+  if (!n) return;
+  askedNodes.add(n.id);
+  canvas.select({ kind: 'node', id: n.id });
+}
+
 async function poll(id, my) {
   while (my.isCurrent()) {
     await sleep(live(run.status) ? 1000 : 4000);
@@ -130,6 +161,7 @@ async function poll(id, my) {
       const was = run.status;
       run = r;
       paint();
+      openWaitingAsk();
       if (!live(run.status) && live(was)) toast(run.status === 'done' ? 'The script finished.' : run.status === 'failed' ? 'The script failed.' : 'The script was stopped.', run.status === 'failed');
     } catch { /* the next look */ }
   }
@@ -148,6 +180,8 @@ export async function renderRun(v, scriptId, runId, c, shell) {
     onSelect: (s) => { sel = s?.kind === 'node' ? s : null; lastPanel = ''; paint(); },
   });
   paint();
+  askedNodes = new Set();
+  openWaitingAsk();
   // follow the running block's pulse without asking the server: the countdowns move every second
   const tickTimer = setInterval(() => { if (run && live(run.status)) canvas.refresh(); }, 1000);
   let convView = null;
@@ -163,6 +197,13 @@ export async function renderRun(v, scriptId, runId, c, shell) {
       location.hash = '#/scripts/' + s.id;
     } else if (['pause', 'resume', 'step', 'stop'].includes(act)) {
       run = await api('POST', `/api/script_runs/${run.id}/${act}`);
+      paint();
+    } else if (act === 'ask-yes' || act === 'ask-no') {
+      const box = $('#sr-ask-value', view);
+      const body = { node: sel.id, approved: act === 'ask-yes', value: box ? box.value : '' };
+      if (body.approved && box && !box.value.trim()) { box.focus(); return; }
+      run = await api('POST', `/api/script_runs/${run.id}/answer`, body);
+      lastPanel = '';
       paint();
     } else if (act === 'again') {
       const r = await api('POST', `/api/scripts/${run.script_id}/run`);

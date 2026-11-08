@@ -2,6 +2,7 @@
 #include <functional>
 
 #include "auth.hpp"
+#include "backup.hpp"
 #include "runner.hpp"
 #include "script_runner.hpp"
 #include "store.hpp"
@@ -16,6 +17,8 @@ struct ServerOptions {
     TelegramBridge* telegram = nullptr;  // talking to ghosts from Telegram; may be null
     ScriptRunner* scripts = nullptr;  // visual scripts (runs); may be null
     Usage* usage = nullptr;  // what is left of the Claude/Codex subscription limits; may be null
+    Notifier* notifier = nullptr;  // the bell, Windows balloons, Telegram notices; may be null
+    Backup* backup = nullptr;  // Vault backups (Settings > Backup); may be null
     Tunnel* tunnel = nullptr;  // "Internet access" (Cloudflare quick tunnel); may be null
     fs::path fresh_vault;  // the Vault folder this start created (it did not exist); removed when the first owner picks another folder
     std::function<void(bool)> on_listening;  // called once the port is bound (true) or could not be bound (false)

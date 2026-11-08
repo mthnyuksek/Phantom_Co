@@ -1,6 +1,6 @@
 ---
 name: Visual scripts
-description: Write visual scripts (Scripts tab) for the person: saved as drafts that only a person can run. No tools, about 1000 tokens.
+description: Write visual scripts (Scripts tab) for the person: saved as drafts that only a person can run. No tools, about 1200 tokens.
 tools:
 dirs:
 min_role: editor
@@ -24,13 +24,15 @@ Format:
 Blocks (`type`):
 - `start`: exactly one; the run begins here.
 - `prompt`: `agent_id` = a ghost id from your team list (not a name); `text` = the job, may use `{var}` to put a value in; `project_id` "" = the script's project; `target` (optional) = a variable that gets a value from the ghost's answer (the ghost is asked to end with `<value>...</value>`).
+  A prompt may also have `"retry": 2` (tries again up to 5 times when it fails) and `"retry_wait": 1` (minutes between tries). An arrow with `"port": "failed"` goes on when every try failed; without one a failed prompt ends the whole run.
 - `set`: `{"var": "score", "expr": "score + 1"}`.
 - `if`: `{"expr": "..."}` must give true/false; arrows leave it with `"port": "true"` or `"port": "false"`.
 - `delay`: `{"mode": "for", "expr": "30"}` (minutes) or `{"mode": "until", "expr": "16:00"}`.
 - `do`: `{"count": "3", "var": "i"}` repeats the blocks after its `"port": "loop"` arrow `count` times (0-100; `var` = optional Number variable that gets 1, 2, 3…), then goes on through `"port": "then"`. Nothing from outside the loop may point into the loop part.
+- `ask`: the run waits for the person who started it. `{"question": "Publish {title}?", "mode": "approve", "timeout": 0}`, arrows leave it with `"port": "approved"` or `"port": "rejected"`. With `"mode": "value", "var": "n"` the person types a value for that variable. `timeout` = minutes to wait, 0 = for ever; no answer in time goes on through `rejected`. Use it before anything risky or expensive.
 - `end`: optional; the run is done as soon as it gets here, like return (also inside a loop); blocks still working are stopped.
 
-Arrows go from a block's output to the next block (`port` is `"out"` except for if and do). One block may lead to several: they run at the same time. A block with several arrows coming in waits for all of them. **No loops made of arrows**: arrows must never lead back up; repeat with a `do` block instead. Every block must be reachable from start. Place blocks top to bottom (y grows by ~140 per step, side branches at x ±220).
+Arrows go from a block's output to the next block (`port` is `"out"` except for if, do and ask, and the `failed` arrow of a prompt). One block may lead to several: they run at the same time. A block with several arrows coming in waits for all of them. **No loops made of arrows**: arrows must never lead back up; repeat with a `do` block instead. Every block must be reachable from start. Place blocks top to bottom (y grows by ~140 per step, side branches at x ±220).
 
 Types and values (values in the file are texts): `Number` with up to 2 decimals ("56.00", "3"), `Time` "16:00", `Date` "2026-11-16", `Bool` "true"/"false", `Text` (any text). Variable names: letters, digits and _ (not and, or, not, true, false, abs, round, min, max).
 Expressions: + - * / % on Numbers; Time ± Number = minutes, Date ± Number = days, Time - Time and Date - Date give a Number; compare with < <= > >= == != (same types only; Bool only == !=); join with and, or, not; abs(), round(), min(a, b), max(a, b). Texts in quotes: "done". No automatic conversions: `now_time < 16` is wrong, `now_time < 16:00` is right.

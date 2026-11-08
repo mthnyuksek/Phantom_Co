@@ -32,6 +32,8 @@ struct PromptInput {
     std::string workdir_label;   // "project \"X\"" or "the shared files folder"
     json project;                // null when none
     bool name_chat = false;
+    bool memory_on = false;      // the ghost keeps notes between chats (its notes about this person follow)
+    std::vector<std::string> memory;
 };
 
 std::string build_system_prompt(Store& store, const PromptInput& in);
@@ -53,8 +55,11 @@ struct ParsedReply {
     std::string title;  // from <title>..</title>
     std::vector<SendBlock> sends;
     std::vector<ScriptBlock> scripts;
+    std::vector<std::string> remember;  // <remember>a short fact</remember>
+    std::vector<int> forget;            // <forget>note number</forget>
 };
-ParsedReply parse_reply(const std::string& raw);
+// memory: take <remember> and <forget> out of the answer (ghosts with memory only; for others they stay plain text).
+ParsedReply parse_reply(const std::string& raw, bool memory = false);
 std::string clean_title(const std::string& s);  // one line, max 50 chars
 
 }  // namespace pc2

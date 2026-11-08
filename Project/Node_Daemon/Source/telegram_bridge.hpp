@@ -2,6 +2,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <set>
@@ -36,6 +37,11 @@ public:
     std::string new_link_code(const std::string& user_id);
     void unlink(const std::string& user_id);
     json inbox();                                     // the last messages the bot got (for the read_messages tool)
+    // Sends a notice to every Telegram account linked to this person (several threads may call it; no lock is held while sending).
+    void send_to_user(const std::string& user_id, const std::string& en, const std::string& tr);
+    // Ask blocks of scripts: /yes, /no and /answer <value> reach them through these (set once at start).
+    void set_asks(std::function<json(const std::string& user, bool owner)> list,
+                  std::function<bool(const json& ask, const std::string& user, bool owner, const std::string& by, bool approved, const std::string& value, std::string& err)> answer);
 
 private:
     void poll_loop();
@@ -66,6 +72,8 @@ private:
     std::atomic<bool> stop_{false};
     std::thread poll_, sender_;
     std::string token_now_;  // the token the sender uses
+    std::function<json(const std::string&, bool)> asks_list_;
+    std::function<bool(const json&, const std::string&, bool, const std::string&, bool, const std::string&, std::string&)> asks_answer_;
 };
 
 }  // namespace pc2

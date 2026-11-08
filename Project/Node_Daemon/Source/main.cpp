@@ -15,6 +15,8 @@
 #include <thread>
 
 #include "accounts.hpp"
+#include "budget.hpp"
+#include "notify.hpp"
 #include "auth.hpp"
 #include "mcp.hpp"
 #include "telegram_bridge.hpp"
@@ -380,6 +382,7 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             switch (LOWORD(lp)) {
                 case NIN_SELECT:
                 case NIN_KEYSELECT:
+                case NIN_BALLOONUSERCLICK:
                 case WM_LBUTTONDBLCLK:
                     show_window();
                     break;
@@ -554,7 +557,39 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
             auto u = store.user(id);
             return u && !u->value("disabled", false) && auth.exists(id) ? auth.role(id) : std::string();
         });
-        runner.set_finish_hook([&scripts](const Job& j, const std::string& st, const std::string& a, const std::string& e) { scripts.on_job_finished(j, st, a, e); });
+        // Notices: the bell, a Windows balloon, Telegram. Never deleted, like the Telegram bridge (a send may still be waiting at quit).
+        auto* notifier = new Notifier(cfg.file.parent_path());
+        runner.set_notifier(notifier);
+        scripts.set_notifier(notifier);
+        mcp.set_on_approval([&store, notifier](const std::string& user, const std::string& conv, const std::string& who, const std::string& tool) {
+            auto cv = store.conv_load(conv);
+            const std::string task = cv ? (*cv)["meta"].value("task_id", "") : "";
+            notifier->post({"ask", user, who + " asks for your approval", tool, who + " onayını bekliyor", tool, task.empty() ? "#/chats/" + conv : "#/tasks/" + task, ""});
+        });
+        runner.set_finish_hook([&scripts, &store, &runner, notifier](const Job& j, const std::string& st, const std::string& a, const std::string& e) {
+            scripts.on_job_finished(j, st, a, e);
+            // Work a person asked for directly: a failed task always says so, anything else when it took long.
+            if (j.stack.size() != 1 || j.stack[0].kind != "user" || is_budget_error(e)) return;
+            const bool failed = st == "failed" || st == "timeout";
+            if (!failed && st != "done") return;
+            const std::string conv = j.stack[0].conv;
+            auto cv = store.conv_load(conv);
+            if (!cv) return;
+            const std::string title = (*cv)["meta"].value("title", ""), task = j.task_id;
+            const std::string link = task.empty() ? "#/chats/" + conv : "#/tasks/" + task;
+            if (failed && !task.empty()) { notifier->post({"failed", j.user_id, "Task failed: " + title, e, "Görev başarısız: " + title, e, link, ""}); return; }
+            const int minutes = notifier->done_minutes();
+            if (minutes < 0 || runner.conversation_busy(conv)) return;  // helpers are still working: their report ends it
+            std::string asked;
+            const json& msgs = (*cv)["messages"];
+            for (auto it = msgs.rbegin(); it != msgs.rend() && asked.empty(); ++it)
+                if (it->value("from", "").rfind("user:", 0) == 0) asked = it->value("ts", "");
+            if (asked.empty() || (long long)std::time(nullptr) - iso_to_unix(asked) < minutes * 60LL) return;
+            auto ghost = store.agent(j.agent_id);
+            const std::string name = ghost ? ghost->value("name", "") : j.agent_id;
+            if (failed) notifier->post({"failed", j.user_id, name + " could not finish", e, name + " bitiremedi", e, link, ""});
+            else notifier->post({"done", j.user_id, name + " finished: " + title, truncate_utf8(a, 300), name + " bitirdi: " + title, truncate_utf8(a, 300), link, ""});
+        });
         scripts.set_usage(&usage);
         scripts.set_builtin([&store](const std::string& name, script::Value& out) {
             if (name != "tokens_today") return false;
@@ -569,6 +604,22 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         auto* telegram = new TelegramBridge(store, auth, runner, mcp, cfg.file.parent_path());
         store.set_append_hook([telegram](const std::string& conv, const json& line) { telegram->on_append(conv, line); });
         telegram->start();
+        telegram->set_asks([&scripts](const std::string& user, bool owner) { return scripts.pending_asks(user, owner); },
+                           [&scripts](const json& ask, const std::string& user, bool owner, const std::string& by, bool approved, const std::string& value, std::string& err) {
+                               return scripts.answer_ask(ask.value("run_id", ""), ask.value("node", ""), user, owner, by, approved, value, err);
+                           });
+        notifier->set_toast([](const Notice& n) {
+            if (!g_hwnd) return;
+            const bool tr = g_tr;
+            tray_balloon(Widen(tr ? n.title_tr : n.title).c_str(), Widen(tr ? n.text_tr : n.text).c_str());
+        });
+        notifier->set_telegram([&store, &auth, telegram](const std::string& user, const Notice& n) {
+            const std::string en = "🔔 " + n.title + (n.text.empty() ? "" : "\n" + n.text) + (n.link.rfind("#/scripts/", 0) == 0 && n.kind == "ask" ? "\n\nAnswer with /yes, /no or /answer <value>." : "");
+            const std::string tr = "🔔 " + n.title_tr + (n.text_tr.empty() ? "" : "\n" + n.text_tr) + (n.link.rfind("#/scripts/", 0) == 0 && n.kind == "ask" ? "\n\n/yes, /no ya da /answer <değer> ile yanıtla." : "");
+            if (!user.empty()) { telegram->send_to_user(user, en, tr); return; }
+            for (auto& u : store.users()) if (auth.role(u.value("id", "")) == "owner") telegram->send_to_user(u.value("id", ""), en, tr);
+        });
+        notifier->start();
         g_cfg = &cfg;
         g_store = &store;
         g_runner = &runner;
@@ -587,6 +638,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         opt.telegram = telegram;
         opt.scripts = &scripts;
         opt.usage = &usage;
+        opt.notifier = notifier;
+        Backup backup(cfg.file.parent_path());
+        opt.backup = &backup;
         if (!vault_existed) opt.fresh_vault = cfg.vault;
         std::promise<bool> listening;
         std::atomic<bool> signalled{false};
@@ -648,6 +702,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         server.join();  // headless: returns when Ctrl+C stops the server
         tunnel.Stop();
         telegram->stop();
+        notifier->stop();
         g_worker.stop();
         runner.shutdown();
         scripts.shutdown();

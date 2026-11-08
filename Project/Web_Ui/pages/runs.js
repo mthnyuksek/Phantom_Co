@@ -61,10 +61,11 @@ function draw() {
     }).join('') : '<div class="empty">Nothing has run yet.</div>'}</div>`;
 }
 
-export async function render(v) {
+export async function render(v, arg) {
   view = v;
   runs = (await api('GET', '/api/runs')).runs;
   draw();
+  if (arg) await openRunModal(arg).catch((e) => toast(e.message, true));  // #/runs/<id>: a link from a search result
   view.onclick = guard(async (e) => {
     const el = e.target.closest('[data-act]');
     if (!el) return;

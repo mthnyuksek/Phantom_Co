@@ -34,6 +34,8 @@ public:
     Mcp(const fs::path& data_dir, Store& store);
     void set_port(int port) { port_ = port; }
     int port() const { return port_; }
+    // Called when a tool call starts waiting for a yes/no, under this object's lock (user, conversation, ghost name, tool). Set once at start.
+    void set_on_approval(std::function<void(const std::string&, const std::string&, const std::string&, const std::string&)> f) { on_approval_ = std::move(f); }
 
     // ---- the list (Settings > MCP)
     json list();                               // without secret values: secrets_set = names that have a value
@@ -61,6 +63,7 @@ public:
     bool decide(const std::string& id, const std::string& user_id, const std::string& user_name, bool owner, bool approve, std::string& error);
 
 private:
+    std::function<void(const std::string&, const std::string&, const std::string&, const std::string&)> on_approval_;
     struct Approval {
         std::string id, key, run_id, agent_id, user_id, conv, server, label, tool, args, status = "pending", by;
     };

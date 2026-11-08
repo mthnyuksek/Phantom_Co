@@ -22,7 +22,7 @@ export function openAgentModal(agent, tpl) {
   const draft = agent ? { ...agent, skills: [...agent.skills] } : {
     name: NAMES[Math.floor(Math.random() * NAMES.length)], role: 'Assistant', provider: firstReal?.id || 'demo', model: '', reports_to: '',
     form: FORMS[Math.floor(Math.random() * FORMS.length)].id, color: PALETTE[Math.floor(Math.random() * PALETTE.length)],
-    persona: '', timeout_min: 30, thinking: '', enabled: true, skills: ['read_files', 'write_files'].filter((id) => skillById(id)),
+    persona: '', timeout_min: 30, thinking: '', memory: false, enabled: true, skills: ['read_files', 'write_files'].filter((id) => skillById(id)),
   };
   const apply = (t) => Object.assign(draft, { role: t.role, form: t.form, color: t.color, persona: t.persona, skills: t.skills.filter((id) => skillById(id)) });
   if (tpl) apply(tpl);
@@ -48,6 +48,9 @@ export function openAgentModal(agent, tpl) {
         <div class="skill-list" id="f-skills">${st.skills.map((s) => `<label class="check" title="${esc(s.description)}"><input type="checkbox" value="${esc(s.id)}"> ${esc(s.name)}${s.min_role === 'owner' ? ' <span class="badge">owner</span>' : ''}${s.enabled ? '' : ' <span class="badge">off</span>'}${skillScopeBadge(s)}</label>`).join('') || '<span class="hint">No skills yet. The owner can add some in Skills.</span>'}</div>
         <label>Personality &amp; instructions</label><textarea id="f-persona" maxlength="8000" placeholder="How should this ghost think, talk and work? Keep it short: it is paid on every run."></textarea>
         <label class="check"><input type="checkbox" id="f-enabled"> Switched on</label>
+        <label class="check"><input type="checkbox" id="f-memory"> Long-term memory <span class="hint-inline">keeps short notes between chats, separately for each person</span></label>
+        ${isNew ? '' : `<div id="f-mem-box" hidden><h3 class="subhead">What it remembers about you</h3><div id="f-mem-list"></div>
+          <div class="inline"><input type="text" id="f-mem-new" maxlength="300" placeholder="Add a note…"><button class="btn small" type="button" id="f-mem-add">Add</button></div></div>`}
       </div></div>
     <div class="modal-foot">
       ${isNew ? '' : '<button class="btn danger" id="f-del" style="margin-right:auto">Fire this ghost</button>'}
@@ -60,7 +63,7 @@ export function openAgentModal(agent, tpl) {
     };
     const fill = () => {
       q('#f-name').value = draft.name; q('#f-role').value = draft.role; q('#f-model').value = draft.model; q('#f-timeout').value = draft.timeout_min; q('#f-thinking').value = draft.thinking || '';
-      q('#f-provider').value = draft.provider; q('#f-boss').value = draft.reports_to || ''; q('#f-persona').value = draft.persona; q('#f-enabled').checked = draft.enabled;
+      q('#f-provider').value = draft.provider; q('#f-boss').value = draft.reports_to || ''; q('#f-persona').value = draft.persona; q('#f-enabled').checked = draft.enabled; q('#f-memory').checked = !!draft.memory;
       m.querySelectorAll('#f-skills input').forEach((c) => { c.checked = draft.skills.includes(c.value); });
       modelHint();
       drawPreview();
@@ -91,6 +94,16 @@ export function openAgentModal(agent, tpl) {
       if (ocModels) fill();
       else api('GET', '/api/opencode/models').then((r) => { ocModels = r; fill(); }).catch(() => {});
     };
+    const paintMemory = (notes) => {
+      if (!q('#f-mem-list')) return;
+      q('#f-mem-list').innerHTML = notes.map((n, i) => `<div class="mem-row"><span data-no-i18n>${esc(n)}</span><button class="btn small" type="button" data-mem-del="${i + 1}" title="Forget">✕</button></div>`).join('') || '<p class="hint">Nothing yet.</p>';
+    };
+    const showMemory = () => {
+      if (!q('#f-mem-box')) return;
+      q('#f-mem-box').hidden = !draft.memory;
+      if (draft.memory) api('GET', `/api/agents/${agent.id}/memory`).then((r) => paintMemory(r.notes)).catch(() => {});
+    };
+    showMemory();
     const picker = bindGhostPicker(q('#f-pick'), draft, drawPreview);
     fill();
     m.addEventListener('input', (e) => {
@@ -103,9 +116,19 @@ export function openAgentModal(agent, tpl) {
       if (e.target.id === 'f-boss') draft.reports_to = e.target.value;
       if (e.target.id === 'f-thinking') draft.thinking = e.target.value;
       if (e.target.id === 'f-enabled') draft.enabled = e.target.checked;
+      if (e.target.id === 'f-memory') { draft.memory = e.target.checked; showMemory(); }
       if (e.target.closest('#f-skills')) draft.skills = [...m.querySelectorAll('#f-skills input:checked')].map((c) => c.value);
     });
     m.addEventListener('click', guard(async (e) => {
+      const forget = e.target.closest('[data-mem-del]');
+      if (forget) return paintMemory((await api('DELETE', `/api/agents/${agent.id}/memory/${forget.dataset.memDel}`)).notes);
+      if (e.target.id === 'f-mem-add') {
+        const box = q('#f-mem-new');
+        if (!box.value.trim()) return;
+        paintMemory((await api('POST', `/api/agents/${agent.id}/memory`, { text: box.value })).notes);
+        box.value = '';
+        return;
+      }
       const tp = e.target.closest('[data-tpl]');
       if (tp) { apply(TEMPLATES[+tp.dataset.tpl]); fill(); picker.redraw(); return; }
       if (e.target.id === 'f-cancel') return closeModal();
@@ -117,7 +140,7 @@ export function openAgentModal(agent, tpl) {
       }
       if (e.target.id === 'f-save') {
         const body = { name: draft.name, role: draft.role, provider: draft.provider, model: draft.model, reports_to: draft.reports_to, form: draft.form, color: draft.color,
-          persona: draft.persona, timeout_min: draft.timeout_min, thinking: draft.thinking || '', enabled: draft.enabled, skills: draft.skills };
+          persona: draft.persona, timeout_min: draft.timeout_min, thinking: draft.thinking || '', memory: !!draft.memory, enabled: draft.enabled, skills: draft.skills };
         if (isNew) await api('POST', '/api/agents', body); else await api('PUT', '/api/agents/' + agent.id, body);
         closeModal(); toast(isNew ? draft.name + ' joined the haunt! 👻' : 'Saved'); window.dispatchEvent(new Event('pc2:changed'));
       }

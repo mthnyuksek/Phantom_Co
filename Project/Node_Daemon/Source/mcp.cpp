@@ -344,6 +344,7 @@ json Mcp::ask(const std::string& key, const std::string& server, const std::stri
         const std::string who = ag ? ag->value("name", "A ghost") : "A ghost";
         store_.conv_append(a.conv, {{"t", "msg"}, {"from", "system"}, {"kind", "approval"}, {"approval", a.id}, {"agent", a.agent_id},
                                     {"server", a.label}, {"tool", a.tool}, {"args", a.args}, {"text", who + " asks to use " + a.label + " › " + a.tool}});
+        if (on_approval_) on_approval_(a.user_id, a.conv, who, a.label + " › " + a.tool);
         id = a.id;
         approvals_[id] = a;
     }

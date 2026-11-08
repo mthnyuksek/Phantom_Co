@@ -2,7 +2,7 @@ import { lang, setLang, LANGS } from './i18n.js';  // first: it translates what 
 import { api } from './api.js';
 import { ghostSVG } from './ghosts.js';
 import { brandColor, themePickerHTML, bindThemePicker } from './theme.js';
-import { $, $$, esc, guard, modal, closeModal, toast, ROLE_TEXT } from './ui.js';
+import { $, $$, esc, guard, modal, closeModal, toast, ago, ROLE_TEXT } from './ui.js';
 import { S, refreshState, forgetState, me, isOwner, canEdit, userGhost, providerLabel } from './state.js';
 import { ghostPickerHTML, bindGhostPicker } from './pickers.js';
 import { offerGuide } from './guide.js';
@@ -14,6 +14,8 @@ const NAV = [
   { id: 'projects', label: 'Projects', icon: '📁' },
   { id: 'tasks', label: 'Tasks', icon: '📋' },
   { id: 'scripts', label: 'Scripts', icon: '🧩' },
+  { id: 'search', label: 'Search', icon: '🔎' },
+  { id: 'overview', label: 'Overview', icon: '📊', editor: true },
   { id: 'skills', label: 'Skills', icon: '🧰' },
   { id: 'rules', label: 'Rules', icon: '📜' },
   { id: 'runs', label: 'Runs', icon: '⏱️' },
@@ -21,7 +23,7 @@ const NAV = [
   { id: 'team', label: 'Team', icon: '👥' },
   { id: 'settings', label: 'Settings', icon: '⚙️', owner: true },
 ];
-const PAGES = ['haunt', 'chats', 'projects', 'tasks', 'scripts', 'skills', 'rules', 'runs', 'files', 'team', 'settings'];
+const PAGES = ['haunt', 'chats', 'projects', 'tasks', 'scripts', 'search', 'overview', 'skills', 'rules', 'runs', 'files', 'team', 'settings'];
 
 let token = 0, current = null, currentCtx = null, timer = null, running = false;
 
@@ -172,13 +174,41 @@ function paintShell() {
   $('#me-chip').innerHTML = `<span class="mini">${userGhost(m, 30)}</span><span class="me-text"><b>${esc(m.name)}</b><small>${esc(ROLE_TEXT[m.role] || m.role)}</small></span>`;
   const page = location.hash.replace(/^#\//, '').split('/')[0] || 'haunt';
   const busyChats = s.jobs.length, asks = (s.approvals || []).filter((x) => x.can_decide).length;  // ghost actions waiting for this person's yes/no
-  $('#nav').innerHTML = NAV.filter((n) => !n.owner || m.role === 'owner')
-    .map((n) => `<a href="#/${n.id}" data-page="${n.id}" class="${n.id === page ? 'on' : ''}"><i>${n.icon}</i> ${n.label}${n.id === 'runs' && busyChats ? `<span class="count">${busyChats}</span>` : ''}${n.id === 'chats' && asks ? `<span class="count ask" title="Waiting for your approval">🔐 ${asks}</span>` : ''}</a>`).join('');
+  const scriptAsks = (s.asks || []).length;  // Ask blocks of scripts waiting for this person
+  document.querySelectorAll('.bell-count').forEach((el) => { el.hidden = !s.unread; el.textContent = s.unread > 99 ? '99+' : s.unread; });
+  $('#nav').innerHTML = NAV.filter((n) => (!n.owner || m.role === 'owner') && (!n.editor || m.role !== 'viewer'))
+    .map((n) => `<a href="#/${n.id}" data-page="${n.id}" class="${n.id === page ? 'on' : ''}"><i>${n.icon}</i> ${n.label}${n.id === 'runs' && busyChats ? `<span class="count">${busyChats}</span>` : ''}${n.id === 'scripts' && scriptAsks ? `<span class="count ask" title="A script is waiting for your answer">❓ ${scriptAsks}</span>` : ''}${n.id === 'chats' && asks ? `<span class="count ask" title="Waiting for your approval">🔐 ${asks}</span>` : ''}</a>`).join('');
   // phone top bar: page name, small ghost, profile button
   $('#top-ghost').innerHTML = ghostSVG({ form: 'classic', color: brandColor(), size: 26 });
   $('#top-title').textContent = (NAV.find((n) => n.id === page) || NAV[0]).label;
   $('#top-me').innerHTML = userGhost(m, 30);
 }
+
+// The bell: what happened while this person was away. A notice opens the place it is about and counts as read.
+async function openBell() {
+  setMenu(false);
+  const items = (await api('GET', '/api/notifications')).items;
+  const text = (n, k) => (lang === 'tr' ? n[k + '_tr'] : n[k]) || '';
+  const ICON = { failed: '⚠️', ask: '❓', budget: '💰', done: '✅' };
+  modal(`<h2>Notifications</h2>
+    <div class="nt-list">${items.map((n) => `<a class="nt-row ${n.read ? '' : 'new'}" href="${esc(n.link || '#/haunt')}" data-nt="${esc(n.id)}"><i>${ICON[n.kind] || '🔔'}</i>
+      <div><b data-no-i18n>${esc(text(n, 'title'))}</b>${text(n, 'text') ? `<div class="nt-text" data-no-i18n>${esc(text(n, 'text'))}</div>` : ''}<small>${esc(ago(n.ts))}</small></div></a>`).join('') || '<div class="empty small">Nothing yet.</div>'}</div>
+    <div class="modal-foot">${items.some((n) => !n.read) ? '<button class="btn" id="nt-all">Mark all as read</button>' : ''}<button class="btn" id="nt-close">Close</button></div>`,
+  (el) => el.addEventListener('click', guard(async (e) => {
+    const row = e.target.closest('[data-nt]');
+    if (e.target.id === 'nt-close') return closeModal();
+    if (e.target.id === 'nt-all') await api('POST', '/api/notifications/read', {});
+    else if (row) await api('POST', '/api/notifications/read', { id: row.dataset.nt });
+    else return;
+    closeModal();
+    await refreshState();
+    paintShell();
+  })));
+}
+document.querySelectorAll('.bell-btn').forEach((b) => { b.onclick = guard(openBell); });
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && running) { e.preventDefault(); location.hash = '#/search'; }
+});
 
 // phone: the sidebar is a drawer opened from the top bar
 const setMenu = (open) => { document.body.classList.toggle('nav-open', open); $('#menu-btn').setAttribute('aria-expanded', String(open)); };

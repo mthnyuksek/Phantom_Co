@@ -29,6 +29,7 @@ function summary(n) {
     const who = p.agent_id ? raw(`<b>${esc(agentById(p.agent_id)?.name || p.agent_id)}</b>`) : '<span class="sc-miss">no ghost</span>';
     return `${who} ${p.text ? raw(esc(short(p.text, 70))) : '<span class="sc-miss">no prompt</span>'}${p.target ? ` <span class="sc-var">→ ${raw(esc(p.target))}</span>` : ''}`;
   }
+  if (n.type === 'ask') return `${p.question ? raw(esc(short(p.question, 70))) : '<span class="sc-miss">no question</span>'}${p.mode === 'value' && p.var ? ` <span class="sc-var">→ ${raw(esc(p.var))}</span>` : ''}`;
   if (n.type === 'set') return `<code>${esc(p.var || '?')} = ${esc(p.expr || '?')}</code>`;
   if (n.type === 'if') return `<code>${esc(p.expr || '?')}</code>`;
   if (n.type === 'delay') return p.mode === 'until' ? `<span>until</span> <code>${esc(p.expr || '?')}</code>` : `<code>${esc(p.expr || '?')}</code> <span>min</span>`;
@@ -147,7 +148,16 @@ function nodePanel(n) {
     <label>Project</label><select data-pf="project_id" ${dis()}>${projectOptions(p.project_id, '— the script\'s default —')}</select>
     <label>Prompt</label><textarea data-pf="text" maxlength="20000" style="min-height:120px" placeholder="What should the ghost do? Use {variable} to put a value in." ${dis()}>${esc(p.text)}</textarea>
     <label>Save the answer's value into</label><select data-pf="target" ${dis()}>${varOptions(p.target, { none: true })}</select>
-    <p class="muted small">With a variable the ghost is asked to end its answer with &lt;value&gt;…&lt;/value&gt;.</p>`;
+    <p class="muted small">With a variable the ghost is asked to end its answer with &lt;value&gt;…&lt;/value&gt;.</p>
+    <div class="two"><div><label>Try again if it fails</label><input type="number" min="0" max="5" data-pf="retry" value="${esc(p.retry ?? 0)}" ${dis()}></div>
+      <div><label>Minutes between tries</label><input type="number" min="0" max="1440" data-pf="retry_wait" value="${esc(p.retry_wait ?? 1)}" ${dis()}></div></div>
+    <p class="muted small">When every try failed, the "failed" output goes on. If nothing is connected to it, the whole run fails.</p>`;
+  else if (n.type === 'ask') fields = `
+    <label>Question</label><textarea data-pf="question" maxlength="4000" style="min-height:90px" placeholder="What should the person decide? Use {variable} to put a value in." ${dis()}>${esc(p.question)}</textarea>
+    <label>Answer</label><select data-pf="mode" ${dis()}><option value="approve" ${p.mode !== 'value' ? 'selected' : ''}>approve or reject</option><option value="value" ${p.mode === 'value' ? 'selected' : ''}>give a value</option></select>
+    ${p.mode === 'value' ? `<label>Save the value into</label><select data-pf="var" ${dis()}>${varOptions(p.var)}</select>` : ''}
+    <label>Give up after (minutes, 0 = wait for ever)</label><input type="number" min="0" max="10080" data-pf="timeout" value="${esc(p.timeout ?? 0)}" ${dis()}>
+    <p class="muted small">The run waits here. The person who started it (or the owner) answers in the run view or from Telegram. No answer in time goes on through "rejected".</p>`;
   else if (n.type === 'set') fields = `
     <label>Variable</label><select data-pf="var" ${dis()}>${varOptions(p.var)}</select>
     <label>New value</label><input type="text" data-pf="expr" value="${esc(p.expr)}" placeholder="score + 1" ${dis()} data-no-i18n>`;
@@ -168,7 +178,7 @@ function edgePanel(i) {
   const e = cur.edges[i];
   if (!e) return '';
   const name = (id) => { const n = cur.nodes.find((x) => x.id === id); return n ? (n.label || BLOCKS[n.type]?.label || id) : id; };
-  return `<h3>Arrow</h3><p data-no-i18n>${esc(name(e.from))}${e.port === 'true' ? ' (yes)' : e.port === 'false' ? ' (no)' : ''} → ${esc(name(e.to))}</p>
+  return `<h3>Arrow</h3><p data-no-i18n>${esc(name(e.from))}${e.port && e.port !== 'out' ? ` (${esc(e.port === 'true' ? 'yes' : e.port === 'false' ? 'no' : e.port)})` : ''} → ${esc(name(e.to))}</p>
     ${editable ? '<div class="modal-foot"><button class="btn danger small" data-act="remove">Delete arrow</button></div>' : ''}`;
 }
 
@@ -349,7 +359,7 @@ function renameOrSetVar(i, field, value) {
     v.name = value;
     for (const n of cur.nodes) {
       if (n.props?.target === old) n.props.target = value;
-      if (n.type === 'set' && n.props?.var === old) n.props.var = value;
+      if ((n.type === 'set' || n.type === 'ask') && n.props?.var === old) n.props.var = value;
     }
     canvas.refresh();
   } else {
