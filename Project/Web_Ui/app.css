@@ -207,6 +207,9 @@ main#view { overflow: auto; padding: 28px 34px 60px; }
 .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
 .tab { padding: 4px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); cursor: pointer; font-size: 12.5px; }
 .tab.on { border-color: var(--accent); color: var(--accent2); }
+.set-tabs { margin-bottom: 14px; }
+.set-tabs .tab { padding: 6px 13px; font-size: 13.5px; white-space: nowrap; }
+.set-tabs .tab i { font-style: normal; }
 .transcript { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; min-height: 220px; max-height: 62vh; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
 .msg { display: flex; gap: 10px; align-items: flex-start; }
 .bubble { background: var(--card2); border: 1px solid var(--line); border-radius: 4px 16px 16px 16px; padding: 10px 14px; max-width: 760px; overflow-wrap: anywhere; }
@@ -610,6 +613,16 @@ main#view:has(> .chats-layout) { padding: 0; overflow: hidden; }
 .sc-port.out:hover, .sc-port.out.armed { border-color: var(--accent); background: var(--accent); }
 .sc-port.out em { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); font-size: 10.5px; font-style: normal; color: var(--muted); }
 .sc-port.out::before { content: ''; position: absolute; inset: -10px; border-radius: 50%; }  /* bigger touch target */
+.sc-port.in { cursor: crosshair; }
+.sc-port.in:hover, .sc-port.in.armed { border-color: var(--accent); background: var(--accent); }
+.sc-port.out.target { border-color: var(--accent); background: var(--sel); }
+.sc-node.sc-tiny { padding: 0; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--line2); background: var(--raised); }
+.sc-tiny .sc-port { width: 12px; height: 12px; opacity: 0; transition: opacity .12s; }
+.sc-tiny .sc-port.in { top: -8px; }
+.sc-tiny .sc-port.out { top: calc(100% + 8px); left: 50%; }
+.sc-tiny .sc-port.out::before { inset: -6px; }
+.sc-tiny:hover .sc-port, .sc-tiny.sel .sc-port, .sc-tiny .sc-port.target, .sc-tiny .sc-port.armed { opacity: 1; }
+.sc-canvas.ro .sc-tiny .sc-port { display: none; }
 .sc-tools { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; z-index: 3; }
 .sc-palette { position: absolute; top: 0; bottom: 0; left: 0; width: 240px; background: var(--modal); border-right: 1px solid var(--line); padding: 12px; z-index: 4;
   transform: translateX(-102%); transition: transform .2s ease; overflow-y: auto; box-shadow: 0 0 30px var(--shadow); }

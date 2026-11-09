@@ -440,7 +440,7 @@ void ScriptRunner::advance(json& st) {
                 ns["state"] = "skipped";
                 for (size_t i = 0; i < script["edges"].size(); ++i)
                     if (script["edges"][i]["from"] == id) st["edges"][i] = "skipped";
-                log(st, {{"kind", "node_skipped"}, {"node", id}});
+                if (n["type"] != "reroute") log(st, {{"kind", "node_skipped"}, {"node", id}});
             } else {
                 ns["state"] = "ready";
             }
@@ -472,6 +472,13 @@ void ScriptRunner::start_node(json& st, const json& n) {
     json& ns = st["nodes"][id];
     ns["state"] = "running";
     ns["started"] = now_iso();
+    if (type == "reroute") {  // only a bend in an arrow: goes on at once and stays out of the run's log
+        ns["state"] = "done";
+        ns["ended"] = ns["started"];
+        for (size_t i = 0; i < st["script"]["edges"].size(); ++i)
+            if (st["script"]["edges"][i]["from"] == id) st["edges"][i] = "fired";
+        return;
+    }
     if (!ns.value("usage_tried", false)) log(st, {{"kind", "node_started"}, {"node", id}, {"text", node_title(n)}});
     if (type == "set" || type == "if" || type == "delay") {
         try {

@@ -2,29 +2,34 @@ import { api } from '../api.js';
 import { S, isOwner, refreshState } from '../state.js';
 import { $, esc, guard, toast, copyText, twoStep } from '../ui.js';
 import { mcpCardHTML, bindMcp } from './settings_mcp.js';
-import { careCardsHTML, bindCare } from './settings_backup.js';
+import { notifyCardHTML, backupCardHTML, bindNotify, bindBackup } from './settings_backup.js';
+import { personalHTML, bindPersonal } from './settings_personal.js';
 import { t } from '../i18n.js';
 
 let view, net = null, tun = null, tunTimer = null;
 let acc = null, accTimer = null, accUntil = 0;  // sign-in states (Secrets), polled for a while after a sign-in window opened
 let about = null;  // version and update check (/api/about)
+let section = 'personal', renderId = 0;
 
-function draw() {
-  const s = S.state, c = s.company, set = s.settings;
-  view.innerHTML = `
-    <div class="page-head"><div><h1>Settings</h1><p>Your company, your Vault, sharing and limits. Only the owner sees this page.</p></div></div>
+// One tab per part of the page, address #/settings/<id>. Everybody has Personal; the rest is the owner's.
+const SECTIONS = [
+  { id: 'personal', label: 'Personal', icon: '🎨' },
+  { id: 'company', label: 'Company', icon: '🏢' },
+  { id: 'sharing', label: 'Sharing', icon: '🌐' },
+  { id: 'secrets', label: 'Secrets', icon: '🔑' },
+  { id: 'mcp', label: 'MCP', icon: '🧩' },
+  { id: 'notifications', label: 'Notifications', icon: '🔔' },
+  { id: 'backup', label: 'Backup', icon: '💾' },
+  { id: 'about', label: 'About', icon: 'ℹ️' },
+];
+
+function sectionHTML(s, c, set) {
+  if (section === 'personal') return personalHTML();
+  if (section === 'company') return `
     <div class="card"><h3>Company</h3>
       <label>Name</label><input type="text" id="s-name" maxlength="60" value="${esc(c.name)}">
       <label>Goal <span class="hint-inline">every ghost reads this</span></label><textarea id="s-goal" maxlength="2000">${esc(c.goal)}</textarea>
       <div class="modal-foot"><button class="btn primary" data-act="save-company">Save</button></div></div>
-    <div class="card"><h3>Sharing with friends</h3>
-      <p class="hint" style="margin-top:0">Friends use their own Phantom Co. program and connect to this PC. Their ghost work runs here, with <b>your</b> Claude / Codex sign-in; nobody ever gets your login. It only works while this PC is on.</p>
-      <label class="check"><input type="checkbox" id="s-share" ${s.share ? 'checked' : ''}> Let people on my network connect</label>
-      ${s.share && net ? `<p class="hint">Friends connect to: ${net.addresses.map((a) => `<code>http://${esc(a.address)}:${net.port}</code> <span class="meta">(${esc(a.name)})</span>`).join(' &nbsp; ') || 'no network address found'}</p>` : ''}
-      <p class="hint">Windows may ask once to allow the program through the firewall: allow it for <b>private</b> networks. The connection is not encrypted: use a home network or a private network app such as Tailscale, never the open internet. Sign-in is always required.</p></div>
-    <div class="card" id="s-tunnel"><h3>Internet access</h3>
-      <p class="hint" style="margin-top:0">For friends who are <b>not</b> on your network. Phantom Co. opens a free, encrypted Cloudflare tunnel (no account) and gives you a <code>https://…trycloudflare.com</code> address. It is off every time the program starts and the address changes each time. Sign-in is always required.</p>
-      ${tunnelHTML()}</div>
     <div class="card"><h3>Limits</h3>
       <div class="two"><div><label>Runs at the same time (per brain)</label><input type="number" id="s-conc" min="1" max="4" value="${set.max_concurrent}"></div>
         <div><label>Waiting runs per person</label><input type="number" id="s-queue" min="0" max="100" value="${set.max_queue_per_user}"></div></div>
@@ -33,9 +38,20 @@ function draw() {
       <div class="modal-foot"><button class="btn primary" data-act="save-limits">Save</button></div></div>
     <div class="card"><h3>Vault folder</h3>
       <p class="hint" style="margin-top:0">Everything lives here as plain files: people, ghosts, skills, rules, projects, chats, runs. Pointing to a new empty folder creates a fresh Vault there (old files are not moved).</p>
-      <div class="inline"><input type="text" id="s-vault" value="${esc(s.vault_path)}"><button class="btn" data-act="save-vault">Use this folder</button><button class="btn" data-act="open-vault">Open</button></div></div>
+      <div class="inline"><input type="text" id="s-vault" value="${esc(s.vault_path)}"><button class="btn" data-act="save-vault">Use this folder</button><button class="btn" data-act="open-vault">Open</button></div></div>`;
+  if (section === 'sharing') return `
+    <div class="card"><h3>Sharing with friends</h3>
+      <p class="hint" style="margin-top:0">Friends use their own Phantom Co. program and connect to this PC. Their ghost work runs here, with <b>your</b> Claude / Codex sign-in; nobody ever gets your login. It only works while this PC is on.</p>
+      <label class="check"><input type="checkbox" id="s-share" ${s.share ? 'checked' : ''}> Let people on my network connect</label>
+      ${s.share && net ? `<p class="hint">Friends connect to: ${net.addresses.map((a) => `<code>http://${esc(a.address)}:${net.port}</code> <span class="meta">(${esc(a.name)})</span>`).join(' &nbsp; ') || 'no network address found'}</p>` : ''}
+      <p class="hint">Windows may ask once to allow the program through the firewall: allow it for <b>private</b> networks. The connection is not encrypted: use a home network or a private network app such as Tailscale, never the open internet. Sign-in is always required.</p></div>
+    <div class="card" id="s-tunnel"><h3>Internet access</h3>
+      <p class="hint" style="margin-top:0">For friends who are <b>not</b> on your network. Phantom Co. opens a free, encrypted Cloudflare tunnel (no account) and gives you a <code>https://…trycloudflare.com</code> address. It is off every time the program starts and the address changes each time. Sign-in is always required.</p>
+      ${tunnelHTML()}</div>`;
+  if (section === 'secrets') return `
     <div class="card" id="s-secrets"><h3>Secrets</h3>
       <p class="hint" style="margin-top:0">The Claude Code, Codex, Gemini CLI and OpenCode sign-ins your ghosts can use. <b>Auto</b> is the sign-in the command-line tool already has on this PC. Add more accounts (another subscription or an API key), then pick one as a ghost's brain. Sign-ins stay in this PC's settings folder, never in the Vault; API keys are stored encrypted for this Windows user and are typed only on this PC.</p>
+      <p class="hint">Gemini CLI has no Auto: it works only with an API key added here.</p>
       <div id="s-acc-list">${secretsHTML()}</div>
       <div class="inline acc-add"><p class="acc-add-title">Add another sign-in or API key</p>
         <select id="s-acc-prov"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="gemini">Gemini CLI</option><option value="opencode">OpenCode (NVIDIA, OpenRouter, Groq…)</option></select>
@@ -43,10 +59,19 @@ function draw() {
         <select id="s-acc-kind"><option value="subscription">Subscription</option><option value="api_key">API key</option></select>
         <input type="text" id="s-acc-name" maxlength="40" placeholder="Account name, e.g. Work">
         <input type="password" id="s-acc-key" maxlength="400" placeholder="Paste the API key" autocomplete="off" hidden>
-        <button class="btn" data-act="acc-add">Add account</button></div></div>
-    ${mcpCardHTML()}
-    ${careCardsHTML()}
-    <div class="card" id="s-about"><h3>About</h3>${aboutHTML()}</div>`;
+        <button class="btn" data-act="acc-add">Add account</button></div></div>`;
+  if (section === 'mcp') return mcpCardHTML();
+  if (section === 'notifications') return notifyCardHTML();
+  if (section === 'backup') return backupCardHTML();
+  return `<div class="card" id="s-about"><h3>About</h3>${aboutHTML()}</div>`;
+}
+
+function draw() {
+  const s = S.state, owner = isOwner();
+  const tabs = owner ? `<div class="tabs set-tabs">${SECTIONS.map((x) => `<a class="tab ${x.id === section ? 'on' : ''}" href="#/settings/${x.id}"><i>${x.icon}</i> ${x.label}</a>`).join('')}</div>` : '';
+  view.innerHTML = `
+    <div class="page-head"><div><h1>Settings</h1><p>${owner ? 'Your own preferences, and everything about your company.' : 'Your own preferences.'}</p></div></div>
+    ${tabs}${sectionHTML(s, s.company, s.settings)}`;
 }
 
 function aboutHTML() {
@@ -97,7 +122,7 @@ function usedHTML(names) {
   return names?.length ? `<div class="meta"><span>Used by:</span> ${names.map(esc).join(', ')}</div>` : '';
 }
 function secretsHTML() {
-  const autos = acc ? acc.auto : S.state.providers.filter((p) => p.id !== 'demo').map((p) => ({ provider: p.id, label: p.label, available: p.available }));
+  const autos = acc ? acc.auto : S.state.providers.filter((p) => p.id !== 'demo' && p.id !== 'gemini').map((p) => ({ provider: p.id, label: p.label, available: p.available }));
   const list = acc ? acc.accounts : (S.state.accounts || []);
   const rows = autos.map((a) => `<div class="acc-row"><div class="acc-main"><div><b>${esc(PROV[a.provider] || a.label)} · Auto</b></div>
       <div class="acc-state">${statusHTML(a.status, a.available)}</div>${usedHTML(a.agents)}</div>
@@ -144,24 +169,33 @@ function tunnelHTML() {
 async function pollTunnel() {
   clearTimeout(tunTimer);
   tun = await api('GET', '/api/tunnel').catch(() => null);
-  if (!view || !view.isConnected || !$('#s-name', view)) return;  // left the page
+  if (!view || !view.isConnected || !$('#s-tunnel', view)) return;  // left the page
   const card = $('#s-tunnel', view);  // not found by its title: the title is translated in the Turkish interface
   if (card) card.innerHTML = card.querySelector('h3').outerHTML + card.querySelector('p.hint').outerHTML + tunnelHTML();
   if (tun && (tun.state === 'installing' || tun.state === 'starting')) tunTimer = setTimeout(pollTunnel, 1000);
 }
 
-export async function render(v) {
+export async function render(v, arg) {
   view = v;
-  if (!isOwner()) { view.innerHTML = '<div class="empty">Only the owner can change settings.</div>'; return; }
-  net = await api('GET', '/api/network').catch(() => null);
-  tun = await api('GET', '/api/tunnel').catch(() => null);
+  const my = ++renderId;
+  clearTimeout(tunTimer);
+  clearTimeout(accTimer);
+  section = isOwner() && SECTIONS.some((x) => x.id === arg) ? arg : 'personal';
+  if (section === 'sharing') {
+    net = await api('GET', '/api/network').catch(() => null);
+    tun = await api('GET', '/api/tunnel').catch(() => null);
+    if (my !== renderId) return;  // another tab was opened meanwhile
+  }
   acc = null;
   draw();
-  bindMcp(view);
-  bindCare(view).catch((e) => toast(e.message, true));
-  loadAccounts();
-  loadAbout();
-  if (tun && (tun.state === 'installing' || tun.state === 'starting')) tunTimer = setTimeout(pollTunnel, 1000);
+  if (section === 'personal') bindPersonal(view);
+  if (!isOwner()) return;
+  if (section === 'mcp') bindMcp(view);
+  if (section === 'notifications') bindNotify(view).catch((e) => toast(e.message, true));
+  if (section === 'backup') bindBackup(view).catch((e) => toast(e.message, true));
+  if (section === 'secrets') loadAccounts();
+  if (section === 'about') loadAbout();
+  if (section === 'sharing' && tun && (tun.state === 'installing' || tun.state === 'starting')) tunTimer = setTimeout(pollTunnel, 1000);
   view.onclick = guard(async (e) => {
     const el = e.target.closest('[data-act]');
     if (!el) return;
@@ -205,10 +239,11 @@ export async function render(v) {
     } else if (act === 'acc-login') await openLogin(el.dataset.id ? { id: el.dataset.id } : { provider: el.dataset.provider });
     else if (act === 'acc-del') {
       const a = acc?.accounts.find((x) => x.id === el.dataset.id);
-      const list = a?.agents?.length ? `<b>These ghosts go back to Auto:</b><br>${a.agents.map(esc).join('<br>')}` : '';
+      const gemini = a?.provider === 'gemini';  // Gemini has no Auto to go back to
+      const list = a?.agents?.length ? `<b>${gemini ? 'These ghosts need another Gemini key:' : 'These ghosts go back to Auto:'}</b><br>${a.agents.map(esc).join('<br>')}` : '';
       await twoStep(el, 'Really remove?', async () => {
         const r = await api('DELETE', '/api/accounts/' + el.dataset.id);
-        toast(r.moved.length ? 'Account removed. Its ghosts use Auto now.' : 'Account removed');
+        toast(r.moved.length && !gemini ? 'Account removed. Its ghosts use Auto now.' : 'Account removed');
         await refreshState();
         acc = null;
         $('#s-acc-list', view).innerHTML = secretsHTML();

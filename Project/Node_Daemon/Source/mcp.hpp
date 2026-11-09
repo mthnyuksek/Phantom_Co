@@ -44,7 +44,7 @@ public:
     bool save(const json& in, const std::map<std::string, std::string>& secrets, bool is_new, std::string& error);
     bool remove(const std::string& name);
     bool refresh_folder(const std::string& name, std::string& error);  // copy the source folder again
-    static json catalog();                     // ready-made servers: browser, youtube, telegram
+    static json catalog();                     // ready-made servers: browser, youtube, telegram, reddit
     std::string secret(const std::string& name, const std::string& key);
     void set_secret(const std::string& name, const std::string& key, const std::string& value);
     fs::path data_dir() const { return dir_; }

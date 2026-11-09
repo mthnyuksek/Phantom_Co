@@ -460,6 +460,24 @@ def run_tests(exe, vault, data, procs, owner, ece, vera):
     check("then runs once after all rounds", r and r["vars"]["done_at"]["value"] == 10000 and node_state(r, "after") == "done", r and r["vars"])
     check("rounds noted in the events", r and sum(1 for e in r["events"] if "Round" in e.get("text", "")) == 4)
 
+    # Reroute points: the run goes straight through them, also inside a loop and on one output of an If; they add nothing to the log
+    RR = lambda id: {"id": id, "type": "reroute"}
+    bends = chain("Bends", [START, RR("r1"), DO("d", "3"), RR("r2"), SET("add", "sum", "sum + 1"), {"id": "c", "type": "if", "props": {"expr": "sum > 100"}}, RR("r3"), RR("r4"), SET("yes", "seen", "1"), END],
+               edges=[{"from": "s", "to": "r1"}, {"from": "r1", "to": "d"}, {"from": "d", "port": "loop", "to": "r2"}, {"from": "r2", "to": "add"},
+                      {"from": "d", "port": "then", "to": "c"}, {"from": "c", "port": "true", "to": "r3"}, {"from": "r3", "to": "yes"}, {"from": "yes", "to": "e"},
+                      {"from": "c", "port": "false", "to": "r4"}, {"from": "r4", "to": "e"}],
+               vars=[{"name": "sum", "type": "Number"}, {"name": "seen", "type": "Number"}])
+    st, r = make_and_run(ece, bends)
+    r = wait_run(ece, r["id"])
+    check("reroute: a run goes through, also in a loop", r and r["status"] == "done" and r["vars"]["sum"]["value"] == 300, r and (r["status"], r.get("error"), r["vars"]))
+    check("reroute: the taken way is done", r and node_state(r, "r4") == "done" and node_state(r, "r1") == "done")
+    check("reroute: the way not taken is skipped", r and node_state(r, "r3") == "skipped" and node_state(r, "yes") == "skipped", r and r["nodes"])
+    check("reroute: not in the run's log", r and not any(e.get("node") in ("r1", "r2", "r3", "r4") for e in r["events"]), r and r["events"])
+    st, v = ece.post("/api/scripts/validate", chain("Only points", [START, DO("d", "2"), RR("p"), END], edges=[{"from": "s", "to": "d"}, {"from": "d", "port": "loop", "to": "p"}, {"from": "d", "port": "then", "to": "e"}]))
+    check("reroute: a loop of only points is empty", st == 200 and any("loop output" in m for m in errors_of(v)), v)
+    st, v = ece.post("/api/scripts/validate", chain("Bad port", [START, RR("p"), END], edges=[{"from": "s", "to": "p"}, {"from": "p", "port": "true", "to": "e"}]))
+    check("reroute: has only the normal output", st == 200 and any("no output" in m for m in errors_of(v)), v)
+
     sc["name"] = "Zero rounds"
     sc["nodes"][1] = DO("d", "0", "i")
     st, r = make_and_run(ece, sc)

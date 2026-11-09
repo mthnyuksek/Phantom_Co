@@ -138,6 +138,7 @@ function nodePanel(n) {
   const p = n.props || {};
   let fields = '';
   if (n.type === 'start') fields = '<p class="muted small">The run begins here when someone presses Run.</p>';
+  else if (n.type === 'reroute') fields = '<p class="muted small">Only leads the arrow around other blocks. The run goes straight through it.</p>';
   else if (n.type === 'end') fields = '<p class="muted small">The run is done as soon as it gets here, like return: blocks still working are stopped. A run also ends by itself when no block is left.</p>';
   else if (n.type === 'do') fields = `
     <label>How many rounds</label><input type="text" data-pf="count" value="${esc(p.count)}" placeholder="3" ${dis()} data-no-i18n>
@@ -168,7 +169,7 @@ function nodePanel(n) {
     <label>Wait</label><select data-pf="mode" ${dis()}><option value="for" ${p.mode !== 'until' ? 'selected' : ''}>for some minutes</option><option value="until" ${p.mode === 'until' ? 'selected' : ''}>until a time of day</option></select>
     <label>${p.mode === 'until' ? 'Time' : 'Minutes'}</label><input type="text" data-pf="expr" value="${esc(p.expr)}" placeholder="${p.mode === 'until' ? '16:00' : '30'}" ${dis()} data-no-i18n>`;
   return `<h3><span>${b.icon}</span> <span data-no-i18n>${b.label}</span></h3>
-    <label>Name on the canvas</label><input type="text" data-nf="label" value="${esc(n.label || '')}" placeholder="${b.label}" maxlength="80" ${dis()}>
+    ${n.type === 'reroute' ? '' : `<label>Name on the canvas</label><input type="text" data-nf="label" value="${esc(n.label || '')}" placeholder="${b.label}" maxlength="80" ${dis()}>`}
     ${fields}
     <div id="sc-node-problems">${problemList(problemsOf((e) => e.node === n.id))}</div>
     ${editable ? '<div class="modal-foot"><button class="btn danger small" data-act="remove">Delete block</button></div>' : ''}`;

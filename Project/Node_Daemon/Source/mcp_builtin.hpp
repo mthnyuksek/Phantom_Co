@@ -5,7 +5,7 @@
 
 namespace pc2::builtin {
 
-// MCP servers built into phantom_co.exe (no Node or Python needed): "telegram" (a bot) and "youtube" (your channel).
+// MCP servers built into phantom_co.exe (no Node or Python needed): "telegram" (a bot), "youtube" (your channel) and "reddit".
 // `session` is what Mcp::session returns: secrets, options and the run's work folder (the only place files are taken from).
 
 json tools(const std::string& builtin);  // the MCP tool list

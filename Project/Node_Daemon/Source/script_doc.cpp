@@ -10,7 +10,7 @@ namespace pc2::script {
 
 namespace {
 
-const std::set<std::string> kNodeTypes = {"start", "prompt", "set", "if", "delay", "do", "ask", "end"};
+const std::set<std::string> kNodeTypes = {"start", "prompt", "set", "if", "delay", "do", "ask", "end", "reroute"};
 const std::set<std::string> kReserved = {"and", "or", "not", "true", "false", "abs", "round", "min", "max"};
 
 std::string str(const json& j, const char* key, size_t max, const std::string& fallback = "") {
@@ -346,7 +346,8 @@ json check_script(const json& s, const ScriptLookup& lookup) {
         for (auto& [id, t] : type_of) {
             if (t != "do") continue;
             std::set<std::string> body = loop_body(s, id);
-            if (body.empty()) { add("Connect the blocks to repeat to the loop output.", {{"node", id}}); continue; }
+            const bool only_points = std::all_of(body.begin(), body.end(), [&](const std::string& b) { return type_of[b] == "reroute"; });
+            if (body.empty() || only_points) { add("Connect the blocks to repeat to the loop output.", {{"node", id}}); continue; }
             for (const json& e : s.value("edges", json::array())) {
                 std::string from = e.value("from", ""), to = e.value("to", "");
                 if (!body.count(to) || body.count(from)) continue;

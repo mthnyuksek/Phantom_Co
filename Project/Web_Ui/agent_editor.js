@@ -18,7 +18,7 @@ export const TEMPLATES = [
 export function openAgentModal(agent, tpl) {
   const isNew = !agent;
   const st = S.state;
-  const firstReal = st.providers.find((p) => p.available && p.id !== 'demo') || st.providers.find((p) => p.id === 'demo');
+  const firstReal = brainOptions().find((b) => b.available && b.id !== 'demo' && !b.id.includes('@')) || { id: 'demo' };
   const draft = agent ? { ...agent, skills: [...agent.skills] } : {
     name: NAMES[Math.floor(Math.random() * NAMES.length)], role: 'Assistant', provider: firstReal?.id || 'demo', model: '', reports_to: '',
     form: FORMS[Math.floor(Math.random() * FORMS.length)].id, color: PALETTE[Math.floor(Math.random() * PALETTE.length)],

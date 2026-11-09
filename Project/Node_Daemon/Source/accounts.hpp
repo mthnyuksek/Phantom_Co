@@ -18,6 +18,8 @@ namespace pc2 {
 // Google refuses the free Google sign-in for Gemini CLI since late 2026: Gemini works only with an API key.
 inline constexpr const char* kGeminiNoGoogle =
     "Google no longer lets Gemini CLI use a free Google sign-in. Add a Gemini API key instead (Settings > Secrets, kind \"API key\").";
+inline constexpr const char* kGeminiNeedsKey =
+    "Gemini CLI works only with an API key now. Add one in Settings > Secrets and pick it as this ghost's brain.";
 // OpenCode accounts are API keys of a model service OpenCode knows (picked in Settings or found from the key's prefix).
 inline constexpr const char* kOpenCodeKeyOnly =
     "OpenCode accounts are API keys of a model service: NVIDIA, OpenRouter, Groq, Cerebras, DeepSeek or Mistral. Local models (LM Studio, Ollama) need no account: write lmstudio/<model> or ollama/<model> in the ghost's Model field.";

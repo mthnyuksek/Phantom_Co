@@ -19,6 +19,7 @@
 #include "notify.hpp"
 #include "auth.hpp"
 #include "mcp.hpp"
+#include "mcp_builtin.hpp"
 #include "telegram_bridge.hpp"
 #include "runner.hpp"
 #include "script_expr.hpp"
@@ -72,6 +73,26 @@ BOOL WINAPI on_ctrl(DWORD) {
 void fatal(const std::wstring& msg, bool window_mode) {
     if (window_mode) MessageBoxW(nullptr, msg.c_str(), L"Phantom Co.", MB_OK | MB_ICONERROR);
     else std::wcerr << msg << L"\n";
+}
+
+// --builtin-call (Tests/reddit_test.py): one request on stdin {builtin, tool, args, secrets}, the result on stdout.
+// An empty tool = the check of Settings > MCP. Only does what the built-in server does for a ghost, with what it is given.
+int builtin_call_main() {
+    HANDLE in = GetStdHandle(STD_INPUT_HANDLE), out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (!in || in == INVALID_HANDLE_VALUE || !out || out == INVALID_HANDLE_VALUE) return 2;
+    std::string text;
+    char chunk[4096];
+    DWORD got = 0;
+    while (ReadFile(in, chunk, sizeof chunk, &got, nullptr) && got > 0) text.append(chunk, got);
+    const json r = json::parse(text, nullptr, false);
+    if (!r.is_object()) return 2;
+    const json secrets = r.value("secrets", json::object()), options = r.value("options", json::object());
+    const std::string builtin_name = r.value("builtin", ""), tool = r.value("tool", "");
+    const json session = {{"secrets", secrets}, {"options", options}, {"workdir", ""}};
+    const std::string a = (tool.empty() ? builtin::check(builtin_name, secrets, options) : builtin::call(builtin_name, tool, r.value("args", json::object()), session)).dump() + "\n";
+    DWORD n = 0;
+    WriteFile(out, a.data(), (DWORD)a.size(), &n, nullptr);
+    return 0;
 }
 
 // --script-eval: reads request lines from the stdin pipe, writes one answer line each (no console, like the MCP proxy).
@@ -486,6 +507,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         }
         // Test hook for script expressions (Tests/script_test.py): JSON lines on stdin -> answers on stdout (pipes).
         if (av && n >= 2 && std::wstring(av[1]) == L"--script-eval") return script_eval_main();
+        if (av && n >= 2 && std::wstring(av[1]) == L"--builtin-call") return builtin_call_main();
     }
     // Started from a terminal? Then --help and errors can be printed there.
     if (AttachConsole(ATTACH_PARENT_PROCESS)) {

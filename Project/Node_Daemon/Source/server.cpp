@@ -630,6 +630,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             if (at != std::string::npos) { at_user = pv.substr(at + 1); pv = pv.substr(0, at); }
             else if (hash != std::string::npos) { account = pv.substr(hash + 1); pv = pv.substr(0, hash); }
             if (!provider_known(pv) || (pv == "demo" && (!at_user.empty() || hash != std::string::npos)) || ((pv == "gemini" || pv == "opencode") && !at_user.empty())) { err = "Unknown provider."; return false; }
+            if (pv == "gemini" && hash == std::string::npos && base.value("provider", "") != "gemini") { err = kGeminiNeedsKey; return false; }  // no "Auto" for Gemini
             if (hash != std::string::npos) {
                 auto a = runner.accounts() ? runner.accounts()->get(account) : std::nullopt;
                 if (!a || (*a)["provider"] != pv) { err = "That account does not exist on this PC."; return false; }
@@ -666,12 +667,12 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         std::vector<std::future<json>> autos_f, list_f;  // the CLI checks run side by side (a few seconds each)
         auto provs = detect_providers();
         for (auto& p : provs)
-            if (p.id != "demo") autos_f.push_back(std::async(std::launch::async, [acc, id = p.id, ok = p.available] { return ok ? acc->status(id, "") : json{{"signed_in", false}, {"error", "not_installed"}}; }));
+            if (p.id != "demo" && p.id != "gemini") autos_f.push_back(std::async(std::launch::async, [acc, id = p.id, ok = p.available] { return ok ? acc->status(id, "") : json{{"signed_in", false}, {"error", "not_installed"}}; }));
         for (auto& a : list)
             list_f.push_back(std::async(std::launch::async, [acc, p = a["provider"].get<std::string>(), id = a["id"].get<std::string>()] { return acc->status(p, id); }));
         size_t i = 0;
         for (auto& p : provs) {
-            if (p.id == "demo") continue;
+            if (p.id == "demo" || p.id == "gemini") continue;
             autos.push_back({{"provider", p.id}, {"label", p.label}, {"available", p.available}, {"status", autos_f[i++].get()}, {"agents", agents_on(p.id)}});
         }
         for (size_t k = 0; k < list.size(); ++k) {
@@ -1215,8 +1216,14 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         json b;
         if (!parse_body(req, res, b)) return;
         std::string provider;
-        for (auto& p : detect_providers()) if (provider.empty() && p.available && (p.id == "claude" || p.id == "codex" || p.id == "gemini" || p.id == "opencode")) provider = p.id;
-        if (provider.empty()) return fail(res, 409, "The guide needs Claude Code, Codex, Gemini CLI or OpenCode on this PC.");
+        for (auto& p : detect_providers()) {
+            if (!provider.empty() || !p.available) continue;
+            if (p.id == "claude" || p.id == "codex" || p.id == "opencode") provider = p.id;
+            else if (p.id == "gemini" && runner.accounts())  // Gemini works only with an API key account
+                for (const json& a : runner.accounts()->list())
+                    if (provider.empty() && a.value("provider", "") == "gemini" && a.value("kind", "") == "api_key") provider = "gemini#" + a.value("id", "");
+        }
+        if (provider.empty()) return fail(res, 409, "The guide needs Claude Code, Codex, OpenCode or a Gemini API key on this PC.");
         if (!store.install_skill_template("app_guide")) return fail(res, 500, "The guide skill is missing from the program.");
         json in = {{"name", "Guide"}, {"role", "Phantom Co. guide"}, {"provider", provider}, {"form", "detective"}, {"color", "#9ff0d4"},
                    {"skills", json::array({"app_guide"})}, {"persona", "You are the friendly guide of this company. Be warm, short and concrete."}}, a;

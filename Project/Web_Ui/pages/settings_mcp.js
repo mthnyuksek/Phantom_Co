@@ -11,6 +11,7 @@ const READY = {
   browser: { icon: '🌐', text: 'A real browser (Chrome) the ghosts can click and type in. Needs Node.js and Google Chrome on this PC.' },
   youtube: { icon: '▶️', text: 'Upload videos to your YouTube channel. Needs a free Google Cloud OAuth client.' },
   telegram: { icon: '✈️', text: 'Send messages and files through your own Telegram bot.' },
+  reddit: { icon: '👽', text: 'Read and search Reddit. Posting needs an app approved by Reddit.' },
 };
 
 export const mcpCardHTML = () => `<div class="card" id="s-mcp"><h3>MCP: tools from outside</h3>
@@ -43,7 +44,7 @@ function formHTML(s) {
       ${secretInput(s, 'bot_token', 'Bot token')}
       <label>Default chat id <span class="hint-inline">where messages go when the ghost names no chat</span></label><input type="text" data-f="chat_id" maxlength="64" value="${esc(s.options?.chat_id || '')}" placeholder="e.g. 123456789">
       <label class="check"><input type="checkbox" data-f="listen" ${s.options?.listen ? 'checked' : ''}> Let people talk to ghosts from Telegram (/agents, /&lt;ghost&gt; message, /new)</label>
-      <p class="hint">Each person connects their own Telegram account in their profile (Profile &gt; Telegram); the ghosts then work with that person's rights. Answers and approval requests come back to Telegram. Only one Phantom Co. window can listen to a bot.</p>`;
+      <p class="hint">Each person connects their own Telegram account in Settings &gt; Personal; the ghosts then work with that person's rights. Answers and approval requests come back to Telegram. Only one Phantom Co. window can listen to a bot.</p>`;
   } else if (s.kind === 'builtin' && s.builtin === 'youtube') {
     body = `<ol class="hint mcp-steps"><li>Open console.cloud.google.com, make a project and switch on YouTube Data API v3.</li>
       <li>OAuth consent screen: type External, add your own Google account as a test user.</li>
@@ -51,6 +52,11 @@ function formHTML(s) {
       <li>Press "Sign in with Google" and allow access to your channel.</li></ol>
       <p class="hint">Google keeps videos uploaded by apps it has not reviewed private; you make them public in YouTube Studio. Uploads use the daily YouTube quota of your project (a few videos a day).</p>
       ${secretInput(s, 'client_id', 'OAuth client id')}${secretInput(s, 'client_secret', 'OAuth client secret')}`;
+  } else if (s.kind === 'builtin' && s.builtin === 'reddit') {
+    body = `<p class="hint">With every field empty, ghosts can read public posts through Reddit's feeds; Reddit limits how often. New Reddit apps need Reddit's approval, so the fields below are only for an app you already have.</p>
+      ${secretInput(s, 'client_id', 'Client id')}${secretInput(s, 'client_secret', 'Client secret')}
+      <p class="hint">To publish posts and comments, also fill in the account of a "script" app. An account with two-factor sign-in cannot be used.</p>
+      ${secretInput(s, 'username', 'Reddit user name')}${secretInput(s, 'password', 'Reddit password')}`;
   } else {
     const envs = (s.env_names || []).join('\n');
     body = `${isNew ? `<label>Name <span class="hint-inline">a-z, 0-9 and _; the ghosts see tools as mcp__name__tool</span></label><input type="text" data-f="name" maxlength="24" placeholder="e.g. discord">` : ''}

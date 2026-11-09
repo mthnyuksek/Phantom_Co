@@ -5,15 +5,15 @@ import { $, esc, guard, toast, twoStep } from '../ui.js';
 const size = (n) => (n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 const dateOf = (name) => { const m = name.match(/(\d{4}-\d{2}-\d{2})_(\d{2})(\d{2})/); return m ? `${m[1]} ${m[2]}:${m[3]}` : name; };
 
-export const careCardsHTML = () => `<div class="card" id="s-notify"><h3>Notifications</h3><p class="hint" style="margin-top:0">Loading…</p></div>
-  <div class="card" id="s-backup"><h3>Backup</h3><p class="hint" style="margin-top:0">Loading…</p></div>`;
+export const notifyCardHTML = () => '<div class="card" id="s-notify"><h3>Notifications</h3><p class="hint" style="margin-top:0">Loading…</p></div>';
+export const backupCardHTML = () => '<div class="card" id="s-backup"><h3>Backup</h3><p class="hint" style="margin-top:0">Loading…</p></div>';
 
 const box = (id, on, label) => `<label class="check"><input type="checkbox" data-n="${id}" ${on ? 'checked' : ''}> ${label}</label>`;
 function notifyHTML(s) {
   return `<h3>Notifications</h3>
     <p class="hint" style="margin-top:0">The bell in the sidebar always shows them to the person they are for. They can also come as:</p>
     ${box('windows', s.windows, 'A Windows notification on this PC')}
-    ${box('telegram', s.telegram, 'A Telegram message (for people who connected their Telegram in the profile)')}
+    ${box('telegram', s.telegram, 'A Telegram message (for people who connected their Telegram in Settings)')}
     <h3 class="subhead">Tell me when</h3>
     ${box('failed', s.failed, 'A script, a task or a wake-up failed')}
     ${box('ask', s.ask, 'A ghost asks for approval or a script asks a question')}
@@ -36,9 +36,24 @@ function backupHTML(b, keepChecked) {
       <button class="btn small danger" data-bk="del" data-name="${esc(x.name)}">Delete</button></div>`).join('')}</div>`;
 }
 
-export async function bindCare(view) {
-  const nCard = $('#s-notify', view), bCard = $('#s-backup', view);
-  if (!nCard || !bCard) return;
+export async function bindNotify(view) {
+  const nCard = $('#s-notify', view);
+  if (!nCard) return;
+  const s = await api('GET', '/api/notifications/settings');
+  if (!view.contains(nCard)) return;
+  nCard.innerHTML = notifyHTML(s);
+  nCard.onchange = guard(async (e) => {
+    const k = e.target.dataset.n;
+    if (!k) return;
+    const r = await api('PUT', '/api/notifications/settings', { [k]: k === 'done_min' ? Math.round(+e.target.value) : e.target.checked });
+    if (k === 'done_min') e.target.value = r.done_min;
+    toast('Saved');
+  });
+}
+
+export async function bindBackup(view) {
+  const bCard = $('#s-backup', view);
+  if (!bCard) return;
   let timer = 0;
   const paintBackup = (b) => {
     if (!view.contains(bCard)) return;
@@ -47,15 +62,7 @@ export async function bindCare(view) {
     clearTimeout(timer);
     if (b.running) timer = setTimeout(guard(async () => paintBackup(await api('GET', '/api/backup'))), 700);
   };
-  nCard.innerHTML = notifyHTML(await api('GET', '/api/notifications/settings'));
   paintBackup(await api('GET', '/api/backup'));
-  nCard.onchange = guard(async (e) => {
-    const k = e.target.dataset.n;
-    if (!k) return;
-    const r = await api('PUT', '/api/notifications/settings', { [k]: k === 'done_min' ? Math.round(+e.target.value) : e.target.checked });
-    if (k === 'done_min') e.target.value = r.done_min;
-    toast('Saved');
-  });
   bCard.onclick = guard(async (e) => {
     const b = e.target.closest('[data-bk]');
     if (!b) return;

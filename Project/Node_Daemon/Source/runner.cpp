@@ -419,7 +419,15 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     fs::path workdir = project.is_object() ? store_.project_dir(job.project_id) : store_.files_root();
     std::string base_provider, worker;
     const bool remote = split_provider(js->brain, base_provider, worker);  // the lane it was queued on, even if the agent changed since
-    const std::string account = remote ? "" : split_account(base_provider, base_provider);
+    std::string account = remote ? "" : split_account(base_provider, base_provider);
+    // Gemini has no "Auto" (Google refuses the CLI's own sign-in): a ghost that still has the plain brain, from before
+    // or because its account was removed, uses the first Gemini API key, else it fails with a clear text.
+    if (!remote && base_provider == "gemini" && account.empty()) {
+        if (accounts_)
+            for (const json& a : accounts_->list())
+                if (a.value("provider", "") == "gemini" && a.value("kind", "") == "api_key") { account = a.value("id", ""); break; }
+        if (account.empty()) { o.status = "failed"; o.error = kGeminiNeedsKey; finish(o); return; }
+    }
     const std::string scope = project.is_object() ? "project:" + job.project_id : "shared";
     std::error_code ec;
     fs::create_directories(workdir, ec);

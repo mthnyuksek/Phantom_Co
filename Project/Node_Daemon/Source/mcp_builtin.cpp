@@ -6,8 +6,10 @@
 #include <chrono>
 #include <ctime>
 #include <memory>
+#include <mutex>
 
 #include "http_client.hpp"
+#include "version.hpp"
 
 namespace pc2::builtin {
 
@@ -24,6 +26,15 @@ static std::string url_encode(const std::string& s) {
         else { out += '%'; out += hex[c >> 4]; out += hex[c & 15]; }
     }
     return out;
+}
+
+static std::string base64(const std::string& raw) {
+    DWORD n = 0;
+    CryptBinaryToStringA(reinterpret_cast<const BYTE*>(raw.data()), (DWORD)raw.size(), CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, nullptr, &n);
+    std::string b(n, '\0');
+    CryptBinaryToStringA(reinterpret_cast<const BYTE*>(raw.data()), (DWORD)raw.size(), CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, b.data(), &n);
+    b.resize(n);
+    return b;
 }
 
 static std::string form(const std::vector<std::pair<std::string, std::string>>& kv) {
@@ -200,13 +211,8 @@ static const char* kScopes = "https://www.googleapis.com/auth/youtube.upload htt
 std::string pkce_challenge(const std::string& verifier) {
     std::string hex = sha256_hex_of(verifier), raw;
     for (size_t i = 0; i + 1 < hex.size(); i += 2) raw += (char)std::stoi(hex.substr(i, 2), nullptr, 16);
-    DWORD n = 0;
-    CryptBinaryToStringA(reinterpret_cast<const BYTE*>(raw.data()), (DWORD)raw.size(), CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, nullptr, &n);
-    std::string b(n, '\0');
-    CryptBinaryToStringA(reinterpret_cast<const BYTE*>(raw.data()), (DWORD)raw.size(), CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, b.data(), &n);
-    b.resize(n);
     std::string out;
-    for (char c : b) { if (c == '+') out += '-'; else if (c == '/') out += '_'; else if (c != '=' && c != '\0') out += c; }
+    for (char c : base64(raw)) { if (c == '+') out += '-'; else if (c == '/') out += '_'; else if (c != '=' && c != '\0') out += c; }
     return out;
 }
 
@@ -347,10 +353,351 @@ static json youtube_call(const std::string& tool, const json& a, const json& ses
     return text_result("Unknown tool: " + tool, true);
 }
 
+// ------------------------------------------------------------------- reddit
+// With an app Reddit has approved (client id + secret, plus user name + password of a "script" app for posting) the
+// official API is used. Without one only Reddit's public RSS feeds can be read: its logged-out JSON answers 403.
+static std::string reddit_host(bool api) {
+    // Tests point PHANTOM_REDDIT_API at a fake Reddit (Tests/reddit_test.py); always the real one otherwise.
+    static const std::string test = [] {
+        wchar_t buf[512];
+        DWORD n = GetEnvironmentVariableW(L"PHANTOM_REDDIT_API", buf, 512);
+        return n > 0 && n < 512 ? Narrow(std::wstring(buf, n)) : std::string();
+    }();
+    return !test.empty() ? test : api ? "https://oauth.reddit.com" : "https://www.reddit.com";
+}
+
+static Headers reddit_headers(const json& sec, const std::string& token = "") {
+    std::string ua = "windows:phantom_co:v" PC2_VERSION_STR;
+    if (!sec.value("username", "").empty()) ua += " (by /u/" + sec.value("username", "") + ")";
+    Headers h{{"User-Agent", ua}};
+    if (!token.empty()) h.push_back({"Authorization", "Bearer " + token});
+    return h;
+}
+
+static std::string reddit_status_text(int status) {
+    if (status == 401) return "Reddit no longer accepts this sign-in. Check the app and the account in Settings > MCP > Reddit.";
+    if (status == 403) return "Reddit refused this (a private or banned community, or the app has no permission).";
+    if (status == 404) return "Reddit does not know that community or post.";
+    if (status == 429) return "Reddit is limiting requests right now. Try again in a few minutes.";
+    return "Reddit answered with error " + std::to_string(status) + ".";
+}
+
+// "" with no error = no app saved, so public feeds only.
+static std::string reddit_token(const json& sec, std::string& error) {
+    const std::string id = sec.value("client_id", ""), secret = sec.value("client_secret", ""), user = sec.value("username", ""), pass = sec.value("password", "");
+    if (id.empty() || secret.empty()) return "";
+    static std::mutex mu;
+    static std::string cached, cached_for;
+    static ULONGLONG until = 0;
+    const std::string who = id + "\n" + secret + "\n" + user + "\n" + pass;
+    std::lock_guard<std::mutex> l(mu);
+    if (!cached.empty() && cached_for == who && GetTickCount64() < until) return cached;
+    Headers h = reddit_headers(sec);
+    h.push_back({"Authorization", "Basic " + base64(id + ":" + secret)});
+    const std::string body = !user.empty() && !pass.empty() ? form({{"grant_type", "password"}, {"username", user}, {"password", pass}}) : form({{"grant_type", "client_credentials"}});
+    auto r = request("POST", reddit_host(false) + "/api/v1/access_token", h, body, "application/x-www-form-urlencoded");
+    json j = parse(r);
+    if (!r) { error = "Reddit could not be reached."; return ""; }
+    if (r->status == 401 || r->status == 403) { error = "Reddit refused this app: the client id or secret is wrong, or Reddit has not approved the app."; return ""; }
+    if (j.is_object() && j.value("error", "") == "invalid_grant") { error = "Reddit refused the user name or password (an account with two-factor sign-in cannot be used here)."; return ""; }
+    if (r->status != 200 || !j.is_object() || j.value("access_token", "").empty()) { error = reddit_status_text(r->status); return ""; }
+    cached = j["access_token"];
+    cached_for = who;
+    until = GetTickCount64() + std::max(60, j.value("expires_in", 3600) - 60) * 1000ULL;
+    return cached;
+}
+
+static std::string xml_decode(const std::string& s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); ++i) {
+        size_t e = s[i] == '&' ? s.find(';', i) : std::string::npos;
+        if (e == std::string::npos || e - i > 10) { out += s[i]; continue; }
+        const std::string name = s.substr(i + 1, e - i - 1);
+        unsigned long c = 0;
+        if (name == "amp") c = '&';
+        else if (name == "lt") c = '<';
+        else if (name == "gt") c = '>';
+        else if (name == "quot") c = '"';
+        else if (name == "apos") c = '\'';
+        else if (name.size() > 2 && name[0] == '#' && (name[1] == 'x' || name[1] == 'X')) c = strtoul(name.c_str() + 2, nullptr, 16);
+        else if (name.size() > 1 && name[0] == '#') c = strtoul(name.c_str() + 1, nullptr, 10);
+        if (c == 0 || c > 0x10FFFF) { out += s[i]; continue; }
+        if (c < 0x80) out += (char)c;
+        else if (c < 0x800) { out += (char)(0xC0 | (c >> 6)); out += (char)(0x80 | (c & 63)); }
+        else if (c < 0x10000) { out += (char)(0xE0 | (c >> 12)); out += (char)(0x80 | ((c >> 6) & 63)); out += (char)(0x80 | (c & 63)); }
+        else { out += (char)(0xF0 | (c >> 18)); out += (char)(0x80 | ((c >> 12) & 63)); out += (char)(0x80 | ((c >> 6) & 63)); out += (char)(0x80 | (c & 63)); }
+        i = e;
+    }
+    return out;
+}
+
+static std::string trim(std::string s) {
+    size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
+    return a == std::string::npos ? "" : s.substr(a, b - a + 1);
+}
+
+// The text of a feed entry: an escaped piece of HTML; Reddit escapes entities in it once more (&amp;#32;).
+static std::string feed_text(const std::string& html_escaped) {
+    const std::string html = xml_decode(html_escaped);
+    std::string plain;
+    for (size_t i = 0; i < html.size(); ++i) {
+        if (html[i] != '<') { plain += html[i]; continue; }
+        size_t e = html.find('>', i);
+        if (e == std::string::npos) break;
+        const std::string tag = html.substr(i + 1, std::min<size_t>(e - i - 1, 4));
+        if (tag.rfind("br", 0) == 0 || tag.rfind("/p", 0) == 0 || tag.rfind("/li", 0) == 0) plain += '\n';
+        i = e;
+    }
+    plain = xml_decode(plain);
+    size_t tail = plain.rfind("submitted by");  // the feed's own footer: author and [link] [comments]
+    if (tail != std::string::npos) plain.erase(tail);
+    return trim(plain);
+}
+
+struct FeedEntry { std::string title, author, sub, id, link, date, text; };
+
+static std::string between(const std::string& s, const std::string& open, const std::string& close, size_t from = 0) {
+    size_t a = s.find(open, from);
+    if (a == std::string::npos) return "";
+    a += open.size();
+    size_t b = s.find(close, a);
+    return b == std::string::npos ? "" : s.substr(a, b - a);
+}
+
+static std::vector<FeedEntry> feed_entries(const std::string& body) {
+    std::vector<FeedEntry> out;
+    for (size_t at = body.find("<entry>"); at != std::string::npos; at = body.find("<entry>", at + 1)) {
+        size_t end = body.find("</entry>", at);
+        if (end == std::string::npos) break;
+        const std::string e = body.substr(at, end - at);
+        FeedEntry f;
+        f.title = xml_decode(xml_decode(between(e, "<title>", "</title>")));  // escaped twice, like the content
+        f.author = xml_decode(between(e, "<name>", "</name>"));
+        if (f.author.rfind("/u/", 0) == 0) f.author.erase(0, 1);
+        f.sub = xml_decode(between(e, "<category term=\"", "\""));
+        f.id = between(e, "<id>", "</id>");
+        f.link = xml_decode(between(e, "<link href=\"", "\""));
+        f.date = between(e, "<updated>", "</updated>").substr(0, 10);
+        f.text = feed_text(between(e, "<content type=\"html\">", "</content>"));
+        out.push_back(f);
+    }
+    return out;
+}
+
+static bool feed_get(const json& sec, const std::string& path, std::string& body, std::string& error) {
+    auto r = request("GET", reddit_host(false) + path, reddit_headers(sec), "", "");
+    if (!r) { error = "Reddit could not be reached."; return false; }
+    if (r->status == 429) { error = "Reddit limits reading without an approved app. Try again in a few minutes."; return false; }
+    if (r->status != 200) { error = reddit_status_text(r->status); return false; }
+    body = r->body;
+    return true;
+}
+
+static json reddit_get(const json& sec, const std::string& token, const std::string& path, std::string& error) {
+    auto r = request("GET", reddit_host(true) + path, reddit_headers(sec, token), "", "");
+    json j = parse(r);
+    if (!r) { error = "Reddit could not be reached."; return json(); }
+    if (r->status != 200 || j.is_discarded()) { error = reddit_status_text(r->status); return json(); }
+    return j;
+}
+
+static bool reddit_sub(std::string s, std::string& out) {
+    if (s.rfind("/r/", 0) == 0) s.erase(0, 3);
+    else if (s.rfind("r/", 0) == 0) s.erase(0, 2);
+    if (s.size() < 2 || s.size() > 21 || s.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") != std::string::npos) return false;
+    out = s;
+    return true;
+}
+
+// A post or comment as "t3_abc" / "t1_abc" from a full name, a bare post id or a link to the post.
+static bool reddit_thing(std::string s, std::string& out) {
+    size_t c = s.find("/comments/");
+    if (c != std::string::npos) { s = s.substr(c + 10); s = "t3_" + s.substr(0, s.find_first_of("/?#")); }
+    else if (s.rfind("t1_", 0) != 0 && s.rfind("t3_", 0) != 0) s = "t3_" + s;
+    if (s.size() < 4 || s.size() > 20 || s.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789", 3) != std::string::npos) return false;
+    out = s;
+    return true;
+}
+
+static std::string feed_line(const FeedEntry& f, size_t max_text) {
+    std::string out = "- " + f.title + "\n  " + (f.sub.empty() ? "" : "r/" + f.sub + " · ") + f.author + " · " + f.date + " · id " + f.id + " · " + f.link + "\n";
+    if (!f.text.empty()) out += "  " + truncate_utf8(f.text, max_text) + "\n";
+    return out;
+}
+
+static std::string post_line(const json& d, size_t max_text) {
+    std::time_t t = (std::time_t)d.value("created_utc", 0.0);
+    char day[16] = "";
+    std::tm tmv{};
+    if (gmtime_s(&tmv, &t) == 0) std::strftime(day, sizeof(day), "%Y-%m-%d", &tmv);
+    std::string out = "- " + d.value("title", "") + "\n  r/" + d.value("subreddit", "") + " · u/" + d.value("author", "") + " · " + day + " · " +
+                      std::to_string(d.value("score", 0)) + " points · " + std::to_string(d.value("num_comments", 0)) + " comments · id " + d.value("name", "") +
+                      " · https://www.reddit.com" + d.value("permalink", "") + "\n";
+    if (!d.value("is_self", true)) out += "  link: " + d.value("url", "") + "\n";
+    if (!d.value("selftext", "").empty()) out += "  " + truncate_utf8(d.value("selftext", ""), max_text) + "\n";
+    return out;
+}
+
+static void comment_lines(const json& listing, int depth, std::string& out) {
+    if (!listing.is_object() || !listing.contains("data") || depth > 4) return;
+    for (const json& c : listing["data"].value("children", json::array())) {
+        if (c.value("kind", "") != "t1") continue;
+        const json d = c.value("data", json::object());
+        out += std::string(depth * 2, ' ') + "- u/" + d.value("author", "") + " (" + std::to_string(d.value("score", 0)) + ", id " + d.value("name", "") + "): " +
+               truncate_utf8(d.value("body", ""), 1500) + "\n";
+        if (d.contains("replies")) comment_lines(d["replies"], depth + 1, out);
+    }
+}
+
+static json reddit_tools() {
+    return json::array({
+        {{"name", "list_posts"}, {"description", "List the posts of a subreddit."},
+         {"inputSchema", schema({{"subreddit", {{"type", "string"}, {"description", "Name of the community, e.g. programming."}}},
+                                 {"sort", {{"type", "string"}, {"enum", {"hot", "new", "top", "rising"}}, {"description", "Default hot."}}},
+                                 {"limit", {{"type", "integer"}, {"description", "How many (1-50, default 15)."}}}}, {"subreddit"})}},
+        {{"name", "search"}, {"description", "Search Reddit, or one subreddit, for posts."},
+         {"inputSchema", schema({{"query", {{"type", "string"}}},
+                                 {"subreddit", {{"type", "string"}, {"description", "Optional: search only this community."}}},
+                                 {"sort", {{"type", "string"}, {"enum", {"relevance", "new", "top", "comments"}}, {"description", "Default relevance."}}},
+                                 {"limit", {{"type", "integer"}, {"description", "How many (1-50, default 15)."}}}}, {"query"})}},
+        {{"name", "read_post"}, {"description", "Read one post with its comments."},
+         {"inputSchema", schema({{"post", {{"type", "string"}, {"description", "The post's id (t3_abc) or its link."}}},
+                                 {"limit", {{"type", "integer"}, {"description", "How many comments (1-100, default 30)."}}}}, {"post"})}},
+        {{"name", "submit_post"}, {"description", "Publish a post in a subreddit with the company's Reddit account. Give text for a text post or url for a link post."},
+         {"inputSchema", schema({{"subreddit", {{"type", "string"}}}, {"title", {{"type", "string"}, {"description", "At most 300 characters."}}},
+                                 {"text", {{"type", "string"}}}, {"url", {{"type", "string"}}}}, {"subreddit", "title"})}},
+        {{"name", "comment"}, {"description", "Reply to a post or a comment with the company's Reddit account."},
+         {"inputSchema", schema({{"parent", {{"type", "string"}, {"description", "Id of the post (t3_abc) or comment (t1_abc), or the post's link."}}},
+                                 {"text", {{"type", "string"}}}}, {"parent", "text"})}},
+    });
+}
+
+static bool reddit_write(const json& sec, const std::string& token, const std::string& path, const std::string& body, json& data, std::string& error) {
+    auto r = request("POST", reddit_host(true) + path, reddit_headers(sec, token), body, "application/x-www-form-urlencoded");
+    json j = parse(r);
+    if (!r) { error = "Reddit could not be reached, so it is not known whether this went through."; return false; }
+    if (r->status != 200 || !j.is_object() || !j.contains("json")) { error = reddit_status_text(r->status); return false; }
+    const json errors = j["json"].value("errors", json::array());
+    if (!errors.empty()) {
+        error = "Reddit refused this: ";
+        for (const json& e : errors) if (e.is_array() && e.size() > 1 && e[1].is_string()) error += e[1].get<std::string>() + " ";
+        return false;
+    }
+    data = j["json"].value("data", json::object());
+    return true;
+}
+
+static json reddit_call(const std::string& tool, const json& a, const json& session) {
+    const json& sec = session["secrets"];
+    std::string error, sub;
+    const std::string token = reddit_token(sec, error);
+    if (!error.empty()) return text_result(error, true);
+    const int limit = a.contains("limit") && a["limit"].is_number_integer() ? std::clamp(a["limit"].get<int>(), 1, tool == "read_post" ? 100 : 50) : (tool == "read_post" ? 30 : 15);
+    const std::string n = std::to_string(limit);
+
+    if (tool == "list_posts") {
+        if (!reddit_sub(sarg(a, "subreddit"), sub)) return text_result("Give the name of a subreddit, e.g. programming.", true);
+        std::string sort = sarg(a, "sort", "hot");
+        if (sort != "hot" && sort != "new" && sort != "top" && sort != "rising") sort = "hot";
+        std::string out;
+        if (token.empty()) {
+            std::string body;
+            if (!feed_get(sec, "/r/" + sub + "/" + sort + ".rss?limit=" + n, body, error)) return text_result(error, true);
+            for (const FeedEntry& f : feed_entries(body)) out += feed_line(f, 400);
+        } else {
+            json j = reddit_get(sec, token, "/r/" + sub + "/" + sort + "?raw_json=1&limit=" + n, error);
+            if (j.is_null()) return text_result(error, true);
+            for (const json& c : j["data"].value("children", json::array())) out += post_line(c.value("data", json::object()), 400);
+        }
+        return text_result(out.empty() ? "No posts." : out);
+    }
+    if (tool == "search") {
+        const std::string q = sarg(a, "query");
+        if (q.empty()) return text_result("Give something to search for.", true);
+        if (!sarg(a, "subreddit").empty() && !reddit_sub(sarg(a, "subreddit"), sub)) return text_result("That is not the name of a subreddit.", true);
+        std::string sort = sarg(a, "sort", "relevance");
+        if (sort != "new" && sort != "top" && sort != "comments") sort = "relevance";
+        const std::string where = sub.empty() ? "/search" : "/r/" + sub + "/search";
+        const std::string query = "?q=" + url_encode(q) + "&sort=" + sort + "&limit=" + n + (sub.empty() ? "" : "&restrict_sr=on");
+        std::string out;
+        if (token.empty()) {
+            std::string body;
+            if (!feed_get(sec, where + ".rss" + query, body, error)) return text_result(error, true);
+            for (const FeedEntry& f : feed_entries(body)) out += feed_line(f, 400);
+        } else {
+            json j = reddit_get(sec, token, where + query + "&raw_json=1", error);
+            if (j.is_null()) return text_result(error, true);
+            for (const json& c : j["data"].value("children", json::array())) out += post_line(c.value("data", json::object()), 400);
+        }
+        return text_result(out.empty() ? "Nothing found." : out);
+    }
+    if (tool == "read_post") {
+        std::string thing;
+        if (!reddit_thing(sarg(a, "post"), thing) || thing.rfind("t3_", 0) != 0) return text_result("Give the post's id (t3_abc) or its link.", true);
+        const std::string id = thing.substr(3);
+        std::string out;
+        if (token.empty()) {
+            std::string body;
+            if (!feed_get(sec, "/comments/" + id + ".rss?limit=" + n, body, error)) return text_result(error, true);
+            bool first = true;
+            for (const FeedEntry& f : feed_entries(body)) {
+                out += first ? feed_line(f, 8000) + "\nComments:\n" : "- " + f.author + " (id " + f.id + "): " + truncate_utf8(f.text, 1500) + "\n";
+                first = false;
+            }
+        } else {
+            json j = reddit_get(sec, token, "/comments/" + id + "?raw_json=1&depth=4&limit=" + n, error);
+            if (j.is_null()) return text_result(error, true);
+            if (!j.is_array() || j.size() < 2) return text_result("Reddit sent something unexpected.", true);
+            for (const json& c : j[0]["data"].value("children", json::array())) out += post_line(c.value("data", json::object()), 8000);
+            out += "\nComments:\n";
+            comment_lines(j[1], 0, out);
+        }
+        return text_result(out.empty() ? "Post not found." : out);
+    }
+    if (tool == "submit_post" || tool == "comment") {
+        if (token.empty() || sec.value("username", "").empty() || sec.value("password", "").empty())
+            return text_result("Posting needs an app approved by Reddit and an account: the owner adds them in Settings > MCP > Reddit. Without them Reddit can only be read.", true);
+        json data;
+        if (tool == "comment") {
+            std::string thing;
+            const std::string text = sarg(a, "text");
+            if (text.empty() || !reddit_thing(sarg(a, "parent"), thing)) return text_result("Give the post or comment to answer and the text.", true);
+            if (!reddit_write(sec, token, "/api/comment", form({{"api_type", "json"}, {"thing_id", thing}, {"text", truncate_utf8(text, 10000)}}), data, error)) return text_result(error, true);
+            return text_result("Comment published.");
+        }
+        if (!reddit_sub(sarg(a, "subreddit"), sub)) return text_result("Give the name of a subreddit.", true);
+        const std::string title = truncate_utf8(sarg(a, "title"), 300), text = sarg(a, "text"), url = sarg(a, "url");
+        if (title.empty()) return text_result("Give the post a title.", true);
+        if (text.empty() == url.empty()) return text_result("Give either text (a text post) or url (a link post).", true);
+        std::vector<std::pair<std::string, std::string>> kv = {{"api_type", "json"}, {"sr", sub}, {"title", title}, {"kind", url.empty() ? "self" : "link"}};
+        if (url.empty()) kv.push_back({"text", truncate_utf8(text, 40000)});
+        else kv.push_back({"url", url});
+        if (!reddit_write(sec, token, "/api/submit", form(kv), data, error)) return text_result(error, true);
+        return text_result("Published: " + data.value("url", "(no link came back)"));
+    }
+    return text_result("Unknown tool: " + tool, true);
+}
+
+static json reddit_check(const json& sec) {
+    std::string error;
+    const std::string token = reddit_token(sec, error);
+    if (!error.empty()) return {{"ok", false}, {"text", error}};
+    if (token.empty()) {
+        std::string body;
+        if (!feed_get(sec, "/r/popular/hot.rss?limit=1", body, error) && error.find("limits reading") == std::string::npos) return {{"ok", false}, {"text", error}};
+        return {{"ok", true}, {"text", "Read only: public feeds, no account"}};
+    }
+    if (sec.value("username", "").empty() || sec.value("password", "").empty()) return {{"ok", true}, {"text", "Read only: app without an account"}};
+    json me = reddit_get(sec, token, "/api/v1/me", error);
+    if (me.is_null()) return {{"ok", false}, {"text", error}};
+    return {{"ok", true}, {"text", "u/" + me.value("name", "")}};
+}
+
 // ------------------------------------------------------------------- public
 json tools(const std::string& builtin) {
     if (builtin == "telegram") return telegram_tools();
     if (builtin == "youtube") return youtube_tools();
+    if (builtin == "reddit") return reddit_tools();
     return json::array();
 }
 
@@ -359,6 +706,7 @@ json call(const std::string& builtin, const std::string& tool, const json& args,
     try {
         if (builtin == "telegram") return telegram_call(tool, a, session);
         if (builtin == "youtube") return youtube_call(tool, a, session);
+        if (builtin == "reddit") return reddit_call(tool, a, session);
     } catch (const std::exception& e) {
         return text_result(std::string("Error: ") + e.what(), true);
     }
@@ -382,6 +730,7 @@ json check(const std::string& builtin, const json& secrets, const json& options)
         if (!ch.contains("items") || ch["items"].empty()) return {{"ok", false}, {"text", "This Google account has no YouTube channel yet."}};
         return {{"ok", true}, {"text", ch["items"][0]["snippet"].value("title", "")}};
     }
+    if (builtin == "reddit") return reddit_check(secrets);
     return {{"ok", false}, {"text", "Unknown server."}};
 }
 

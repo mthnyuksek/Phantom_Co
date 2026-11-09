@@ -66,6 +66,7 @@ static bool one_line(const std::string& s) { return s.find_first_of(std::string(
 static std::set<std::string> builtin_secrets(const std::string& builtin) {
     if (builtin == "telegram") return {"bot_token"};
     if (builtin == "youtube") return {"client_id", "client_secret", "refresh_token"};
+    if (builtin == "reddit") return {"client_id", "client_secret", "username", "password"};
     return {};
 }
 
@@ -89,6 +90,8 @@ json Mcp::catalog() {
          {"approve_tools", {"upload_video", "set_thumbnail"}}, {"skill", "youtube"}},
         {{"name", "telegram"}, {"label", "Telegram"}, {"kind", "builtin"}, {"builtin", "telegram"}, {"approve", true},
          {"approve_tools", {"send_message", "send_file"}}, {"skill", "telegram"}},
+        {{"name", "reddit"}, {"label", "Reddit"}, {"kind", "builtin"}, {"builtin", "reddit"}, {"approve", true},
+         {"approve_tools", {"submit_post", "comment"}}, {"skill", "reddit"}},
     });
 }
 
@@ -180,7 +183,7 @@ bool Mcp::save(const json& in, const std::map<std::string, std::string>& secrets
     if (out["kind"] != "command" && out["kind"] != "builtin") { error = "Unknown kind of server."; return false; }
     if (out["kind"] == "builtin") {
         out["builtin"] = s("builtin", 16, "");
-        if (out["builtin"] != "telegram" && out["builtin"] != "youtube") { error = "Unknown built-in server."; return false; }
+        if (out["builtin"] != "telegram" && out["builtin"] != "youtube" && out["builtin"] != "reddit") { error = "Unknown built-in server."; return false; }
         out.erase("command"); out.erase("args"); out.erase("folder"); out.erase("env_names");
         json opt = json::object();
         if (out["builtin"] == "telegram") {

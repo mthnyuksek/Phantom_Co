@@ -193,7 +193,7 @@ void TelegramBridge::handle(const json& m, const std::string& token) {
             if (it != codes_.end()) codes_.erase(it);
         }
         auto u = uid.empty() ? std::nullopt : store_.user(uid);
-        if (!u) return reply(chat, T(tr, "That code is wrong or too old. Make a new one in Phantom Co. (Profile > Telegram).", "Bu kod yanlış ya da süresi dolmuş. Phantom Co.’da yeni bir kod oluştur (Profil > Telegram)."));
+        if (!u) return reply(chat, T(tr, "That code is wrong or too old. Make a new one in Phantom Co. (Settings > Personal > Telegram).", "Bu kod yanlış ya da süresi dolmuş. Phantom Co.’da yeni bir kod oluştur (Ayarlar > Kişisel > Telegram)."));
         {
             std::lock_guard<std::mutex> l(mu_);
             state_["links"][tg] = {{"user", uid}, {"name", from.value("first_name", "")}, {"tr", tr}};
@@ -208,8 +208,8 @@ void TelegramBridge::handle(const json& m, const std::string& token) {
         if (state_["links"].contains(tg)) uid = state_["links"][tg].value("user", "");
     }
     if (uid.empty()) {
-        if (priv) reply(chat, T(tr, "This bot belongs to a Phantom Co. company. To talk to its ghosts, open your profile in Phantom Co., press \"Connect Telegram\" and send the /link code here.",
-                                "Bu bot bir Phantom Co. şirketine ait. Hayaletleriyle konuşmak için Phantom Co.’da profilini aç, \"Telegram’ı bağla\"ya bas ve /link kodunu buraya gönder."));
+        if (priv) reply(chat, T(tr, "This bot belongs to a Phantom Co. company. To talk to its ghosts, open Settings > Personal in Phantom Co., press \"Connect Telegram\" and send the /link code here.",
+                                "Bu bot bir Phantom Co. şirketine ait. Hayaletleriyle konuşmak için Phantom Co.’da Ayarlar > Kişisel bölümünü aç,\"Telegram’ı bağla\"ya bas ve /link kodunu buraya gönder."));
         return;
     }
     auto user = store_.user(uid);
