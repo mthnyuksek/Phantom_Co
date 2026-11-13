@@ -20,13 +20,10 @@ static std::string trim(const std::string& s) {
     return a == std::string::npos ? "" : s.substr(a, b - a + 1);
 }
 
-// "Ayşe Çalışkan" -> "ayse_caliskan": Telegram commands are a-z, 0-9 and _ only.
+// "Ayşe Çalışkan" -> "ayse_caliskan": Telegram commands are a-z, 0-9 and _ only. A name with no letters keeps the old "ghost".
 static std::string command_of(const std::string& name) {
-    static const std::vector<std::pair<std::string, std::string>> tr = {
-        {"ç", "c"}, {"Ç", "c"}, {"ğ", "g"}, {"Ğ", "g"}, {"ı", "i"}, {"İ", "i"}, {"ö", "o"}, {"Ö", "o"}, {"ş", "s"}, {"Ş", "s"}, {"ü", "u"}, {"Ü", "u"}};
-    std::string s = name;
-    for (auto& [a, b] : tr) s = replace_all(s, a, b);
-    return slugify(s, 32);
+    std::string c = command_slug(name);
+    return c.empty() ? "ghost" : c;
 }
 
 static long long now_s() { return (long long)std::time(nullptr); }
@@ -68,16 +65,27 @@ bool TelegramBridge::config(std::string& token) {
 }
 
 std::vector<std::pair<std::string, json>> TelegramBridge::commands() {
-    static const std::set<std::string> reserved = {"start", "help", "agents", "phantoms", "ghosts", "hayaletler", "new", "yeni",
-                                                    "yes", "no", "evet", "hayir", "link", "unlink", "answer", "cevap"};
     std::vector<std::pair<std::string, json>> out;
-    std::set<std::string> used = reserved;
+    std::set<std::string> used;
     for (auto& a : store_.agents()) {
         if (!a.value("enabled", true)) continue;
         std::string c = command_of(a.value("name", "")), base = c;
-        for (int i = 2; used.count(c); ++i) c = base.substr(0, 29) + "_" + std::to_string(i);
+        for (int i = 2; used.count(c) || is_reserved_command(c); ++i) c = base.substr(0, 29) + "_" + std::to_string(i);
         used.insert(c);
         out.push_back({c, a});
+    }
+    return out;
+}
+
+// The prompt shortcuts a person can use as /<command>: a ghost with the same command wins (shortcuts are checked when made,
+// but a ghost hired later may take the word).
+static std::vector<json> usable_shortcuts(Store& store, const std::vector<std::pair<std::string, json>>& ghost_cmds) {
+    std::set<std::string> taken;
+    for (auto& [c, a] : ghost_cmds) { taken.insert(c); taken.insert(a.value("id", "")); }
+    std::vector<json> out;
+    for (auto& s : store.shortcuts()) {
+        std::string c = s.value("command", "");
+        if (!c.empty() && !taken.count(c) && !is_reserved_command(c)) out.push_back(s);
     }
     return out;
 }
@@ -114,8 +122,12 @@ void TelegramBridge::poll_loop() {
             json list = json::array({{{"command", "agents"}, {"description", "List the ghosts / Hayaletleri listele"}},
                                      {{"command", "new"}, {"description", "Forget the chat / Sohbeti unut"}},
                                      {{"command", "help"}, {"description", "Help / Yardım"}}});
-            for (auto& [c, a] : commands())
+            auto ghost_cmds = commands();
+            for (auto& [c, a] : ghost_cmds)
                 if (list.size() < 100) list.push_back({{"command", c}, {"description", truncate_utf8(a.value("name", "") + (a.value("role", "").empty() ? "" : " · " + a.value("role", "")), 250)}});
+            for (auto& s : usable_shortcuts(store_, ghost_cmds))  // description must not be empty
+                if (list.size() < 100) list.push_back({{"command", s.value("command", "")},
+                                                       {"description", truncate_utf8("⚡ " + replace_all(s.value("title", "").empty() ? s.value("body", "") : s.value("title", ""), "\n", " "), 250)}});
             std::string sig = list.dump();
             if (sig != last_cmds && !builtin::telegram_api(token, "setMyCommands", {{"commands", list}}, err, 20000).is_null()) last_cmds = sig;
         }
@@ -151,8 +163,8 @@ void TelegramBridge::reply(const std::string& chat, const std::string& text) {
 }
 
 static std::string help_text(bool tr) {
-    return T(tr, "Commands:\n/agents — list the ghosts\n/<ghost> message — talk to a ghost (it becomes the current one: plain messages go to it)\n/new — the current ghost forgets the chat\n/yes, /no — answer an approval request or a script's question\n/answer value — give the value a script asks for",
-             "Komutlar:\n/agents — hayaletleri listeler\n/<hayalet> mesaj — bir hayaletle konuş (o artık geçerli hayalet olur: düz mesajlar ona gider)\n/new — geçerli hayalet sohbeti unutur\n/yes, /no — bir onay isteğini ya da betik sorusunu yanıtla\n/answer değer — betiğin istediği değeri ver");
+    return T(tr, "Commands:\n/agents — list the ghosts\n/<ghost> message — talk to a ghost (it becomes the current one: plain messages go to it)\n/new — the current ghost forgets the chat\n/yes, /no — answer an approval request or a script's question\n/answer value — give the value a script asks for\n/<shortcut> text — a ready-made prompt of the company (the shortcuts are listed in /agents)",
+             "Komutlar:\n/agents — hayaletleri listeler\n/<hayalet> mesaj — bir hayaletle konuş (o artık geçerli hayalet olur: düz mesajlar ona gider)\n/new — geçerli hayalet sohbeti unutur\n/yes, /no — bir onay isteğini ya da betik sorusunu yanıtla\n/answer değer — betiğin istediği değeri ver\n/<kısayol> metin — şirketin hazır promptu (kısayollar /agents içinde listelenir)");
 }
 
 void TelegramBridge::handle(const json& m, const std::string& token) {
@@ -243,6 +255,11 @@ void TelegramBridge::handle(const json& m, const std::string& token) {
             out += "/" + k + " — " + a.value("name", "") + (a.value("role", "").empty() ? "" : " · " + a.value("role", "")) +
                    (act.contains(a.value("id", "")) ? T(tr, " (working)", " (çalışıyor)") : "") + (cur && (*cur)["id"] == a["id"] ? " ←" : "") + "\n";
         if (cmds.empty()) out += T(tr, "(no ghosts yet)\n", "(henüz hayalet yok)\n");
+        auto shorts = usable_shortcuts(store_, cmds);
+        if (!shorts.empty()) {
+            out += T(tr, "\nShortcuts (ready-made prompts):\n", "\nKısayollar (hazır promptlar):\n");
+            for (auto& s : shorts) out += "/" + s.value("command", "") + (s.value("title", "").empty() ? "" : " — " + s.value("title", "")) + "\n";
+        }
         out += T(tr, "\nWrite /<ghost> and your message. /new: the current ghost forgets the chat.", "\n/<hayalet> ve mesajını yaz. /new: geçerli hayalet sohbeti unutur.");
         return reply(chat, out);
     }
@@ -297,7 +314,20 @@ void TelegramBridge::handle(const json& m, const std::string& token) {
     std::optional<json> target;
     if (!cmd.empty()) {
         target = by_cmd(cmd);
-        if (!target) return reply(chat, T(tr, "There is no ghost called /" + cmd + ". /agents lists them.", "/" + cmd + " adında bir hayalet yok. /agents hepsini listeler."));
+        if (!target) {  // not a ghost: a prompt shortcut? It goes to its own ghost, else to the current one (which stays as it was)
+            std::optional<json> sc;
+            for (auto& s : usable_shortcuts(store_, cmds)) if (s.value("command", "") == cmd) sc = s;
+            if (!sc) return reply(chat, T(tr, "There is no ghost or shortcut called /" + cmd + ". /agents lists them.", "/" + cmd + " adında bir hayalet ya da kısayol yok. /agents hepsini listeler."));
+            std::optional<json> a;
+            if (!sc->value("agent_id", "").empty()) {
+                a = store_.agent(sc->value("agent_id", ""));
+                if (a && !a->value("enabled", true)) a = std::nullopt;
+            }
+            if (!a) a = current();
+            if (!a) return reply(chat, T(tr, "Who should get this? Pick a ghost first, for example /" + (cmds.empty() ? std::string("agents") : cmds[0].first) + ", then send /" + cmd + " again.",
+                                         "Bu kime gitsin? Önce bir hayalet seç, örneğin /" + (cmds.empty() ? std::string("agents") : cmds[0].first) + ", sonra /" + cmd + " komutunu tekrar gönder."));
+            return to_ghost(tg, chat, *a, expand_shortcut(sc->value("body", ""), rest), *user, role, tr);
+        }
         { std::lock_guard<std::mutex> l(mu_); state_["current"][tg] = (*target)["id"]; save(); }
         if (rest.empty()) return reply(chat, T(tr, "Now talking to " + target->value("name", "") + ". Write your message.", "Artık " + target->value("name", "") + " ile konuşuyorsun. Mesajını yaz."));
     } else {
@@ -419,6 +449,13 @@ json TelegramBridge::link_info(const std::string& user_id) {
     json linked = json::array();
     for (auto& [k, v] : state_["links"].items()) if (v.value("user", "") == user_id) linked.push_back({{"name", v.value("name", "")}});
     return {{"on", status_ == "on"}, {"bot", bot_}, {"linked", linked}};
+}
+
+std::vector<std::string> TelegramBridge::chat_ids(const std::string& user_id) {
+    std::vector<std::string> out;
+    std::lock_guard<std::mutex> l(mu_);
+    for (auto& [k, v] : state_["links"].items()) if (v.value("user", "") == user_id) out.push_back(k);
+    return out;
 }
 
 std::string TelegramBridge::new_link_code(const std::string& user_id) {

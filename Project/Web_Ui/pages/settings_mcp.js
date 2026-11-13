@@ -12,6 +12,7 @@ const READY = {
   youtube: { icon: '▶️', text: 'Upload videos to your YouTube channel. Needs a free Google Cloud OAuth client.' },
   telegram: { icon: '✈️', text: 'Send messages and files through your own Telegram bot.' },
   reddit: { icon: '👽', text: 'Read and search Reddit. Posting needs an app approved by Reddit.' },
+  reminders: { icon: '⏰', text: 'Telegram reminders that arrive on time even when Phantom Co. is closed. Needs a free Cloudflare Worker.' },
 };
 
 export const mcpCardHTML = () => `<div class="card" id="s-mcp"><h3>MCP: tools from outside</h3>
@@ -57,6 +58,12 @@ function formHTML(s) {
       ${secretInput(s, 'client_id', 'Client id')}${secretInput(s, 'client_secret', 'Client secret')}
       <p class="hint">To publish posts and comments, also fill in the account of a "script" app. An account with two-factor sign-in cannot be used.</p>
       ${secretInput(s, 'username', 'Reddit user name')}${secretInput(s, 'password', 'Reddit password')}`;
+  } else if (s.kind === 'builtin' && s.builtin === 'reminders') {
+    body = `<p class="hint">Reminders are kept and sent by a small Worker on your own free Cloudflare account, so they arrive even when this PC is off. Set it up once with the steps in Project/Cloudflare_Worker/README.md, then paste its address and key here.</p>
+      <label>Worker address</label><input type="password" data-secret="worker_url" maxlength="400" autocomplete="off"
+        placeholder="${(s.secrets_set || []).includes('worker_url') ? 'Saved (leave empty to keep it)' : 'https://phantom-reminders.….workers.dev'}">
+      ${secretInput(s, 'worker_key', 'Worker key')}
+      <p class="hint">Each person gets reminders in their own Telegram, connected in Settings &gt; Personal (the Telegram server above must be on). Do not put students’ personal data in reminders: they wait on Cloudflare until they are sent.</p>`;
   } else {
     const envs = (s.env_names || []).join('\n');
     body = `${isNew ? `<label>Name <span class="hint-inline">a-z, 0-9 and _; the ghosts see tools as mcp__name__tool</span></label><input type="text" data-f="name" maxlength="24" placeholder="e.g. discord">` : ''}

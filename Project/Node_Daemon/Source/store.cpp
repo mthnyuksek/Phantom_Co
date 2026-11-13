@@ -113,6 +113,9 @@ static const std::vector<Field> kTemplateF = {  // task templates: a ready-made 
     {"name", "name", 'S', ""}, {"agent", "agent_id", 'S', ""}, {"project", "project_id", 'S', ""},
     {"created_by", "created_by", 'S', ""}, {"created", "created", 'S', ""},
     {"wake", "wake", 'S', ""}, {"wake_every", "wake_every", 'I', "0"}, {"wake_at", "wake_at", 'S', ""}};
+static const std::vector<Field> kShortcutF = {  // prompt shortcuts: body = the prompt, "{args}" = what follows the command
+    {"command", "command", 'S', ""}, {"title", "title", 'S', ""}, {"agent", "agent_id", 'S', ""},
+    {"created_by", "created_by", 'S', ""}, {"created", "created", 'S', ""}};
 static const std::vector<Field> kUserF = {
     {"name", "name", 'S', ""}, {"form", "form", 'S', "classic"}, {"color", "color", 'S', "#9ff0d4"},
     {"created", "created", 'S', ""}, {"disabled", "disabled", 'B', "false"}};
@@ -228,7 +231,7 @@ void init_vault(const fs::path& root) {
         fresh = true;
     }
 
-    for (const wchar_t* d : {L"Company", L"Users", L"Agents", L"Skills", L"Rules", L"Projects", L"Tasks", L"Task_Templates", L"Scripts", L"Script_Runs", L"Conversations", L"Runs", L"Shared_Files", L"Memory"})
+    for (const wchar_t* d : {L"Company", L"Users", L"Agents", L"Skills", L"Rules", L"Projects", L"Tasks", L"Task_Templates", L"Shortcuts", L"Scripts", L"Script_Runs", L"Conversations", L"Runs", L"Shared_Files", L"Memory"})
         fs::create_directories(root / d, ec);
 
     for (size_t i = 0; i < kEmbeddedCount; ++i) {  // starting files from the template; existing files are kept
@@ -346,6 +349,21 @@ SIMPLE_ENTITY(agents, agent, L"Agents", kAgentF, "persona", "created")
 SIMPLE_ENTITY(skills, skill, L"Skills", kSkillF, "body", "name")
 SIMPLE_ENTITY(rules, rule, L"Rules", kRuleF, "body", "name")
 SIMPLE_ENTITY(task_templates, task_template, L"Task_Templates", kTemplateF, "description", "name")
+SIMPLE_ENTITY(shortcuts, shortcut, L"Shortcuts", kShortcutF, "body", "command")
+
+std::optional<json> Store::shortcut_by_command(const std::string& command) {
+    for (auto& s : shortcuts()) if (s.value("command", "") == command) return s;
+    return std::nullopt;
+}
+json Store::save_shortcut(json s) {
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    if (!s.contains("id") || s["id"].get<std::string>().empty()) {
+        s["id"] = unique_id(root_ / L"Shortcuts", s.value("command", "shortcut"), false);
+        s["created"] = now_iso();
+    }
+    write_entity(root_ / L"Shortcuts" / P(s["id"].get<std::string>() + ".md"), s, kShortcutF, "body");
+    return s;
+}
 
 json Store::save_user(json u) {
     std::lock_guard<std::recursive_mutex> l(mu_);

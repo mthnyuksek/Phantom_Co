@@ -99,6 +99,13 @@ public:
     json save_task_template(json t);
     bool remove_task_template(const std::string& id);
 
+    // Prompt shortcuts: Shortcuts/<id>.md, "/<command> text" in a chat or in Telegram; body = the prompt text
+    std::vector<json> shortcuts();                  // by command
+    std::optional<json> shortcut(const std::string& id);
+    std::optional<json> shortcut_by_command(const std::string& command);
+    json save_shortcut(json s);
+    bool remove_shortcut(const std::string& id);
+
     // Visual scripts: Scripts/<id>.json (JSON, not Markdown: a graph), see Development/Docs/visual_scripts.md
     std::vector<json> scripts();                    // by name
     std::optional<json> script(const std::string& id);

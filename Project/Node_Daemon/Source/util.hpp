@@ -32,4 +32,12 @@ std::string truncate_utf8(const std::string& s, size_t max_bytes);
 std::string replace_all(std::string s, const std::string& from, const std::string& to);
 std::string sha256_hex_of(const std::string& data);  // lower-case hex SHA-256
 
+// Chat commands (Telegram and prompt shortcuts): "Ayşe Çalışkan" -> "ayse_caliskan" (a-z, 0-9, _; at most 32). "" when nothing is left.
+std::string command_slug(const std::string& name);
+// Commands the program itself answers in Telegram; a shortcut or ghost cannot take them.
+bool is_reserved_command(const std::string& cmd);
+// A prompt shortcut's text with what the person wrote after the command: "{args}" is replaced; without "{args}" the
+// text is added below the shortcut's text.
+std::string expand_shortcut(const std::string& text, const std::string& args);
+
 }  // namespace pc2

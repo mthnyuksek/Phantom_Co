@@ -7,9 +7,33 @@ import { $, esc, md, ago, sleep, guard } from './ui.js';
 export function conversationView(el, id, { placeholder = 'Write a message…', onData } = {}) {
   let alive = true, data = null, sig = '', sending = false;
   el.innerHTML = `<div class="conv"><div class="transcript" id="cv-msgs"><div class="empty">Loading…</div></div>
-    <div class="composer"><textarea id="cv-input" rows="2" placeholder="${esc(placeholder)}"></textarea>
+    <div class="composer"><div class="slash-pop" id="cv-slash" hidden></div><textarea id="cv-input" rows="2" placeholder="${esc(placeholder)}"></textarea>
     <button class="btn primary" id="cv-send">Send</button></div><div class="composer-note" id="cv-note"></div></div>`;
-  const msgsEl = $('#cv-msgs', el), input = $('#cv-input', el), sendBtn = $('#cv-send', el), note = $('#cv-note', el);
+  const msgsEl = $('#cv-msgs', el), input = $('#cv-input', el), sendBtn = $('#cv-send', el), note = $('#cv-note', el), slashEl = $('#cv-slash', el);
+
+  // Prompt shortcuts (Shortcuts page): "/restaurant Kadıköy" is sent as the saved prompt with {args} filled in.
+  const shortcuts = () => S.state?.shortcuts || [];
+  const expandShortcut = (text) => {
+    const m = /^\/([^\s]+)\s*([\s\S]*)$/.exec(text);
+    const sc = m && shortcuts().find((s) => s.command === m[1].toLowerCase());
+    if (!sc) return text;
+    const args = m[2].trim();
+    return sc.body.includes('{args}') ? sc.body.split('{args}').join(args) : args ? `${sc.body}\n\n${args}` : sc.body;
+  };
+  let slashList = [], slashAt = 0;
+  const slashClose = () => { slashList = []; slashEl.hidden = true; };
+  function slashUpdate() {
+    const v = input.value;
+    slashList = /^\/[^\s]*$/.test(v) && !input.disabled ? shortcuts().filter((s) => s.command.startsWith(v.slice(1).toLowerCase())) : [];
+    if (!slashList.length) return slashClose();
+    slashAt = Math.min(slashAt, slashList.length - 1);
+    slashEl.hidden = false;
+    slashEl.innerHTML = slashList.map((s, i) => `<div class="slash-item ${i === slashAt ? 'on' : ''}" data-i="${i}"><b data-no-i18n>/${esc(s.command)}</b> <span data-no-i18n>${esc(s.title || s.body)}</span></div>`).join('');
+  }
+  const slashPick = (i) => { input.value = `/${slashList[i].command} `; slashClose(); input.focus(); };
+  input.oninput = slashUpdate;
+  input.onblur = () => setTimeout(slashClose, 150);
+  slashEl.onmousedown = (e) => { const it = e.target.closest('.slash-item'); if (it) { e.preventDefault(); slashPick(+it.dataset.i); } };
 
   const renderApproval = (m) => {
     const a = agentById(m.agent), p = (data.approvals || []).find((x) => x.id === m.approval);
@@ -48,7 +72,8 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
     input.disabled = !can;
     sendBtn.disabled = !can;
     note.textContent = !d.can_write ? (me().role === 'viewer' ? 'You can read this conversation but not write in it.' : 'This conversation is read-only for you.')
-      : d.busy ? 'The agent is working… you can write again when it is done.' : 'Enter sends, Shift+Enter adds a line.';
+      : d.busy ? 'The agent is working… you can write again when it is done.'
+        : shortcuts().length ? 'Enter sends, Shift+Enter adds a line. Type / for shortcuts.' : 'Enter sends, Shift+Enter adds a line.';
   }
 
   function apply(d) {
@@ -67,10 +92,11 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
   (async () => { while (alive) { await load(); await sleep(data?.busy ? 800 : 3000); } })();
 
   const send = guard(async () => {
-    const text = input.value.trim();
+    const text = expandShortcut(input.value.trim());
     if (!text || !data?.can_write || data.busy) return;
     sending = true;
     sendBtn.disabled = true;
+    slashClose();
     try {
       const d = await api('POST', `/api/chats/${id}/send`, { text });
       input.value = '';
@@ -78,7 +104,15 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
     } finally { sending = false; }
   });
   sendBtn.onclick = send;
-  input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  input.onkeydown = (e) => {
+    if (slashList.length && !slashEl.hidden) {  // the shortcut list is open
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); slashAt = (slashAt + (e.key === 'ArrowDown' ? 1 : slashList.length - 1)) % slashList.length; slashUpdate(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); slashClose(); return; }
+      const exact = input.value.trim() === `/${slashList[slashAt].command}`;
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !exact)) { e.preventDefault(); slashPick(slashAt); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  };
   msgsEl.onclick = guard(async (e) => {
     if (e.target.closest('[data-stop]')) { await api('POST', `/api/chats/${id}/stop`, {}); load(); }
     else if (e.target.closest('[data-approve], [data-decline]')) {

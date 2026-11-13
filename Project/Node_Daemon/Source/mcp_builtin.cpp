@@ -693,8 +693,132 @@ static json reddit_check(const json& sec) {
     return {{"ok", true}, {"text", "u/" + me.value("name", "")}};
 }
 
+// ---------------------------------------------------------------- reminders
+// The user's own Cloudflare Worker (Project/Cloudflare_Worker) keeps the reminders and sends them to Telegram at the
+// time, also while this PC is off. Phantom Co. only talks to it: POST /reminders, GET /reminders?chat=, POST
+// /reminders/cancel, GET /health (Bearer worker_key). A reminder goes to the Telegram of the person the ghost works for.
+static std::string worker_base(const json& sec) {
+    std::string u = sec.value("worker_url", "");
+    while (!u.empty() && (u.back() == '/' || u.back() == ' ')) u.pop_back();
+    return u;
+}
+
+static Headers worker_headers(const json& sec) { return {{"Authorization", "Bearer " + sec.value("worker_key", "")}}; }
+
+static std::string worker_error(const std::unique_ptr<HttpResult>& r, const json& j) {
+    if (!r) return "The reminder Worker could not be reached. Check its address in Settings > MCP > Reminders.";
+    if (r->status == 401 || r->status == 403) return "The Worker refused the key. Check the key in Settings > MCP > Reminders.";
+    if (j.is_object() && j.contains("error") && j["error"].is_string()) return "Worker: " + j["error"].get<std::string>();
+    return "The Worker answered with error " + std::to_string(r->status) + ".";
+}
+
+// "2026-11-16 16:00" (this PC's local time) <-> unix seconds
+static bool parse_local(const std::string& s, long long& out) {
+    int y, mo, d, h, mi;
+    std::string t5 = s;  // "2026-11-16T16:00:00" is accepted too; seconds are ignored
+    for (auto& c : t5) if (c == 'T') c = ' ';
+    if (sscanf(t5.c_str(), "%d-%d-%d %d:%d", &y, &mo, &d, &h, &mi) != 5) return false;
+    if (y < 2000 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 23 || mi < 0 || mi > 59) return false;
+    std::tm t{};
+    t.tm_year = y - 1900; t.tm_mon = mo - 1; t.tm_mday = d; t.tm_hour = h; t.tm_min = mi; t.tm_isdst = -1;
+    std::time_t v = std::mktime(&t);
+    if (v == (std::time_t)-1 || t.tm_mday != d || t.tm_mon != mo - 1) return false;  // 31 November and the like
+    out = (long long)v;
+    return true;
+}
+
+static std::string local_text(long long unix_s) {
+    std::time_t t = (std::time_t)unix_s;
+    std::tm tmv{};
+    char buf[32] = "";
+    if (localtime_s(&tmv, &t) == 0) std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tmv);
+    return buf;
+}
+
+static json reminders_tools() {
+    // The proxy asks for the tool list at the start of every run, so the ghost always knows the date (its prompt has none).
+    std::time_t t = std::time(nullptr);
+    std::tm tmv{};
+    char now[64] = "";
+    if (localtime_s(&tmv, &t) == 0) std::strftime(now, sizeof(now), "%A %Y-%m-%d %H:%M", &tmv);
+    return json::array({
+        {{"name", "schedule_reminders"}, {"description", std::string("Schedule Telegram reminders for the person you work for. Each one is sent to their Telegram at the given time, even when Phantom Co. is closed. Needs their Telegram account to be connected. Give the whole list in one call (up to 100). Right now it is ") + now + " on this PC (the times you give are this PC's local time)."},
+         {"inputSchema", schema({{"reminders", {{"type", "array"}, {"description", "The reminders."},
+                                                {"items", {{"type", "object"}, {"properties", {{"at", {{"type", "string"}, {"description", "Local date and time as YYYY-MM-DD HH:MM (24 hours), e.g. 2026-11-16 16:00."}}},
+                                                                                              {"text", {{"type", "string"}, {"description", "The message, at most 500 characters. Say what to do and for which club or project."}}}}},
+                                                           {"required", json::array({"at", "text"})}}}}}}, {"reminders"})}},
+        {{"name", "list_reminders"}, {"description", "List the reminders of the person you work for that have not been sent yet (id, time, text)."},
+         {"inputSchema", schema(json::object(), json::array())}},
+        {{"name", "cancel_reminders"}, {"description", "Cancel reminders that have not been sent yet, by the ids list_reminders shows."},
+         {"inputSchema", schema({{"ids", {{"type", "array"}, {"items", {{"type", "integer"}}}, {"description", "Reminder ids."}}}}, {"ids"})}},
+    });
+}
+
+static json reminders_call(const std::string& tool, const json& a, const json& session) {
+    const json& sec = session["secrets"];
+    const std::string base = worker_base(sec);
+    if (base.empty() || sec.value("worker_key", "").empty()) return text_result("The reminder Worker is not set up yet: the owner adds its address and key in Settings > MCP > Reminders.", true);
+    if (base.rfind("https://", 0) != 0 && base.rfind("http://", 0) != 0) return text_result("The Worker address must start with https://.", true);
+    std::string chat;
+    if (session.contains("telegram_ids") && session["telegram_ids"].is_array() && !session["telegram_ids"].empty()) chat = session["telegram_ids"][0].get<std::string>();
+    if (chat.empty()) return text_result("The person you work for has not connected Telegram yet. They connect it in Settings > Personal > Telegram (a link code for the bot); reminders can only go to a connected account.", true);
+
+    if (tool == "schedule_reminders") {
+        if (!a.contains("reminders") || !a["reminders"].is_array() || a["reminders"].empty()) return text_result("Give a list of reminders, each with `at` and `text`.", true);
+        if (a["reminders"].size() > 100) return text_result("At most 100 reminders in one call: split the list.", true);
+        const long long now = (long long)std::time(nullptr);
+        json items = json::array();
+        std::string problems;
+        int n = 0;
+        for (auto& r : a["reminders"]) {
+            ++n;
+            const std::string at_s = r.is_object() ? sarg(r, "at") : "", text = r.is_object() ? sarg(r, "text") : "";
+            long long at = 0;
+            if (text.empty()) { problems += "#" + std::to_string(n) + ": no text. "; continue; }
+            if (!parse_local(at_s, at)) { problems += "#" + std::to_string(n) + ": time \"" + at_s + "\" is not YYYY-MM-DD HH:MM. "; continue; }
+            if (at < now - 60) { problems += "#" + std::to_string(n) + ": " + at_s + " is already past. "; continue; }
+            items.push_back({{"at", at}, {"text", truncate_utf8(text, 500)}});
+        }
+        if (!problems.empty()) return text_result("Nothing was scheduled. Fix and send the whole list again: " + problems, true);  // all or nothing, so a retry never doubles
+        auto r = request("POST", base + "/reminders", worker_headers(sec), json{{"chat_id", chat}, {"reminders", items}}.dump(), "application/json");
+        json j = parse(r);
+        if (!r || r->status != 200 || !j.is_object()) return text_result(worker_error(r, j), true);
+        return text_result("Scheduled " + std::to_string(items.size()) + " reminder(s). They will arrive in the person's Telegram at the given times.");
+    }
+    if (tool == "list_reminders") {
+        auto r = request("GET", base + "/reminders?chat=" + url_encode(chat), worker_headers(sec), "", "");
+        json j = parse(r);
+        if (!r || r->status != 200 || !j.is_object() || !j.contains("reminders")) return text_result(worker_error(r, j), true);
+        std::string out;
+        for (auto& x : j["reminders"]) out += "#" + std::to_string(x.value("id", 0LL)) + " · " + local_text(x.value("at", 0LL)) + " · " + x.value("text", "") + "\n";
+        return text_result(out.empty() ? "No reminders waiting." : out);
+    }
+    if (tool == "cancel_reminders") {
+        if (!a.contains("ids") || !a["ids"].is_array() || a["ids"].empty()) return text_result("Give the ids to cancel.", true);
+        json ids = json::array();
+        for (auto& i : a["ids"]) if (i.is_number_integer()) ids.push_back(i);
+        auto r = request("POST", base + "/reminders/cancel", worker_headers(sec), json{{"chat_id", chat}, {"ids", ids}}.dump(), "application/json");
+        json j = parse(r);
+        if (!r || r->status != 200 || !j.is_object()) return text_result(worker_error(r, j), true);
+        return text_result("Cancelled " + std::to_string(j.value("removed", 0)) + " reminder(s).");
+    }
+    return text_result("Unknown tool: " + tool, true);
+}
+
+static json reminders_check(const json& sec) {
+    const std::string base = worker_base(sec);
+    if (base.empty() || sec.value("worker_key", "").empty()) return {{"ok", false}, {"text", "No Worker address or key yet."}};
+    if (base.rfind("https://", 0) != 0 && base.rfind("http://", 0) != 0) return {{"ok", false}, {"text", "The address must start with https://"}};
+    auto r = request("GET", base + "/health", worker_headers(sec), "", "", 20000, 20000);
+    json j = parse(r);
+    if (!r || r->status != 200 || !j.is_object()) return {{"ok", false}, {"text", worker_error(r, j)}};
+    if (!j.value("telegram", true)) return {{"ok", false}, {"text", "The Worker has no BOT_TOKEN secret yet."}};
+    return {{"ok", true}, {"text", std::to_string(j.value("waiting", 0)) + " reminder(s) waiting"}};
+}
+
 // ------------------------------------------------------------------- public
 json tools(const std::string& builtin) {
+    if (builtin == "reminders") return reminders_tools();
     if (builtin == "telegram") return telegram_tools();
     if (builtin == "youtube") return youtube_tools();
     if (builtin == "reddit") return reddit_tools();
@@ -707,6 +831,7 @@ json call(const std::string& builtin, const std::string& tool, const json& args,
         if (builtin == "telegram") return telegram_call(tool, a, session);
         if (builtin == "youtube") return youtube_call(tool, a, session);
         if (builtin == "reddit") return reddit_call(tool, a, session);
+        if (builtin == "reminders") return reminders_call(tool, a, session);
     } catch (const std::exception& e) {
         return text_result(std::string("Error: ") + e.what(), true);
     }
@@ -731,6 +856,7 @@ json check(const std::string& builtin, const json& secrets, const json& options)
         return {{"ok", true}, {"text", ch["items"][0]["snippet"].value("title", "")}};
     }
     if (builtin == "reddit") return reddit_check(secrets);
+    if (builtin == "reminders") return reminders_check(secrets);
     return {{"ok", false}, {"text", "Unknown server."}};
 }
 

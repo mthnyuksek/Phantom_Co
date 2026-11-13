@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS reminders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  tries INTEGER NOT NULL DEFAULT 0,
+  created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reminders_at ON reminders (at);
+CREATE INDEX IF NOT EXISTS reminders_chat ON reminders (chat_id);

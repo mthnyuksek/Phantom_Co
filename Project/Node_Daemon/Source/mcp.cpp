@@ -67,6 +67,7 @@ static std::set<std::string> builtin_secrets(const std::string& builtin) {
     if (builtin == "telegram") return {"bot_token"};
     if (builtin == "youtube") return {"client_id", "client_secret", "refresh_token"};
     if (builtin == "reddit") return {"client_id", "client_secret", "username", "password"};
+    if (builtin == "reminders") return {"worker_url", "worker_key"};
     return {};
 }
 
@@ -92,6 +93,8 @@ json Mcp::catalog() {
          {"approve_tools", {"send_message", "send_file"}}, {"skill", "telegram"}},
         {{"name", "reddit"}, {"label", "Reddit"}, {"kind", "builtin"}, {"builtin", "reddit"}, {"approve", true},
          {"approve_tools", {"submit_post", "comment"}}, {"skill", "reddit"}},
+        {{"name", "reminders"}, {"label", "Reminders (Cloudflare)"}, {"kind", "builtin"}, {"builtin", "reminders"}, {"approve", true},
+         {"approve_tools", {"schedule_reminders"}}, {"skill", "reminders"}},
     });
 }
 
@@ -183,7 +186,7 @@ bool Mcp::save(const json& in, const std::map<std::string, std::string>& secrets
     if (out["kind"] != "command" && out["kind"] != "builtin") { error = "Unknown kind of server."; return false; }
     if (out["kind"] == "builtin") {
         out["builtin"] = s("builtin", 16, "");
-        if (out["builtin"] != "telegram" && out["builtin"] != "youtube" && out["builtin"] != "reddit") { error = "Unknown built-in server."; return false; }
+        if (out["builtin"] != "telegram" && out["builtin"] != "youtube" && out["builtin"] != "reddit" && out["builtin"] != "reminders") { error = "Unknown built-in server."; return false; }
         out.erase("command"); out.erase("args"); out.erase("folder"); out.erase("env_names");
         json opt = json::object();
         if (out["builtin"] == "telegram") {
@@ -306,7 +309,7 @@ std::optional<json> Mcp::session(const std::string& key, const std::string& name
         for (auto& i : items_) if (i["name"] == name) x = i;
     }
     if (x.is_null() || !x.value("enabled", true)) { error = "The server is missing or switched off."; return std::nullopt; }
-    json out = {{"name", name}, {"label", x.value("label", name)}, {"kind", x["kind"]}, {"workdir", run.workdir},
+    json out = {{"name", name}, {"label", x.value("label", name)}, {"kind", x["kind"]}, {"workdir", run.workdir}, {"user_id", run.user_id},
                 {"approve", x.value("approve", true)}, {"approve_tools", x.value("approve_tools", json::array())}};
     if (x["kind"] == "builtin") {
         out["builtin"] = x["builtin"];

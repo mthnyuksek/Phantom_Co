@@ -17,13 +17,14 @@ const NAV = [
   { id: 'search', label: 'Search', icon: '🔎' },
   { id: 'overview', label: 'Overview', icon: '📊', editor: true },
   { id: 'skills', label: 'Skills', icon: '🧰' },
+  { id: 'shortcuts', label: 'Shortcuts', icon: '⚡', editor: true },
   { id: 'rules', label: 'Rules', icon: '📜' },
   { id: 'runs', label: 'Runs', icon: '⏱️' },
   { id: 'files', label: 'Files', icon: '🗂️' },
   { id: 'team', label: 'Team', icon: '👥' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },
 ];
-const PAGES = ['haunt', 'chats', 'projects', 'tasks', 'scripts', 'search', 'overview', 'skills', 'rules', 'runs', 'files', 'team', 'settings'];
+const PAGES = ['haunt', 'chats', 'projects', 'tasks', 'scripts', 'search', 'overview', 'skills', 'shortcuts', 'rules', 'runs', 'files', 'team', 'settings'];
 
 let token = 0, current = null, currentCtx = null, timer = null, running = false;
 
@@ -167,8 +168,6 @@ function paintShell() {
   const s = S.state;
   $('#brand-name').textContent = s.company.name;
   $('#brand-ghost').innerHTML = ghostSVG({ form: 'classic', color: brandColor(), size: 34 });
-  $('#provider-chips').innerHTML = s.providers.filter((p) => p.id !== 'demo' && ((p.id !== 'gemini' && p.id !== 'opencode') || p.available))  // Gemini / OpenCode only when installed: most people do not have them
-    .map((p) => `<span class="chip ${p.available ? 'ok' : ''}" title="${p.available ? 'Found on this PC' : 'Not found on this PC'}">${esc(p.label)}</span>`).join('');
   $('#home-btn').hidden = !(bridge && isRemote);
   const m = s.me;
   $('#me-chip').innerHTML = `<span class="mini">${userGhost(m, 30)}</span><span class="me-text"><b>${esc(m.name)}</b><small>${esc(ROLE_TEXT[m.role] || m.role)}</small></span>`;

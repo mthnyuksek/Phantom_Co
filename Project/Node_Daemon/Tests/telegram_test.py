@@ -143,7 +143,7 @@ def main():
         n = len(sent); say("hello?")
         check("plain text without a ghost asks who", reply_after(n, lambda t: "Who should get this" in t) is not None)
         n = len(sent); say("/nobody hi")
-        check("unknown ghost", reply_after(n, lambda t: "no ghost called /nobody" in t) is not None)
+        check("unknown ghost", reply_after(n, lambda t: "no ghost or shortcut called /nobody" in t) is not None)
         n = len(sent); say("/casper_kaya hello there")
         ans = reply_after(n, lambda t: t.startswith("👻 Çasper Kaya:"), 40)
         check("the ghost's answer comes back", ans and ans.startswith("👻 Çasper Kaya:"), ans)
@@ -152,6 +152,30 @@ def main():
         check("a normal chat holds it", tchat is not None, [c.get("title") for c in chats])
         n = len(sent); say("and again")
         check("plain text goes to the current ghost", (reply_after(n, lambda t: t.startswith("👻"), 40) or "").startswith("👻 Çasper Kaya:"))
+        # prompt shortcuts: /<command> text becomes the saved prompt for the current (or the shortcut's own) ghost
+        st, sc = o.call("POST", "/api/shortcuts", {"command": "Restoran!", "title": "Find restaurants", "body": "Find restaurants near {args}."})
+        check("shortcut made", st == 201 and sc["command"] == "restoran", sc)
+        st, sc2 = o.call("POST", "/api/shortcuts", {"command": "ozet", "body": "Summarise this:"})
+        def tchat_texts():
+            c = next((c for c in o.call("GET", "/api/chats")[1]["chats"] if c.get("title") == "Telegram · Çasper Kaya"), None)
+            return [m.get("text", "") for m in o.call("GET", "/api/chats/" + c["id"])[1]["messages"]] if c else []
+        n = len(sent); say("/agents")
+        lst = reply_after(n, lambda t: "Ghosts" in t) or ""
+        check("/agents lists the shortcuts", "/restoran — Find restaurants" in lst and "/ozet" in lst, lst)
+        n = len(sent); say("/restoran Kadıköy, balık")
+        ans = reply_after(n, lambda t: t.startswith("👻 Çasper Kaya:"), 40)
+        check("a shortcut reaches the current ghost", ans is not None and ans.startswith("👻"), ans)
+        check("{args} is filled in", "Find restaurants near Kadıköy, balık." in tchat_texts(), tchat_texts()[-3:])
+        n = len(sent); say("/ozet the long text")
+        reply_after(n, lambda t: t.startswith("👻 Çasper Kaya:"), 40)
+        check("a text without {args} gets the words below it", "Summarise this:\n\nthe long text" in tchat_texts(), tchat_texts()[-3:])
+        n = len(sent); say("/RESTORAN")
+        reply_after(n, lambda t: t.startswith("👻 Çasper Kaya:"), 40)
+        check("the command is not case sensitive; no words leave {args} empty", "Find restaurants near ." in tchat_texts(), tchat_texts()[-3:])
+        o.call("DELETE", "/api/shortcuts/" + sc2["id"])
+        n = len(sent); say("/ozet again")
+        check("a deleted shortcut is unknown", reply_after(n, lambda t: "no ghost or shortcut called /ozet" in t) is not None)
+
         n = len(sent); say("/new")
         check("/new makes it forget", reply_after(n, lambda t: "forgot the chat" in t) is not None)
         v = o.call("GET", "/api/chats/" + tchat["id"])[1] if tchat else {"messages": []}

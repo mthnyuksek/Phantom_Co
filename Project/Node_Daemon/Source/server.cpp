@@ -466,7 +466,8 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         json jobs = json::array();
         for (auto& j : runner.active_jobs()) if (conv_visible(j.value("conversation_id", ""), c)) jobs.push_back(j);
         json st = {{"company", store.company()}, {"me", public_user(c.profile)}, {"users", users}, {"providers", providers},
-                   {"agents", agents}, {"skills", skills}, {"rules", store.rules()}, {"projects", store.projects()}, {"jobs", jobs},
+                   {"agents", agents}, {"skills", skills}, {"rules", store.rules()}, {"shortcuts", editor ? json(store.shortcuts()) : json::array()},
+                   {"projects", store.projects()}, {"jobs", jobs},
                    {"forms", kForms}, {"tools", kTools}};
         if (runner.mcp()) {  // MCP servers (names for the skill editor) and the tool calls waiting for this person's approval
             json names = json::array();
@@ -854,7 +855,7 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         if (!s) return fail(res, 404, "Server not found.");
         if ((*s)["kind"] != "builtin") return send(res, {{"ok", true}, {"text", ""}});
         json sec = json::object();
-        for (const char* k : {"bot_token", "client_id", "client_secret", "refresh_token"}) sec[k] = m->secret(req.matches[1], k);
+        for (const char* k : {"bot_token", "client_id", "client_secret", "refresh_token", "username", "password", "worker_url", "worker_key"}) sec[k] = m->secret(req.matches[1], k);
         send(res, builtin::check((*s)["builtin"], sec, s->value("options", json::object())));
     });
     // YouTube: "Sign in with Google" opens Google's page in the browser; Google sends the browser back to /api/mcp/oauth.
@@ -908,6 +909,11 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         std::string err;
         auto s = runner.mcp()->session(str(b, "key", 64), str(b, "server", 24), err);
         if (!s) return fail(res, 403, err);
+        if (s->value("builtin", "") == "reminders") {  // reminders go to the Telegram of the person the ghost works for
+            json ids = json::array();
+            if (opt.telegram) for (auto& id : opt.telegram->chat_ids(s->value("user_id", ""))) ids.push_back(id);
+            (*s)["telegram_ids"] = ids;
+        }
         send(res, *s);
     });
     add("POST", "/api/mcp/ask", kPublic, [&](auto& req, auto& res, Ctx&) {
@@ -1512,6 +1518,58 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         if (!cur) return fail(res, 404, "Template not found");
         if (cur->value("created_by", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who made this template can delete it.");
         store.remove_task_template(req.matches[1]);
+        send(res, {{"ok", true}});
+    });
+
+    // ========================================================= prompt shortcuts
+    // "/restaurant Kadıköy" in a chat or in Telegram becomes the saved prompt text with "{args}" filled in. One team-wide list;
+    // editors make shortcuts, only the maker or the owner changes one (like templates). The chat page expands it in the browser,
+    // the Telegram bridge on the server (Store::shortcut_by_command + expand_shortcut).
+    auto clean_shortcut = [&](const json& in, json base, std::string& err) -> std::optional<json> {
+        std::string raw = str(in, "command", 64, base.value("command", ""));
+        while (!raw.empty() && raw[0] == '/') raw.erase(0, 1);
+        std::string cmd = command_slug(raw);
+        base["command"] = cmd;
+        base["title"] = str(in, "title", 120, base.value("title", ""));
+        std::string text = str(in, "body", 8000, base.value("body", ""));
+        size_t from = text.find_first_not_of(" \t\r\n"), to = text.find_last_not_of(" \t\r\n");
+        base["body"] = from == std::string::npos ? std::string() : text.substr(from, to - from + 1);  // a text of spaces is no text
+        base["agent_id"] = str(in, "agent_id", 64, base.value("agent_id", ""));
+        if (cmd.empty()) { err = "The shortcut needs a command: letters and numbers, like restaurant."; return std::nullopt; }
+        if (base["body"].get<std::string>().empty()) { err = "The shortcut needs a prompt text."; return std::nullopt; }
+        if (is_reserved_command(cmd)) { err = "/" + cmd + " is a command of the program. Pick another word."; return std::nullopt; }
+        for (auto& a : store.agents())
+            if (command_slug(a.value("name", "")) == cmd || a.value("id", "") == cmd) { err = "/" + cmd + " is already the command of the ghost " + a.value("name", "") + "."; return std::nullopt; }
+        for (auto& o : store.shortcuts())
+            if (o.value("command", "") == cmd && o.value("id", "") != base.value("id", "")) { err = "/" + cmd + " is already a shortcut."; return std::nullopt; }
+        if (!base["agent_id"].get<std::string>().empty() && !store.agent(base["agent_id"])) { err = "Unknown ghost."; return std::nullopt; }
+        return base;
+    };
+    add("GET", "/api/shortcuts", kEditor, [&](auto&, auto& res, Ctx&) { send(res, {{"shortcuts", store.shortcuts()}}); });
+    add("POST", "/api/shortcuts", kEditor, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        std::string err;
+        auto s = clean_shortcut(b, {{"created_by", c.id}}, err);
+        if (!s) return fail(res, 400, err);
+        send(res, store.save_shortcut(*s), 201);
+    });
+    add("PUT", "/api/shortcuts/" + ID, kEditor, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        auto cur = store.shortcut(req.matches[1]);
+        if (!cur) return fail(res, 404, "Shortcut not found");
+        if (cur->value("created_by", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who made this shortcut can change it.");
+        std::string err;
+        auto s = clean_shortcut(b, *cur, err);
+        if (!s) return fail(res, 400, err);
+        send(res, store.save_shortcut(*s));
+    });
+    add("DELETE", "/api/shortcuts/" + ID, kEditor, [&](auto& req, auto& res, Ctx& c) {
+        auto cur = store.shortcut(req.matches[1]);
+        if (!cur) return fail(res, 404, "Shortcut not found");
+        if (cur->value("created_by", "") != c.id && c.role != "owner") return fail(res, 403, "Only the person who made this shortcut can delete it.");
+        store.remove_shortcut(req.matches[1]);
         send(res, {{"ok", true}});
     });
 

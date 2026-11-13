@@ -1,0 +1,13 @@
+name = "phantom-reminders"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# Every minute: send the reminders that are due.
+[triggers]
+crons = ["* * * * *"]
+
+# `wrangler d1 create phantom_reminders` prints the id: paste it here.
+[[d1_databases]]
+binding = "DB"
+database_name = "phantom_reminders"
+database_id = "PASTE_THE_ID_HERE"

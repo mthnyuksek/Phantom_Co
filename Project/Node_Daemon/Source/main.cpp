@@ -75,7 +75,7 @@ void fatal(const std::wstring& msg, bool window_mode) {
     else std::wcerr << msg << L"\n";
 }
 
-// --builtin-call (Tests/reddit_test.py): one request on stdin {builtin, tool, args, secrets}, the result on stdout.
+// --builtin-call (Tests/reddit_test.py, reminders_test.py): one request on stdin {builtin, tool, args, secrets, options, telegram_ids}, the result on stdout.
 // An empty tool = the check of Settings > MCP. Only does what the built-in server does for a ghost, with what it is given.
 int builtin_call_main() {
     HANDLE in = GetStdHandle(STD_INPUT_HANDLE), out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -88,7 +88,7 @@ int builtin_call_main() {
     if (!r.is_object()) return 2;
     const json secrets = r.value("secrets", json::object()), options = r.value("options", json::object());
     const std::string builtin_name = r.value("builtin", ""), tool = r.value("tool", "");
-    const json session = {{"secrets", secrets}, {"options", options}, {"workdir", ""}};
+    const json session = {{"secrets", secrets}, {"options", options}, {"workdir", ""}, {"telegram_ids", r.value("telegram_ids", json::array())}};
     const std::string a = (tool.empty() ? builtin::check(builtin_name, secrets, options) : builtin::call(builtin_name, tool, r.value("args", json::object()), session)).dump() + "\n";
     DWORD n = 0;
     WriteFile(out, a.data(), (DWORD)a.size(), &n, nullptr);

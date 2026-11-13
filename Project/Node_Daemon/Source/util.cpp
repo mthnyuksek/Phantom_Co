@@ -9,6 +9,9 @@
 #include <fstream>
 #include <mutex>
 #include <random>
+#include <set>
+#include <utility>
+#include <vector>
 
 namespace pc2 {
 
@@ -108,6 +111,27 @@ std::string slugify(const std::string& s, size_t max_len) {
     }
     while (!out.empty() && out.back() == '_') out.pop_back();
     return out.empty() ? "ghost" : out;
+}
+
+std::string command_slug(const std::string& name) {
+    static const std::vector<std::pair<std::string, std::string>> tr = {
+        {"ç", "c"}, {"Ç", "c"}, {"ğ", "g"}, {"Ğ", "g"}, {"ı", "i"}, {"İ", "i"}, {"ö", "o"}, {"Ö", "o"}, {"ş", "s"}, {"Ş", "s"}, {"ü", "u"}, {"Ü", "u"}};
+    std::string s = name;
+    for (auto& [a, b] : tr) s = replace_all(s, a, b);
+    bool any = false;
+    for (unsigned char c : s) if (c < 128 && std::isalnum(c)) any = true;
+    return any ? slugify(s, 32) : "";
+}
+
+bool is_reserved_command(const std::string& cmd) {
+    static const std::set<std::string> reserved = {"start", "help", "yardim", "agents", "phantoms", "ghosts", "hayaletler", "new", "yeni",
+                                                   "yes", "no", "evet", "hayir", "link", "unlink", "answer", "cevap"};
+    return reserved.count(cmd) > 0;
+}
+
+std::string expand_shortcut(const std::string& text, const std::string& args) {
+    if (text.find("{args}") != std::string::npos) return replace_all(text, "{args}", args);
+    return args.empty() ? text : text + "\n\n" + args;
 }
 
 bool valid_id(const std::string& s) {
