@@ -4,6 +4,7 @@ import { $, esc, guard, modal, closeModal, twoStep, toast, ago } from '../ui.js'
 import { openNewChatModal } from './chats.js';
 import { openTaskModal } from './tasks.js';
 
+const bridge = window.chrome?.webview;  // present when this page runs inside the Phantom Co. program window (folder picker)
 let view, selected = '';
 
 function listHTML() {
@@ -28,7 +29,29 @@ function detail(p) {
       ${p.notes.map((n) => `<div class="note ${n.enabled ? '' : 'off'}"><div class="note-top"><b>${esc(n.name)}</b>
         ${ro ? '' : `<label class="check"><input type="checkbox" data-act="note-toggle" data-id="${esc(n.id)}" ${n.enabled ? 'checked' : ''}> on</label>
         <button class="btn small" data-act="note-edit" data-id="${esc(n.id)}">Edit</button>`}</div><div class="note-body">${esc(n.body)}</div></div>`).join('') || '<div class="empty small">No notes yet.</div>'}</div>
-    ${rolesCard(p, ro)}</div>`;
+    ${foldersCard(p)}${rolesCard(p, ro)}</div>`;
+}
+
+// Folders of this PC outside the Vault that the project's ghosts may read or change. Everybody who works with ghosts sees the list,
+// only the owner changes it (the server refuses anybody else).
+const modeOptions = (mode) => `<option value="read" ${mode === 'read' ? 'selected' : ''}>Read only</option><option value="write" ${mode === 'write' ? 'selected' : ''}>Can edit</option>`;
+function foldersCard(p) {
+  if (!canEdit()) return '';
+  const own = isOwner(), list = p.folders || [];
+  return `<div class="card wide"><div class="card-head"><h3>Folders on this PC</h3></div>
+    <p class="hint">Ghosts working in this project can use these folders too, besides the project's own folder. Read only: they can open and read the files. Can edit: they can also create, change and delete files. This needs a ghost with a file skill. Only the owner changes this list.</p>
+    <p class="hint">Read only is enforced for Claude and Codex ghosts (Claude: not when the ghost also has a shell skill). Other ghosts, and ghosts with a shell skill, are asked not to change those folders but are not stopped.</p>
+    ${list.map((f, i) => `<div class="note"><div class="note-top"><code class="folder-path">${esc(f.path)}</code>
+      ${own ? `<select data-act="folder-mode" data-i="${i}">${modeOptions(f.mode)}</select><button class="btn small" data-act="folder-del" data-i="${i}">Remove</button>`
+            : `<span class="hint-inline">${f.mode === 'write' ? 'Can edit' : 'Read only'}</span>`}</div></div>`).join('') || '<div class="empty small">No extra folders.</div>'}
+    ${own ? `<div class="folder-add"><input type="text" id="fo-path" placeholder="C:\\Documents\\Reports" spellcheck="false">
+      ${bridge ? '<button class="btn" data-act="folder-browse" type="button">Browse…</button>' : ''}
+      <select id="fo-mode">${modeOptions('read')}</select><button class="btn primary" data-act="folder-add">Add</button></div>` : ''}</div>`;
+}
+
+async function saveFolders(p, folders) {
+  await api('PUT', '/api/projects/' + p.id, { folders });
+  window.dispatchEvent(new Event('pc2:changed'));
 }
 
 // What each ghost does in this project: added to that ghost's prompt only while it works here.
@@ -128,8 +151,27 @@ export async function render(v, arg) {
     else if (act === 'note-edit') noteModal(p, p.notes.find((n) => n.id === el.dataset.id));
     else if (act === 'role-new') roleModal(p, '');
     else if (act === 'role-edit') roleModal(p, el.dataset.id);
+    else if (act === 'folder-add') {
+      const path = $('#fo-path', view).value.trim();
+      if (!path) return toast('Type or pick a folder first.', true);
+      await saveFolders(p, [...(p.folders || []), { path, mode: $('#fo-mode', view).value }]);
+    }
+    else if (act === 'folder-del') await saveFolders(p, (p.folders || []).filter((_, i) => i !== +el.dataset.i));
+    else if (act === 'folder-browse') {
+      const onPick = (m) => {
+        if (m.data?.type !== 'folder_picked') return;
+        bridge.removeEventListener('message', onPick);
+        if (m.data.path && $('#fo-path', view)) $('#fo-path', view).value = m.data.path;
+      };
+      bridge.addEventListener('message', onPick);
+      bridge.postMessage({ cmd: 'pick_folder' });
+    }
   });
   view.onchange = guard(async (e) => {
+    if (e.target.dataset.act === 'folder-mode') {
+      const p = projectById(selected);
+      await saveFolders(p, (p.folders || []).map((f, i) => (i === +e.target.dataset.i ? { ...f, mode: e.target.value } : f)));
+    }
     if (e.target.dataset.act === 'note-toggle') {
       await api('PUT', `/api/projects/${selected}/notes/${e.target.dataset.id}`, { enabled: e.target.checked });
       window.dispatchEvent(new Event('pc2:changed'));

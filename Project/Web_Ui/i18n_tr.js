@@ -541,6 +541,16 @@ export const EXACT = {
   'Only in these projects': 'Yalnızca bu projelerde',
   'none ticked = everywhere; otherwise the ghost gets this skill only while it works in a ticked project':
     'hiçbiri işaretli değilse her yerde; aksi halde hayalet bu yeteneği yalnızca işaretli bir projede çalışırken kullanır',
+  // ---- folders of a project
+  'Folders on this PC': 'Bu bilgisayardaki klasörler', 'Read only': 'Salt okunur', 'Can edit': 'Düzenlenebilir', 'No extra folders.': 'Ek klasör yok.',
+  'Type or pick a folder first.': 'Önce bir klasör yazın ya da seçin.',
+  "Ghosts working in this project can use these folders too, besides the project's own folder. Read only: they can open and read the files. Can edit: they can also create, change and delete files. This needs a ghost with a file skill. Only the owner changes this list.":
+    "Bu projede çalışan hayaletler, projenin kendi klasörüne ek olarak bu klasörleri de kullanabilir. Salt okunur: dosyaları açıp okuyabilirler. Düzenlenebilir: dosya oluşturabilir, değiştirebilir ve silebilirler. Bunun için dosya yeteneği olan bir hayalet gerekir. Listeyi yalnızca sahibi değiştirir.",
+  'Read only is enforced for Claude and Codex ghosts (Claude: not when the ghost also has a shell skill). Other ghosts, and ghosts with a shell skill, are asked not to change those folders but are not stopped.':
+    'Salt okunur kuralı Claude ve Codex hayaletlerinde uygulanır (Claude: hayaletin kabuk yeteneği de varsa uygulanmaz). Diğer hayaletlerden ve kabuk yeteneği olanlardan bu klasörleri değiştirmemeleri istenir, ama engellenmezler.',
+  'Only the owner can give a project folders.': 'Bir projeye klasör yalnızca sahibi verebilir.',
+  'Folders must be a list.': 'Klasörler bir liste olmalı.', 'At most 12 folders per project.': 'Bir projede en çok 12 klasör olabilir.',
+  'A folder is either read or write.': 'Bir klasör ya salt okunur ya da düzenlenebilir olur.',
   // ---- ghost jobs in a project
   'Ghost jobs in this project': 'Bu projedeki hayalet görevleri', '+ Set a job': '+ Görev tanımla', 'Ghost': 'Hayalet',
   'A ghost keeps its persona everywhere. The job written here is added to its instructions only while it works in this project, and its colleagues see the first line.':
@@ -733,6 +743,13 @@ export const EXACT = {
 };
 
 export const PATTERNS = [
+  ['Use a full path such as C:\\Documents\\Reports: "{}".', 'C:\\Belgeler\\Raporlar gibi tam bir yol yazın: "{0}".'],
+  ['That folder does not exist: {}', 'Bu klasör yok: {0}'],
+  ["This folder holds Phantom Co.'s sign-in data (or lies around it) and cannot be shared with ghosts: {}", 'Bu klasör Phantom Co.’nun oturum verilerini içeriyor (ya da onu kapsıyor), hayaletlerle paylaşılamaz: {0}'],
+  ['This folder contains the whole Vault: {}', 'Bu klasör tüm Kasa’yı içeriyor: {0}'],
+  ['Folders inside the Vault are managed by Phantom Co.; only Projects and Shared_Files can be added: {}', 'Kasa içindeki klasörleri Phantom Co. yönetir; yalnızca Projects ve Shared_Files eklenebilir: {0}'],
+  ["A project's .Phantom folder (notes and jobs) cannot be added: {}", 'Bir projenin .Phantom klasörü (notlar ve görevler) eklenemez: {0}'],
+  ['This folder is listed twice: {}', 'Bu klasör iki kez yazılmış: {0}'],
   ["⚠ {} could not finish: Budget reached: the company's daily limit ({}). The owner can change it in Overview.", "⚠ {0} işi bitiremedi: Bütçe doldu: şirketin günlük limiti ({1}). Sahibi bunu Genel Bakış’ta değiştirebilir."],
   ["⚠ {} could not finish: Budget reached: the company's monthly limit ({}). The owner can change it in Overview.", "⚠ {0} işi bitiremedi: Bütçe doldu: şirketin aylık limiti ({1}). Sahibi bunu Genel Bakış’ta değiştirebilir."],
   ["⚠ {} could not finish: Budget reached: {}'s daily limit ({}). The owner can change it in Overview.", "⚠ {0} işi bitiremedi: Bütçe doldu: {1} için günlük limit ({2}). Sahibi bunu Genel Bakış’ta değiştirebilir."],

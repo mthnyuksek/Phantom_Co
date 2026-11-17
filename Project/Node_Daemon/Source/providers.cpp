@@ -181,6 +181,14 @@ static std::string toml_str(const std::string& s) {
     return "\"" + replace_all(replace_all(s, "\\", "\\\\"), "\"", "\\\"") + "\"";
 }
 
+// Claude Code's permission rule for everything under a folder: "C:\My Files\x" -> "//c/My Files/x/**" (checked with Claude Code 2.1.326).
+static std::string claude_path_rule(const std::string& dir) {
+    std::string d = replace_all(dir, "\\", "/");
+    while (d.size() > 1 && d.back() == '/') d.pop_back();
+    if (d.size() >= 2 && d[1] == ':') d = "/" + std::string(1, (char)tolower((unsigned char)d[0])) + d.substr(2);
+    return "/" + d + "/**";
+}
+
 bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
     out = {};
     out.cwd = rs.workdir;
@@ -214,6 +222,13 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
         if (!rs.model.empty()) { out.args.push_back("--model"); out.args.push_back(rs.model); }
         if (!rs.session_id.empty()) { out.args.push_back("--resume"); out.args.push_back(rs.session_id); }
         for (auto& d : rs.add_dirs) { out.args.push_back("--add-dir"); out.args.push_back(d); }
+        for (auto& d : rs.write_dirs) { out.args.push_back("--add-dir"); out.args.push_back(d); }
+        for (auto& d : rs.read_dirs) { out.args.push_back("--add-dir"); out.args.push_back(d); }
+        // Read-only folders: deny every edit tool (Write, Edit, NotebookEdit) there. "//c/dir/**" = absolute path on drive C.
+        if (!rs.read_dirs.empty()) {
+            out.args.push_back("--disallowedTools");
+            for (auto& d : rs.read_dirs) out.args.push_back("Edit(" + claude_path_rule(d) + ")");
+        }
         return true;
     }
     if (rs.provider == "codex") {
@@ -232,9 +247,17 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
         if (rs.session_id.empty()) {
             out.args = {"exec", "--json", "--skip-git-repo-check", "-s", sandbox, "-C", rs.workdir};
             for (auto& d : rs.add_dirs) { out.args.push_back("--add-dir"); out.args.push_back(d); }
+            for (auto& d : rs.write_dirs) { out.args.push_back("--add-dir"); out.args.push_back(d); }
         } else {
             out.args = {"exec", "resume", rs.session_id, "--json", "--skip-git-repo-check", "-c", "sandbox_mode=\"" + sandbox + "\""};
+            // `resume` has no --add-dir: the writable folders go in through the config
+            std::string roots;
+            for (auto* list : {&rs.add_dirs, &rs.write_dirs})
+                for (auto& d : *list) roots += (roots.empty() ? "" : ",") + toml_str(d);
+            if (!roots.empty()) { out.args.push_back("-c"); out.args.push_back("sandbox_workspace_write.writable_roots=[" + roots + "]"); }
         }
+        // Read-only folders need nothing: Codex's sandbox lets a run read the whole disk and write only in its working folder
+        // and the folders above.
         if (!rs.model.empty()) { out.args.push_back("-m"); out.args.push_back(rs.model); }
         // Only our MCP servers: this replaces the mcp_servers of the user's own config.toml (empty = none at all).
         std::string table;
@@ -277,7 +300,9 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
         }
         if (!rs.model.empty()) { out.args.push_back("-m"); out.args.push_back(rs.model); }
         if (!rs.session_id.empty()) { out.args.push_back("--resume"); out.args.push_back(rs.session_id); }
-        for (auto& d : rs.add_dirs) { out.args.push_back("--include-directories"); out.args.push_back(d); }
+        // Gemini has no per-folder rule: a read-only folder is only named in the system prompt (a writing ghost could still change it).
+        for (auto* list : {&rs.add_dirs, &rs.write_dirs, &rs.read_dirs})
+            for (auto& d : *list) { out.args.push_back("--include-directories"); out.args.push_back(d); }
         if (!rs.system_file.empty()) out.env.push_back({"GEMINI_SYSTEM_MD", rs.system_file});
         return true;
     }
@@ -301,15 +326,30 @@ bool build_command(const RunSpec& rs, ProcessSpec& out, std::string& error) {
             else if (t == "WebFetch") perm["webfetch"] = "allow";
             else if (t == "WebSearch") perm["websearch"] = "allow";
         }
-        if (!rs.add_dirs.empty()) {  // folders outside the work folder (the "*" rule above denies them)
+        auto backslashed = [](const std::string& d) {
+            std::string dir = replace_all(d, "/", "\\");
+            while (!dir.empty() && dir.back() == '\\') dir.pop_back();
+            return dir;
+        };
+        if (!rs.add_dirs.empty() || !rs.read_dirs.empty() || !rs.write_dirs.empty()) {  // folders outside the work folder (the "*" rule above denies them)
             json ext = {{"*", "deny"}};
-            for (auto& d : rs.add_dirs) {
-                std::string dir = replace_all(d, "/", "\\");
-                while (!dir.empty() && dir.back() == '\\') dir.pop_back();
-                ext[dir] = "allow";
-                ext[dir + "\\*"] = "allow";
-            }
+            for (auto* list : {&rs.add_dirs, &rs.write_dirs, &rs.read_dirs})
+                for (auto& d : *list) {
+                    const std::string dir = backslashed(d);
+                    ext[dir] = "allow";
+                    ext[dir + "\\*"] = "allow";
+                }
             perm["external_directory"] = ext;
+        }
+        // Read-only folders: editing there is denied (the last matching rule wins, so the denials come after the general allow).
+        if (!rs.read_dirs.empty() && perm.contains("edit")) {
+            json edit = {{"*", "allow"}};
+            for (auto& d : rs.read_dirs) {
+                const std::string dir = backslashed(d);
+                edit[dir + "\\*"] = "deny";
+                edit[replace_all(dir, "\\", "/") + "/*"] = "deny";
+            }
+            perm["edit"] = edit;
         }
         // A local model server: OpenCode knows the model only when the config lists it (no key is needed).
         json provider = json::object();

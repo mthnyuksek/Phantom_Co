@@ -101,7 +101,9 @@ static const std::vector<Field> kSkillF = {
     {"default", "default", 'B', "false"}, {"projects", "projects", 'C', ""},  // projects: empty = every project
     {"mcp", "mcp", 'C', ""}};  // MCP servers (Settings > MCP) this skill opens
 static const std::vector<Field> kRuleF = {{"name", "name", 'S', ""}, {"enabled", "enabled", 'B', "true"}};
-static const std::vector<Field> kProjectF = {{"name", "name", 'S', ""}, {"created", "created", 'S', ""}};
+static const std::vector<Field> kProjectF = {{"name", "name", 'S', ""}, {"created", "created", 'S', ""},
+                                             // folders outside the Vault the project's ghosts may use (absolute paths; the API shows both lists as `folders`)
+                                             {"folder_read", "folders_read", 'L', ""}, {"folder_write", "folders_write", 'L', ""}};
 static const std::vector<Field> kTaskF = {
     {"name", "title", 'S', ""}, {"agent", "agent_id", 'S', ""}, {"project", "project_id", 'S', ""},
     {"created_by", "created_by", 'S', ""}, {"created", "created", 'S', ""}, {"updated", "updated", 'S', ""},
@@ -535,6 +537,13 @@ std::optional<json> Store::project(const std::string& id) {
     auto p = read_entity(meta / L"project.md", kProjectF, "summary");
     if (!p) return std::nullopt;
     (*p)["id"] = id;  // the folder name, not the stem of project.md
+    json folders = json::array();  // [{path, mode: read|write}]
+    for (const char* mode : {"read", "write"}) {
+        const std::string key = std::string("folders_") + mode;
+        for (auto& f : (*p)[key]) if (f.is_string()) folders.push_back({{"path", f}, {"mode", mode}});
+        p->erase(key);
+    }
+    (*p)["folders"] = folders;
     json notes = json::array();
     std::error_code ec;
     for (auto& n : read_dir(meta / L"Notes", kRuleF, "body")) notes.push_back(std::move(n));
@@ -554,7 +563,13 @@ json Store::save_project(json p) {
     fs::path dir = root_ / L"Projects" / P(p["id"].get<std::string>());
     fs::create_directories(dir / L".Phantom" / L"Notes", ec);
     hide(dir / L".Phantom");
-    write_file_atomic(dir / L".Phantom" / L"project.md", md_serialize(json_to_md(p, kProjectF, "summary")));
+    json out = p;  // `folders` (what the API shows) -> the two lists of the file
+    out["folders_read"] = json::array();
+    out["folders_write"] = json::array();
+    if (p.contains("folders") && p["folders"].is_array())
+        for (auto& f : p["folders"])
+            if (f.is_object() && f.value("path", "") != "") out[f.value("mode", "read") == "write" ? "folders_write" : "folders_read"].push_back(f["path"]);
+    write_file_atomic(dir / L".Phantom" / L"project.md", md_serialize(json_to_md(out, kProjectF, "summary")));
     return p;
 }
 bool Store::remove_project(const std::string& id) {

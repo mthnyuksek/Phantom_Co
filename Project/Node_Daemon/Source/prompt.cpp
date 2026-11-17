@@ -42,6 +42,21 @@ AgentContext resolve_agent(Store& store, const json& agent, const std::string& u
     return c;
 }
 
+void apply_project_folders(AgentContext& ctx, const json& project) {
+    if (!project.is_object() || !project.contains("folders") || !project["folders"].is_array()) return;
+    bool files = false;
+    for (const char* t : {"Read", "Glob", "Grep", "Write", "Edit", "Bash", "PowerShell"}) files = files || ctx.has_tool(t);
+    if (!files) return;
+    const bool writes = ctx.can_write();
+    std::error_code ec;
+    for (auto& f : project["folders"]) {
+        if (!f.is_object()) continue;
+        const std::string path = f.value("path", "");
+        if (path.empty() || !fs::is_directory(P(path), ec)) continue;
+        (writes && f.value("mode", "read") == "write" ? ctx.write_dirs : ctx.read_dirs).push_back(path);
+    }
+}
+
 static std::string trim(const std::string& s) {
     size_t a = 0, b = s.size();
     while (a < b && isspace((unsigned char)s[a])) ++a;
@@ -64,6 +79,18 @@ std::string build_system_prompt(Store& store, const PromptInput& in) {
     if (!in.ctx->add_dirs.empty()) {
         p += " The vault folder is " + U8(store.root()) + "; your skills may edit these parts of it:";
         for (auto& d : in.ctx->add_dirs) p += " " + d + ";";
+    }
+    if (!in.ctx->read_dirs.empty() || !in.ctx->write_dirs.empty()) {
+        p += "\nThis project also gives you folders outside its own:";
+        if (!in.ctx->write_dirs.empty()) {
+            p += " you may read and change files in";
+            for (auto& d : in.ctx->write_dirs) p += " " + d + ";";
+        }
+        if (!in.ctx->read_dirs.empty()) {
+            p += " you may only READ (never create, change, move or delete anything in them, even if a tool would let you):";
+            for (auto& d : in.ctx->read_dirs) p += " " + d + ";";
+        }
+        p += " Use the full path for them; your own files still go in the working folder.";
     }
     p += "\n";
 

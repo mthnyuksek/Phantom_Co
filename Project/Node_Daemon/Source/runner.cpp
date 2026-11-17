@@ -433,6 +433,7 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     fs::create_directories(workdir, ec);
 
     AgentContext ctx = resolve_agent(store_, *agent, job.user_role, project.is_object() ? job.project_id : "");
+    if (!remote) apply_project_folders(ctx, project);  // the owner's folders are on this PC: never for a friend's
     for (auto& sk : ctx.skills) if (sk.value("id", "") == "visual_scripts") js->can_script = true;
     // MCP servers run only on this PC: never on a friend's, and only the ones that exist and are switched on.
     {
@@ -465,6 +466,8 @@ void Runner::execute(const std::shared_ptr<JobState>& js) {
     if (job.name_chat) spec.prompt += "\n\n(This is the first message of this conversation. Start your answer with <title>2-4 word title</title>.)";
     spec.tools = ctx.tools;
     spec.add_dirs = ctx.add_dirs;
+    spec.read_dirs = ctx.read_dirs;
+    spec.write_dirs = ctx.write_dirs;
     spec.can_write = ctx.can_write();
     spec.max_turns = (job.kind == "chat" || job.kind == "task" || job.kind == "script") ? 40 : 25;
     // A session lives on the PC and in the sign-in that ran it: remote ids are stored as "@<worker>:<id>", account ids as

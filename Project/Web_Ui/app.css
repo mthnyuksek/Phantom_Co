@@ -403,6 +403,11 @@ code { font: 12.5px var(--mono); background: var(--code); padding: 1px 5px; bord
 .note.off { opacity: .55; }
 .note-top { display: flex; gap: 10px; align-items: center; }
 .note-top b { flex: 1; }
+.folder-path { flex: 1 1 200px; min-width: 120px; overflow-wrap: anywhere; }
+.note-top select { width: auto; flex: none; }
+.folder-add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.folder-add input { flex: 1 1 220px; min-width: 0; }
+.folder-add select, .folder-add .btn { width: auto; flex: none; }
 .note-body { color: var(--text2); white-space: pre-wrap; margin-top: 4px; font-size: 13px; }
 .tpl-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
 .tpl-item { display: flex; gap: 12px; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; background: var(--sub); }

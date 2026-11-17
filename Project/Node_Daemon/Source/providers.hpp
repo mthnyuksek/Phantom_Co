@@ -27,6 +27,8 @@ struct RunSpec {
     std::string prompt;                    // user message, sent through stdin
     std::vector<std::string> tools;        // Claude tool names granted by skills
     std::vector<std::string> add_dirs;     // extra folders the run may touch
+    std::vector<std::string> read_dirs;    // the project's folders outside the Vault the ghost may only read (not enforced on Gemini)
+    std::vector<std::string> write_dirs;   // ... and may change
     std::string session_id;                // resume this session ("" = new)
     int max_turns = 40;
     std::string thinking;                  // OpenCode: --variant (reasoning effort: low | medium | high), "" = the model's default

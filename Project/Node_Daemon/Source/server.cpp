@@ -59,6 +59,61 @@ static std::string str(const json& j, const char* k, size_t max, const std::stri
     std::string s = j[k];
     return s.size() > max ? truncate_utf8(s, max) : s;
 }
+// ----------------------------------------------------- folders given to a project
+// Lower-case, resolved (links and junctions followed), no trailing separator: for "is A inside B" tests on Windows.
+static std::wstring path_key(const fs::path& p) {
+    std::error_code ec;
+    fs::path c = fs::weakly_canonical(p, ec);
+    std::wstring s = (ec ? p : c).wstring();
+    for (auto& ch : s) ch = static_cast<wchar_t>(towlower(ch));
+    while (s.size() > 3 && (s.back() == L'\\' || s.back() == L'/')) s.pop_back();
+    return s;
+}
+static bool path_inside(const std::wstring& a, const std::wstring& b) {  // a is b or lies below it
+    if (a == b) return true;
+    std::wstring pre = b;
+    if (pre.back() != L'\\') pre += L'\\';
+    return a.compare(0, pre.size(), pre) == 0;
+}
+// Checks the `folders` of a project ([{path, mode: read|write}]) and returns them cleaned (full path with backslashes). `err` is set
+// on the first problem. Refused: anything that is not a full drive path of an existing folder, the program's own data folder (sign-in
+// hashes) or a folder that contains it, a folder that contains the Vault, and the parts of the Vault that rule the company (only the
+// Projects and Shared_Files parts may be shared, e.g. another project's folder to read). Writable access to Skills, Rules or the
+// Agents would let an editor's ghost raise its own rights.
+static json clean_folders(const json& in, const fs::path& vault, const fs::path& data_dir, std::string& err) {
+    json out = json::array();
+    if (!in.is_array()) { err = "Folders must be a list."; return out; }
+    if (in.size() > 12) { err = "At most 12 folders per project."; return out; }
+    const std::wstring v = path_key(vault), data = path_key(data_dir);
+    std::set<std::wstring> seen;
+    for (auto& f : in) {
+        std::string path = f.is_object() ? f.value("path", "") : "";
+        const std::string mode = f.is_object() ? f.value("mode", "read") : "read";
+        size_t a = path.find_first_not_of(" \t\r\n\""), b = path.find_last_not_of(" \t\r\n\"");
+        path = a == std::string::npos ? "" : path.substr(a, b - a + 1);
+        if (mode != "read" && mode != "write") { err = "A folder is either read or write."; return out; }
+        if (path.size() < 3 || !isalpha(static_cast<unsigned char>(path[0])) || path[1] != ':' || (path[2] != '\\' && path[2] != '/')) {
+            err = "Use a full path such as C:\\Documents\\Reports: \"" + path + "\".";
+            return out;
+        }
+        path = replace_all(path, "/", "\\");
+        while (path.size() > 3 && path.back() == '\\') path.pop_back();
+        std::error_code ec;
+        if (!fs::is_directory(P(path), ec)) { err = "That folder does not exist: " + path; return out; }
+        const std::wstring k = path_key(P(path));
+        if (path_inside(k, data) || path_inside(data, k)) { err = "This folder holds Phantom Co.'s sign-in data (or lies around it) and cannot be shared with ghosts: " + path; return out; }
+        if (path_inside(v, k)) { err = "This folder contains the whole Vault: " + path; return out; }
+        if (path_inside(k, v) && !path_inside(k, v + L"\\projects") && !path_inside(k, v + L"\\shared_files")) {
+            err = "Folders inside the Vault are managed by Phantom Co.; only Projects and Shared_Files can be added: " + path;
+            return out;
+        }
+        if (k.find(L"\\.phantom") != std::wstring::npos) { err = "A project's .Phantom folder (notes and jobs) cannot be added: " + path; return out; }
+        if (!seen.insert(k).second) { err = "This folder is listed twice: " + path; return out; }
+        out.push_back({{"path", path}, {"mode", mode}});
+    }
+    return out;
+}
+
 static std::string pct_encode(const std::string& s) {
     static const char* hex = "0123456789ABCDEF";
     std::string o;
@@ -465,9 +520,11 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         for (auto s : store.skills()) { if (!editor) s.erase("body"); skills.push_back(s); }
         json jobs = json::array();
         for (auto& j : runner.active_jobs()) if (conv_visible(j.value("conversation_id", ""), c)) jobs.push_back(j);
+        json projects = store.projects();
+        if (!editor) for (auto& p : projects) p["folders"] = json::array();  // paths on this PC are for the people who give work to ghosts
         json st = {{"company", store.company()}, {"me", public_user(c.profile)}, {"users", users}, {"providers", providers},
                    {"agents", agents}, {"skills", skills}, {"rules", store.rules()}, {"shortcuts", editor ? json(store.shortcuts()) : json::array()},
-                   {"projects", store.projects()}, {"jobs", jobs},
+                   {"projects", projects}, {"jobs", jobs},
                    {"forms", kForms}, {"tools", kTools}};
         if (runner.mcp()) {  // MCP servers (names for the skill editor) and the tool calls waiting for this person's approval
             json names = json::array();
@@ -1096,13 +1153,21 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         if (name.empty()) return fail(res, 400, "The project needs a name.");
         send(res, *store.project(store.save_project({{"name", name}, {"summary", str(b, "summary", 4000)}})["id"].get<std::string>()), 201);
     });
-    add("PUT", "/api/projects/" + ID, kEditor, [&](auto& req, auto& res, Ctx&) {
+    add("PUT", "/api/projects/" + ID, kEditor, [&](auto& req, auto& res, Ctx& c) {
         json b;
         if (!parse_body(req, res, b)) return;
         auto p = store.project(req.matches[1]);
         if (!p) return fail(res, 404, "Project not found");
         (*p)["name"] = str(b, "name", 60, p->value("name", ""));
         (*p)["summary"] = str(b, "summary", 4000, p->value("summary", ""));
+        // Folders outside the Vault: only the owner decides which parts of this PC the project's ghosts can see or change.
+        if (b.contains("folders")) {
+            if (c.role != "owner") return fail(res, 403, "Only the owner can give a project folders.");
+            std::string err;
+            json folders = clean_folders(b["folders"], store.root(), cfg.file.parent_path(), err);
+            if (!err.empty()) return fail(res, 400, err);
+            (*p)["folders"] = folders;
+        }
         store.save_project(*p);
         send(res, *store.project(req.matches[1]));
     });

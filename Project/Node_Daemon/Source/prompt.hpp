@@ -16,6 +16,8 @@ struct AgentContext {
     std::vector<std::string> tools;     // union of their tools (Claude tool names)
     std::vector<std::string> add_dirs;  // extra Vault folders the skills may touch (absolute)
     std::vector<std::string> mcp;       // MCP servers the skills open (names; the runner keeps those that exist and are on)
+    std::vector<std::string> read_dirs;   // folders outside the Vault the run's project lets the ghost read (absolute; set by the runner)
+    std::vector<std::string> write_dirs;  // ... and change (only when the ghost has a writing tool)
     bool can_write() const;
     bool has_tool(const std::string& t) const;
 };
@@ -23,6 +25,9 @@ struct AgentContext {
 // Skills with a project list are used only in those projects (project_id "" = shared files).
 bool skill_fits_project(const json& skill, const std::string& project_id);
 AgentContext resolve_agent(Store& store, const json& agent, const std::string& user_role, const std::string& project_id);
+// Adds the project's extra folders (`folders`: [{path, mode: read|write}]) to ctx.read_dirs / ctx.write_dirs. Only for a ghost with
+// a file or shell tool; folders that no longer exist are skipped; "write" needs a writing tool, else the folder is read only.
+void apply_project_folders(AgentContext& ctx, const json& project);
 
 struct PromptInput {
     const AgentContext* ctx = nullptr;
