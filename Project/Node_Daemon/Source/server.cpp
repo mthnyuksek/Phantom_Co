@@ -20,6 +20,7 @@
 #include <regex>
 #include <set>
 
+#include "assistant_mcp.hpp"
 #include "budget.hpp"
 #include "embedded.hpp"
 #include "httplib.h"
@@ -318,6 +319,11 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
                 return httplib::Server::HandlerResponse::Handled;
             }
             return httplib::Server::HandlerResponse::Unhandled;
+        }
+        if (req.path == "/mcp" && req.method == "POST") {  // MCP clients without a key get the usual MCP answer, not "Forbidden"
+            res.set_header("WWW-Authenticate", "Bearer");
+            fail(res, 401, "Use an API key (Settings > Personal > API keys) as \"Authorization: Bearer pc_...\".");
+            return httplib::Server::HandlerResponse::Handled;
         }
         if (req.method != "GET" && req.method != "HEAD") {
             std::string origin = req.get_header_value("Origin");
@@ -2174,6 +2180,52 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         send(res, {{"ok", true}});
     });
 
+    // ======================================================= MCP for the person's AI assistant
+    // Streamable HTTP without a stream: every POST is answered with plain JSON (202 for notifications), so GET has
+    // nothing to offer. Signed in with an API key only; each tool calls this same REST API with that key
+    // (assistant_mcp.cpp), so the key's role and every check of the API apply unchanged.
+    std::string script_format;
+    for (const json& s : store.skill_templates())
+        if (s.value("id", "") == "visual_scripts") script_format = s.value("body", "");
+    add("POST", "/mcp", kPublic, [&, script_format](auto& req, auto& res, Ctx& c) {
+        if (!c.ok || !c.via_key) {
+            res.set_header("WWW-Authenticate", "Bearer");
+            return fail(res, 401, "Use an API key (Settings > Personal > API keys) as \"Authorization: Bearer pc_...\".");
+        }
+        json msg = json::parse(req.body, nullptr, false);
+        if (msg.is_discarded()) return send(res, {{"jsonrpc", "2.0"}, {"id", nullptr}, {"error", {{"code", -32700}, {"message", "Parse error"}}}}, 400);
+        const std::string auth_header = req.get_header_value("Authorization");
+        AssistantApi api;
+        api.version = PC2_VERSION_STR;
+        api.script_format = script_format;
+        api.busy = [&](const std::string& conv) { return runner.conversation_busy(conv); };
+        api.call = [&cfg, auth_header](const std::string& method, const std::string& path, const json& body) {
+            httplib::Client cli("127.0.0.1", cfg.port);
+            cli.set_connection_timeout(5);
+            cli.set_read_timeout(60);
+            httplib::Headers h = {{"Authorization", auth_header}};
+            const std::string data = body.is_null() ? "" : dumps(body);
+            httplib::Result r = method == "GET" ? cli.Get(path, h)
+                              : method == "POST" ? cli.Post(path, h, data, "application/json")
+                              : method == "PUT" ? cli.Put(path, h, data, "application/json")
+                                                : cli.Delete(path, h, data, "application/json");
+            ApiResult out;
+            if (!r) return out;
+            out.status = r->status;
+            out.body = json::parse(r->body, nullptr, false);
+            if (out.body.is_discarded()) out.body = json::object();
+            return out;
+        };
+        json answer = assistant_mcp(msg, api);
+        if (answer.is_null()) { res.status = 202; return; }
+        send(res, answer);
+    });
+    add("GET", "/mcp", kPublic, [&](auto&, auto& res, Ctx&) {
+        res.set_header("Allow", "POST");
+        fail(res, 405, "This MCP server answers POST requests only (no event stream).");
+    });
+    add("DELETE", "/mcp", kPublic, [&](auto&, auto& res, Ctx&) { fail(res, 405, "No sessions to end."); });
+
     // ============================================================== static UI
     add("GET", "/(.*)", kPublic, [&](auto& req, auto& res, Ctx&) {
         std::string path = req.matches[1];
@@ -2191,6 +2243,8 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         fail(res, 404, "Not found");
     });
 
+    // More workers than httplib's default 8: an assistant's ask_ghost waits up to minutes and calls this server itself.
+    svr.new_task_queue = [] { return new httplib::ThreadPool(32); };
     if (!svr.bind_to_port(cfg.share ? "0.0.0.0" : "127.0.0.1", cfg.port)) {
         std::cerr << "Cannot listen on port " << cfg.port << " (is another copy already running? try --port)\n";
         g_server = nullptr;

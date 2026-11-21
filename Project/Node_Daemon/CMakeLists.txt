@@ -37,6 +37,7 @@ add_executable(phantom_co WIN32
   Source/mcp.cpp
   Source/mcp_builtin.cpp
   Source/mcp_proxy.cpp
+  Source/assistant_mcp.cpp
   Source/telegram_bridge.cpp
   Source/script_value.cpp
   Source/script_expr.cpp
