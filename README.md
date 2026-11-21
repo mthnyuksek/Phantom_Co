@@ -24,6 +24,7 @@ It is a single Windows program with no installer, no account with us and no clou
 - **Control what each ghost can do.** Skills are the only way a ghost gets tools such as reading files, writing files, web research or shell commands. A ghost acts with the rights of the person who asked it, so an editor cannot use owner-only skills through an agent.
 - **Connect outside tools (MCP).** Ghosts can use MCP servers: a real browser through Playwright, YouTube uploads, a Telegram bot, Reddit, Reminders, or any stdio MCP server you add. A ghost can even write a new server with the "MCP builder" skill. Calls can be set to wait for your **Approve / Decline** in the chat before they run.
 - **Talk to ghosts from Telegram.** Linked people can use `/agents`, `/<ghost> message`, `/<shortcut> text`, `/new`, and `/yes` / `/no` for approvals. These conversations show up as normal chats in the app.
+- **Let your own AI assistant use it.** Create an API key in Settings > Personal and connect any MCP client (for example an app built with the Claude Agent SDK) to `http://127.0.0.1:7777/mcp`. The assistant can list ghosts, talk to them and wait for their answers, create tasks with wake-ups, and write, run and follow visual scripts, with your rights (at most an editor's). It can never change accounts, keys, skills, rules, secrets or settings.
 - **Ready-made prompts (shortcuts).** Save a prompt once, for example `/restaurant` = "research restaurants near {args} and recommend three", and use it from any chat (type `/` for the list) or from Telegram: `/restaurant Kadıköy`. Editors and the owner make shortcuts; everybody who can chat uses them.
 - **Reminders that arrive while the PC is off.** An optional Reminders MCP server hands reminders to a small Cloudflare Worker you deploy yourself (free plan, see `Project/Cloudflare_Worker`), which sends them to your Telegram.
 - **Work together.** Owner / editor / viewer roles, invitation links, and private or shared chats. Friends connect over the local network or through an optional Cloudflare tunnel, and the interface also works in a phone browser.
@@ -147,6 +148,8 @@ Read this before giving ghosts powerful skills or sharing your company.
 **What agents can do**
 - **Agents act on your PC** with the tools their skills give them. The shell tools of Claude Code and OpenCode are **not** limited to a folder: giving a ghost the "Run commands" skill gives it your rights on the PC. Give powerful skills only to ghosts you trust, and check what they do in the Runs tab.
 - **MCP servers are programs that run on your PC** with the secrets you give them. Add only servers you trust, and keep "Ask me before it acts" on for anything that sends, posts or deletes. Prompt injection from web pages, files or messages is a real risk for any agent with tools.
+
+- **API keys for your own programs** (Settings > Personal) are stored only as a hash. A key acts as its person but never above an editor, reaches only the ghost, chat, task, script, project, run, search and file parts of the API (and `/mcp`), and ends when you delete it or change your password. Anyone with the key can use those parts: treat it like a password.
 
 **Sharing**
 - **Network sharing uses plain HTTP** inside the program. Turn it on only in a private network you trust. Every connection still needs a sign-in.
