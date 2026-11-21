@@ -60,7 +60,7 @@ Auth::Auth(fs::path file) : file_(std::move(file)) { load(); }
 
 void Auth::load() {
     data_ = read_json(file_, json::object());
-    for (const char* k : {"users", "sessions", "invites", "workers"})
+    for (const char* k : {"users", "sessions", "invites", "workers", "api_keys"})
         if (!data_.contains(k) || !data_[k].is_object()) data_[k] = json::object();
     purge();
 }
@@ -98,7 +98,7 @@ void Auth::set_role(const std::string& id, const std::string& role) {
 void Auth::remove_user(const std::string& id) {
     std::lock_guard<std::mutex> l(mu_);
     data_["users"].erase(id);
-    for (const char* k : {"sessions", "invites", "workers"})
+    for (const char* k : {"sessions", "invites", "workers", "api_keys"})
         for (auto it = data_[k].begin(); it != data_[k].end();) {
             if (it->value("user", "") == id) it = data_[k].erase(it);
             else ++it;
@@ -116,7 +116,7 @@ void Auth::set_password(const std::string& id, const std::string& pw) {
     data_["users"][id]["salt"] = salt;
     data_["users"][id]["iter"] = kIterations;
     data_["users"][id]["hash"] = pbkdf2_hex(pw, salt, kIterations);
-    for (const char* k : {"sessions", "workers"})
+    for (const char* k : {"sessions", "workers", "api_keys"})
         for (auto it = data_[k].begin(); it != data_[k].end();) {
             if (it->value("user", "") == id) it = data_[k].erase(it);
             else ++it;
@@ -227,6 +227,50 @@ void Auth::end_worker(const std::string& id) {
         else ++it;
     }
     save();
+}
+
+// ----------------------------------------------------------------- API keys
+static json public_key(const json& k) {
+    return {{"id", k.value("id", "")}, {"name", k.value("name", "")}, {"hint", k.value("hint", "")},
+            {"created", k.value("created", "")}, {"used", k.value("used", "")}};
+}
+json Auth::new_api_key(const std::string& user, const std::string& name, std::string& token) {
+    std::lock_guard<std::mutex> l(mu_);
+    if (!data_["users"].contains(user)) return nullptr;
+    int n = 0;
+    for (auto& [h, k] : data_["api_keys"].items()) if (k.value("user", "") == user) ++n;
+    if (n >= kMaxApiKeys) return nullptr;
+    token = "pc_" + random_hex(24);
+    json k = {{"user", user}, {"id", "key_" + random_hex(4)}, {"name", name}, {"hint", "…" + token.substr(token.size() - 4)},
+              {"created", now_iso()}, {"used", ""}};
+    data_["api_keys"][sha256_hex(token)] = k;
+    save();
+    return public_key(k);
+}
+std::string Auth::api_key_user(const std::string& token) {
+    if (token.size() != 51 || token.rfind("pc_", 0) != 0) return "";
+    std::lock_guard<std::mutex> l(mu_);
+    auto h = sha256_hex(token);
+    if (!data_["api_keys"].contains(h)) return "";
+    json& k = data_["api_keys"][h];
+    std::string id = k.value("user", "");
+    if (!data_["users"].contains(id)) return "";
+    std::string now = now_iso();  // written at most once per minute (the ISO text without seconds differs)
+    if (k.value("used", "").substr(0, 16) != now.substr(0, 16)) { k["used"] = now; save(); }
+    return id;
+}
+json Auth::api_keys(const std::string& user) {
+    std::lock_guard<std::mutex> l(mu_);
+    json out = json::array();
+    for (auto& [h, k] : data_["api_keys"].items()) if (k.value("user", "") == user) out.push_back(public_key(k));
+    std::sort(out.begin(), out.end(), [](const json& a, const json& b) { return a.value("created", "") < b.value("created", ""); });
+    return out;
+}
+bool Auth::end_api_key(const std::string& user, const std::string& id) {
+    std::lock_guard<std::mutex> l(mu_);
+    for (auto it = data_["api_keys"].begin(); it != data_["api_keys"].end(); ++it)
+        if (it->value("user", "") == user && it->value("id", "") == id) { data_["api_keys"].erase(it); save(); return true; }
+    return false;
 }
 
 }  // namespace pc2

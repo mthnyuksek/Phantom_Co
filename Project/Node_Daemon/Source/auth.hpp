@@ -46,6 +46,14 @@ public:
     std::string worker_user(const std::string& token);  // "" when unknown
     void end_worker(const std::string& id);
 
+    // API keys ("pc_" + 48 hex) for the person's own programs (an AI assistant): sent as `Authorization: Bearer`.
+    // Only the hash is stored. Ended by deleting the key, a password change or removing the user.
+    static constexpr int kMaxApiKeys = 10;
+    json new_api_key(const std::string& user, const std::string& name, std::string& token);  // the key's public entry; null when full
+    std::string api_key_user(const std::string& token);  // "" when unknown; notes when the key was last used
+    json api_keys(const std::string& user);  // [{id, name, hint, created, used}]
+    bool end_api_key(const std::string& user, const std::string& id);
+
 private:
     void load();
     void save();

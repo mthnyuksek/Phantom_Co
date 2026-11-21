@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <ctime>
 #include <functional>
 #include <iostream>
@@ -47,6 +48,22 @@ static void send(httplib::Response& res, const json& j, int status = 200) {
     res.set_content(dumps(j), "application/json; charset=utf-8");
 }
 static void fail(httplib::Response& res, int status, const std::string& msg) { send(res, {{"error", msg}}, status); }
+
+// ---------------------------------------------------------------- API keys
+// A request from the person's own program (an AI assistant) carries `Authorization: Bearer pc_...`.
+static bool has_api_key(const httplib::Request& req) { return req.get_header_value("Authorization").rfind("Bearer pc_", 0) == 0; }
+// What a key may reach: working with ghosts, tasks and scripts. Never sign-in, accounts, keys, secrets,
+// skills, rules, MCP servers, sharing or settings (the key's role is also capped at editor).
+static bool api_key_path(const std::string& path) {
+    static const char* allowed[] = {"/api/state", "/api/chats", "/api/tasks", "/api/task_templates", "/api/scripts",
+                                    "/api/script_runs", "/api/projects", "/api/runs", "/api/search", "/api/shortcuts",
+                                    "/api/files", "/api/usage", "/api/about", "/mcp"};
+    for (const char* a : allowed) {
+        size_t n = std::strlen(a);
+        if (path.compare(0, n, a) == 0 && (path.size() == n || path[n] == '/' || path[n] == '?')) return true;
+    }
+    return false;
+}
 
 static bool parse_body(const httplib::Request& req, httplib::Response& res, json& out) {
     out = json::parse(req.body.empty() ? "{}" : req.body, nullptr, false);
@@ -170,6 +187,7 @@ static json list_addresses() {
 // ---------------------------------------------------------------- context
 struct Ctx {
     bool ok = false;
+    bool via_key = false;  // signed in with an API key (the person's own program), not a browser session
     std::string id, role, name;
     json profile;
 };
@@ -215,6 +233,17 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
     // ---- request context
     auto ctx_of = [&](const httplib::Request& req) {
         Ctx c;
+        if (has_api_key(req)) {  // the person's own program: never counted as "online", at most an editor
+            std::string id = auth.api_key_user(req.get_header_value("Authorization").substr(7));
+            auto u = id.empty() ? std::nullopt : store.user(id);
+            if (!u) return c;
+            c.ok = c.via_key = true;
+            c.id = id;
+            c.role = auth.role(id) == "owner" ? "editor" : auth.role(id);
+            c.name = u->value("name", id);
+            c.profile = *u;
+            return c;
+        }
         std::string cookie = req.get_header_value("Cookie"), tok;
         size_t p = cookie.find(cookie_name);
         if (p != std::string::npos) {
@@ -276,12 +305,19 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
         return req.has_header("Cf-Connecting-Ip") || req.has_header("X-Forwarded-For") || req.has_header("Cf-Ray");
     };
     auto is_this_pc = [&](const httplib::Request& req) {  // the person at this PC, not somebody on the network or the tunnel
-        return (req.remote_addr == "127.0.0.1" || req.remote_addr == "::1") && hosts.count(req.get_header_value("Host")) && !forwarded(req);
+        return !has_api_key(req) && (req.remote_addr == "127.0.0.1" || req.remote_addr == "::1") && hosts.count(req.get_header_value("Host")) && !forwarded(req);
     };
     svr.set_pre_request_handler([&](const httplib::Request& req, httplib::Response& res) {
         if (!cfg.share && !hosts.count(req.get_header_value("Host")) && !via_tunnel(req)) {
             fail(res, 403, "Forbidden host");
             return httplib::Server::HandlerResponse::Handled;
+        }
+        if (has_api_key(req)) {  // not sent by a browser on its own, so no Origin / X-PC2 check; only the API part
+            if (!api_key_path(req.path)) {
+                fail(res, 403, "API keys cannot use this part of Phantom Co.");
+                return httplib::Server::HandlerResponse::Handled;
+            }
+            return httplib::Server::HandlerResponse::Unhandled;
         }
         if (req.method != "GET" && req.method != "HEAD") {
             std::string origin = req.get_header_value("Origin");
@@ -437,6 +473,27 @@ int run_server(Store& store, Auth& auth, Runner& runner, const ServerOptions& op
             set_cookie(res, auth.new_session(c.id), 30 * 86400);  // set_password ended the old sessions
         }
         send(res, public_user(store.save_user(u)));
+    });
+
+    // ============================================================== API keys
+    // The person's own keys (Settings > Personal). A key can never manage keys (`api_key_path`).
+    add("GET", "/api/api_keys", kViewer, [&](auto&, auto& res, Ctx& c) {
+        send(res, {{"keys", auth.api_keys(c.id)}, {"max", Auth::kMaxApiKeys}});
+    });
+    add("POST", "/api/api_keys", kViewer, [&](auto& req, auto& res, Ctx& c) {
+        json b;
+        if (!parse_body(req, res, b)) return;
+        std::string name = str(b, "name", 40), token;
+        name.erase(0, name.find_first_not_of(" \t"));
+        name.erase(name.find_last_not_of(" \t") + 1);
+        if (name.empty()) return fail(res, 400, "Please give the key a name.");
+        json k = auth.new_api_key(c.id, name, token);
+        if (k.is_null()) return fail(res, 409, "You already have " + std::to_string(Auth::kMaxApiKeys) + " keys. Delete one first.");
+        send(res, {{"key", k}, {"token", token}}, 201);
+    });
+    add("DELETE", "/api/api_keys/" + ID, kViewer, [&](auto& req, auto& res, Ctx& c) {
+        if (!auth.end_api_key(c.id, req.matches[1])) return fail(res, 404, "Key not found");
+        send(res, {{"ok", true}});
     });
 
     // ================================================================= users

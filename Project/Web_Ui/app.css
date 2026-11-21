@@ -412,6 +412,8 @@ code { font: 12.5px var(--mono); background: var(--code); padding: 1px 5px; bord
 .tpl-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
 .tpl-item { display: flex; gap: 12px; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; background: var(--sub); }
 .linkbox { display: flex; gap: 8px; margin: 8px 0; }
+.key-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.key-row code { word-break: break-all; }
 .job-row { cursor: default; }
 
 /* two-pane pages fill the whole window (no padding around them) */

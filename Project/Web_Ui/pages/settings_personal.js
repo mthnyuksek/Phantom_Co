@@ -3,7 +3,7 @@ import { lang, setLang, LANGS } from '../i18n.js';
 import { api } from '../api.js';
 import { themePickerHTML, bindThemePicker } from '../theme.js';
 import { S, canEdit, refreshState } from '../state.js';
-import { $, esc, guard, toast } from '../ui.js';
+import { $, esc, guard, toast, ago, twoStep, copyText } from '../ui.js';
 
 const bridge = window.chrome?.webview;  // present when this page runs inside the Phantom Co. program window
 const isRemote = !['127.0.0.1', 'localhost'].includes(location.hostname);
@@ -72,11 +72,48 @@ function bindTelegram(card) {
   }));
 }
 
+// ------------------------------------------------- API keys for the person's own programs (an AI assistant)
+function keysHTML(keys, max) {
+  const rows = keys.map((k) => `<div class="key-row"><span><b data-no-i18n>${esc(k.name)}</b> <code data-no-i18n>pc_${esc(k.hint)}</code>
+      <span class="sub">${k.used ? `Last used: <span>${ago(k.used)}</span>` : 'Never used'}</span></span>
+      <button class="btn small danger" data-del-key="${esc(k.id)}">Delete</button></div>`).join('');
+  return `<h3>API keys</h3>
+    <p class="sub">Your own programs (for example an AI assistant) can use Phantom Co. with a key: it works with ghosts, tasks and scripts with your rights (at most an editor's). It cannot change accounts, keys, skills, rules, secrets or settings. Changing your password ends all keys.</p>
+    ${rows || '<p class="hint">No keys yet.</p>'}
+    <div id="p-key-new"></div>
+    ${keys.length < max ? `<div class="inline"><input type="text" id="p-key-name" maxlength="40" placeholder="Name, e.g. My assistant"><button class="btn small primary" id="p-key-add">Create key</button></div>` : ''}`;
+}
+async function paintKeys(card, fresh) {
+  const r = await api('GET', '/api/api_keys');
+  card.innerHTML = keysHTML(r.keys, r.max);
+  if (fresh) {
+    $('#p-key-new', card).innerHTML = `<p class="hint">Copy the key now: it is shown only once.</p>
+      <div class="linkbox"><input type="text" readonly value="${esc(fresh)}" data-no-i18n><button class="btn small primary" id="p-key-copy">Copy</button></div>
+      <p class="sub">Address: <code data-no-i18n>${esc(location.origin)}</code> · MCP: <code data-no-i18n>${esc(location.origin)}/mcp</code></p>`;
+    $('#p-key-copy', card).onclick = () => copyText(fresh);
+  }
+}
+function bindKeys(card) {
+  paintKeys(card).catch(() => { card.hidden = true; });
+  card.addEventListener('click', guard(async (e) => {
+    if (e.target.id === 'p-key-add') {
+      const name = $('#p-key-name', card).value.trim();
+      if (!name) return toast('Please give the key a name.', true);
+      const r = await api('POST', '/api/api_keys', { name });
+      await paintKeys(card, r.token);
+    } else if (e.target.dataset.delKey) {
+      const btn = e.target;
+      twoStep(btn, 'Really delete?', async () => { await api('DELETE', '/api/api_keys/' + encodeURIComponent(btn.dataset.delKey)); await paintKeys(card); });
+    }
+  }));
+}
+
 export function personalHTML() {
   const tg = telegramHTML();
   return `<div class="card"><h3>Theme</h3><div id="p-theme">${themePickerHTML()}</div></div>
     <div class="card"><h3>Language</h3><select id="p-lang" data-no-i18n>${LANGS.map((l) => `<option value="${l.id}" ${l.id === lang ? 'selected' : ''}>${l.label}</option>`).join('')}</select></div>
     <div class="card" id="p-tg" ${tg ? '' : 'hidden'}>${tg}</div>
+    <div class="card" id="p-keys"></div>
     ${lendHTML()}`;
 }
 
@@ -84,5 +121,6 @@ export function bindPersonal(view) {
   bindThemePicker($('#p-theme', view));
   $('#p-lang', view).onchange = (e) => setLang(e.target.value);
   bindTelegram($('#p-tg', view));
+  bindKeys($('#p-keys', view));
   bindLend(view);
 }

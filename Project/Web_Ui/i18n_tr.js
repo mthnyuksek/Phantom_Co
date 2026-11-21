@@ -185,6 +185,13 @@ export const EXACT = {
   'Owner': 'Sahip', 'Editor': 'Editör', 'Viewer': 'İzleyici',
   'owner': 'sahip', 'off': 'kapalı', 'on': 'açık', 'you': 'sen', 'draft': 'taslak',
   'Loading…': 'Yükleniyor…', 'Send': 'Gönder', 'Stop': 'Durdur', 'Cancel': 'Vazgeç', 'Save': 'Kaydet', 'Close': 'Kapat',
+  'API keys': 'API anahtarları',
+  "Your own programs (for example an AI assistant) can use Phantom Co. with a key: it works with ghosts, tasks and scripts with your rights (at most an editor's). It cannot change accounts, keys, skills, rules, secrets or settings. Changing your password ends all keys.": 'Kendi programların (örneğin bir yapay zeka asistanı) Phantom Co.’yu bir anahtarla kullanabilir: hayaletlerle, görevlerle ve betiklerle senin yetkinle çalışır (en fazla Editör kadar). Hesapları, anahtarları, yetenekleri, kuralları, gizli bilgileri ve ayarları değiştiremez. Şifreni değiştirmek tüm anahtarları iptal eder.',
+  'No keys yet.': 'Henüz anahtar yok.', 'Name, e.g. My assistant': 'Ad, örn. Asistanım', 'Create key': 'Anahtar oluştur',
+  'Copy the key now: it is shown only once.': 'Anahtarı şimdi kopyala: yalnızca bir kez gösterilir.',
+  'Address:': 'Adres:', 'MCP:': 'MCP:', 'Last used:': 'Son kullanım:', 'Never used': 'Hiç kullanılmadı', 'Really delete?': 'Gerçekten silinsin mi?',
+  'Please give the key a name.': 'Lütfen anahtara bir ad ver.', 'Key not found': 'Anahtar bulunamadı',
+  'API keys cannot use this part of Phantom Co.': 'API anahtarları Phantom Co.’nun bu bölümünü kullanamaz.',
   'Delete': 'Sil', 'Edit': 'Düzenle', 'Create': 'Oluştur', 'Copy': 'Kopyala', 'Copied': 'Kopyalandı', 'Refresh': 'Yenile',
   'Open': 'Aç', 'Remove': 'Kaldır', 'Add': 'Ekle', 'added': 'eklendi', 'Hire': 'İşe al', 'Link': 'Bağlantı', 'Done': 'Tamam',
   'Name': 'Ad', 'Role': 'Rol', 'Title': 'Başlık', 'Note': 'Not', 'Details': 'Ayrıntılar', 'Color': 'Renk',
@@ -814,6 +821,7 @@ export const PATTERNS = [
   ['⚠ Wake-up skipped: {}', '⚠ Uyanış atlandı: {0}'],
   ['Ghost job in {}', '{0} projesindeki hayalet görevi'],
   // time
+  ['You already have {#} keys. Delete one first.', 'Zaten {0} anahtarın var. Önce birini sil.'],
   ['{#} min ago', '{0} dk önce'], ['{#} h ago', '{0} sa önce'], ['{#} d ago', '{0} gün önce'], ['just now', 'az önce'],
   ['{#} min {#} s', '{0} dk {1} sn'], ['{#} s', '{0} sn'],
   // shell
