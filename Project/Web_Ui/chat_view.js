@@ -11,6 +11,11 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
     <button class="btn primary" id="cv-send">Send</button></div><div class="composer-note" id="cv-note"></div></div>`;
   const msgsEl = $('#cv-msgs', el), input = $('#cv-input', el), sendBtn = $('#cv-send', el), note = $('#cv-note', el), slashEl = $('#cv-slash', el);
 
+  // Unsent text survives leaving the chat (another tab, another chat, a reload): per person and chat.
+  const draftKey = `pc2.draft.${me()?.id || ''}.${id}`;
+  input.value = readDraft(draftKey);
+  const keepDraft = () => writeDraft(draftKey, input.value);
+
   // Prompt shortcuts (Shortcuts page): "/restaurant Kadıköy" is sent as the saved prompt with {args} filled in.
   const shortcuts = () => S.state?.shortcuts || [];
   const expandShortcut = (text) => {
@@ -30,8 +35,8 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
     slashEl.hidden = false;
     slashEl.innerHTML = slashList.map((s, i) => `<div class="slash-item ${i === slashAt ? 'on' : ''}" data-i="${i}"><b data-no-i18n>/${esc(s.command)}</b> <span data-no-i18n>${esc(s.title || s.body)}</span></div>`).join('');
   }
-  const slashPick = (i) => { input.value = `/${slashList[i].command} `; slashClose(); input.focus(); };
-  input.oninput = slashUpdate;
+  const slashPick = (i) => { input.value = `/${slashList[i].command} `; keepDraft(); slashClose(); input.focus(); };
+  input.oninput = () => { keepDraft(); slashUpdate(); };
   input.onblur = () => setTimeout(slashClose, 150);
   slashEl.onmousedown = (e) => { const it = e.target.closest('.slash-item'); if (it) { e.preventDefault(); slashPick(+it.dataset.i); } };
 
@@ -100,6 +105,7 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
     try {
       const d = await api('POST', `/api/chats/${id}/send`, { text });
       input.value = '';
+      keepDraft();
       apply(d);
     } finally { sending = false; }
   });
@@ -123,5 +129,16 @@ export function conversationView(el, id, { placeholder = 'Write a message…', o
     } else if (e.target.closest('[data-retry]')) { e.target.closest('[data-retry]').disabled = true; sending = true; try { apply(await api('POST', `/api/chats/${id}/retry`, {})); } finally { sending = false; } }
   });
 
-  return { destroy: () => { alive = false; }, reload: load, get data() { return data; } };
+  return { destroy: () => { alive = false; keepDraft(); }, reload: load, get data() { return data; } };
+}
+
+// Drafts live in memory (always) and in localStorage (when allowed, so a reload keeps them too).
+const drafts = new Map();
+function readDraft(key) {
+  if (drafts.has(key)) return drafts.get(key);
+  try { return localStorage.getItem(key) || ''; } catch { return ''; }
+}
+function writeDraft(key, text) {
+  if (text) drafts.set(key, text); else drafts.delete(key);
+  try { if (text) localStorage.setItem(key, text); else localStorage.removeItem(key); } catch { /* private mode / full */ }
 }
