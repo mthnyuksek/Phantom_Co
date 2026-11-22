@@ -93,9 +93,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 8px; }
 
-#app { display: grid; grid-template-columns: 230px 1fr; height: 100vh; height: 100dvh; }
+/* the row is exactly the window height: a tall sidebar or page scrolls inside itself, never the whole window */
+#app { display: grid; grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100vh; height: 100dvh; }
 .topbar, .scrim, .back-btn { display: none; }
-.side { background: var(--bg2); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 18px 14px; gap: 18px; }
+.side { background: var(--bg2); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 18px 14px; gap: 18px; min-height: 0; overflow-y: auto; }
 .brand { display: flex; gap: 10px; align-items: center; }
 .brand b { display: block; font-size: 15px; }
 .brand small { color: var(--muted); font-size: 11px; }
@@ -119,7 +120,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); }
 .chip.ok::before { background: var(--ok); }
 
-main#view { overflow: auto; padding: 28px 34px 60px; }
+main#view { overflow: auto; padding: 28px 34px 60px; min-height: 0; }
+/* short windows (a normal window, or a scaled laptop screen): a tighter sidebar so it fits without scrolling */
+@media (max-height: 820px) {
+  .side { padding: 12px 14px; gap: 12px; }
+  #nav { gap: 2px; }
+  #nav a { padding: 6px 12px; }
+}
+.side::-webkit-scrollbar { width: 6px; }
 .page-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
 .page-head h1 { margin: 0; font-size: 24px; letter-spacing: -.3px; }
 .page-head p { margin: 4px 0 0; color: var(--muted); max-width: 620px; }
